@@ -226,7 +226,7 @@ jobs:
           : "${PROCESSING_ROLE_ARN:?Missing AWS_SAGEMAKER_PROCESSING_ROLE_ARN variable}"
           : "${EVAL_REPOSITORY:?Missing AWS_EVAL_ECR_REPOSITORY_URL variable}"
           [[ "${OWNER_ALIAS}" =~ ^[A-Za-z0-9_.-]{2,32}$ ]]
-      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+      - uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
