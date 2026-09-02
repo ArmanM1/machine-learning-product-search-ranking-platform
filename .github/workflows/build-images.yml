@@ -64,7 +64,7 @@ jobs:
               raise SystemExit("Applicable credit cannot cover image storage allowance and reserve")
           print("ECR cost guard passed with the conservative USD 1 storage allowance.")
           PY
-      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
@@ -101,7 +101,7 @@ jobs:
             test "${digest#sha256:}" != "${digest}"
             printf '%s=%s\n' "${kind}" "${digest}" | tee -a image-digests.txt
           done
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: image-digests-${{ github.sha }}
           path: image-digests.txt
