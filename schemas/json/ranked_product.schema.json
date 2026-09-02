@@ -1,0 +1,35 @@
+{
+  "$id": "https://schemas.example.invalid/search-rank/ranked_product.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "product_id": {
+      "minLength": 1,
+      "title": "Product Id",
+      "type": "string"
+    },
+    "rank": {
+      "maximum": 40,
+      "minimum": 1,
+      "title": "Rank",
+      "type": "integer"
+    },
+    "score": {
+      "title": "Score",
+      "type": "number"
+    },
+    "title": {
+      "minLength": 1,
+      "title": "Title",
+      "type": "string"
+    }
+  },
+  "required": [
+    "rank",
+    "product_id",
+    "title",
+    "score"
+  ],
+  "title": "RankedProduct",
+  "type": "object"
+}

@@ -1,0 +1,29 @@
+{
+  "base_model_id": "cross-encoder/ms-marco-MiniLM-L6-v2",
+  "base_model_license": "Apache-2.0",
+  "base_model_revision": "233902d25c440f23af6f7d6e94d2946bac0bee0a",
+  "config_hash": "sha256:fa59cbedcaaaadac77f63e6766981fe5122f86ea7abff80a6af71e03f522f20c",
+  "config_id": "candidate-random-ablation-v1",
+  "dataset_manifest_hash": "sha256:420735e9bba265ae04797129003258974d8fed9e21272be318de7e49c97e24f6",
+  "deterministic_mode": true,
+  "early_stopping": {
+    "enabled": true,
+    "min_delta": 0.0001,
+    "patience": 2
+  },
+  "effective_batch_size": 32,
+  "gradient_accumulation_steps": 2,
+  "hard_example_sources": [],
+  "input_template_version": "enriched_v1",
+  "label_mapping_version": "project_graded_v1",
+  "learning_rate": 2e-05,
+  "loss_name": "BinaryCrossEntropyLoss",
+  "max_epochs": 3,
+  "max_sequence_length": 256,
+  "precision": "auto",
+  "requested_hardware": "ml.g4dn.xlarge",
+  "sampling_strategy": "random_only_v1",
+  "schema_version": "1.0.0",
+  "seed": 42,
+  "warmup_ratio": 0.1
+}

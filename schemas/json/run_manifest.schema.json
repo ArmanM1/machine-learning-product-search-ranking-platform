@@ -1,0 +1,212 @@
+{
+  "$id": "https://schemas.example.invalid/search-rank/run_manifest.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Trace a local or cloud job to its inputs, environment, and outputs.",
+  "properties": {
+    "accelerator": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Accelerator"
+    },
+    "actual_cost_usd": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Actual Cost Usd"
+    },
+    "artifact_checksums": {
+      "additionalProperties": {
+        "pattern": "^sha256:[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "propertyNames": {
+        "minLength": 1
+      },
+      "title": "Artifact Checksums",
+      "type": "object"
+    },
+    "artifact_uris": {
+      "additionalProperties": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "propertyNames": {
+        "minLength": 1
+      },
+      "title": "Artifact Uris",
+      "type": "object"
+    },
+    "cloud_project_alias": {
+      "minLength": 1,
+      "title": "Cloud Project Alias",
+      "type": "string"
+    },
+    "config_hash": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Config Hash",
+      "type": "string"
+    },
+    "dataset_manifest_hash": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Dataset Manifest Hash",
+      "type": "string"
+    },
+    "duration_seconds": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Duration Seconds"
+    },
+    "ended_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Ended At"
+    },
+    "estimated_cost_usd": {
+      "minimum": 0,
+      "title": "Estimated Cost Usd",
+      "type": "number"
+    },
+    "failure_summary": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Failure Summary"
+    },
+    "git_sha": {
+      "maxLength": 64,
+      "minLength": 7,
+      "pattern": "^[0-9a-f]{7,64}$",
+      "title": "Git Sha",
+      "type": "string"
+    },
+    "hardware": {
+      "minLength": 1,
+      "title": "Hardware",
+      "type": "string"
+    },
+    "image_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Image Digest",
+      "type": "string"
+    },
+    "image_uri": {
+      "minLength": 1,
+      "title": "Image Uri",
+      "type": "string"
+    },
+    "job_id": {
+      "minLength": 1,
+      "title": "Job Id",
+      "type": "string"
+    },
+    "region": {
+      "minLength": 1,
+      "title": "Region",
+      "type": "string"
+    },
+    "repository_dirty": {
+      "title": "Repository Dirty",
+      "type": "boolean"
+    },
+    "run_id": {
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    },
+    "run_type": {
+      "enum": [
+        "data_preparation",
+        "baseline",
+        "training",
+        "evaluation",
+        "serving_build",
+        "smoke_test"
+      ],
+      "title": "Run Type",
+      "type": "string"
+    },
+    "schema_version": {
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "started_at": {
+      "format": "date-time",
+      "title": "Started At",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "pending",
+        "running",
+        "succeeded",
+        "failed",
+        "cancelled"
+      ],
+      "title": "Status",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "run_id",
+    "run_type",
+    "git_sha",
+    "repository_dirty",
+    "image_uri",
+    "image_digest",
+    "config_hash",
+    "dataset_manifest_hash",
+    "cloud_project_alias",
+    "region",
+    "job_id",
+    "hardware",
+    "accelerator",
+    "started_at",
+    "ended_at",
+    "duration_seconds",
+    "status",
+    "failure_summary",
+    "artifact_uris",
+    "artifact_checksums",
+    "estimated_cost_usd",
+    "actual_cost_usd"
+  ],
+  "title": "RunManifest",
+  "type": "object"
+}

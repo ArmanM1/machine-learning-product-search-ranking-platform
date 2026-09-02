@@ -1,0 +1,29 @@
+{
+  "$id": "https://schemas.example.invalid/search-rank/ready_response.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "dataset_manifest_hash": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Dataset Manifest Hash",
+      "type": "string"
+    },
+    "model_id": {
+      "minLength": 1,
+      "title": "Model Id",
+      "type": "string"
+    },
+    "status": {
+      "const": "ready",
+      "default": "ready",
+      "title": "Status",
+      "type": "string"
+    }
+  },
+  "required": [
+    "model_id",
+    "dataset_manifest_hash"
+  ],
+  "title": "ReadyResponse",
+  "type": "object"
+}

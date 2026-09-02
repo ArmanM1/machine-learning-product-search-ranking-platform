@@ -1,0 +1,247 @@
+{
+  "$defs": {
+    "PublicInterval": {
+      "additionalProperties": false,
+      "properties": {
+        "confidence_level": {
+          "exclusiveMaximum": 1,
+          "exclusiveMinimum": 0,
+          "title": "Confidence Level",
+          "type": "number"
+        },
+        "lower": {
+          "title": "Lower",
+          "type": "number"
+        },
+        "point_estimate": {
+          "title": "Point Estimate",
+          "type": "number"
+        },
+        "upper": {
+          "title": "Upper",
+          "type": "number"
+        }
+      },
+      "required": [
+        "point_estimate",
+        "lower",
+        "upper",
+        "confidence_level"
+      ],
+      "title": "PublicInterval",
+      "type": "object"
+    },
+    "PublicRunIntervals": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate_minus_baseline_graded_ndcg_at_10": {
+          "$ref": "#/$defs/PublicInterval"
+        }
+      },
+      "required": [
+        "candidate_minus_baseline_graded_ndcg_at_10"
+      ],
+      "title": "PublicRunIntervals",
+      "type": "object"
+    },
+    "PublicRunMetrics": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate_graded_ndcg_at_10": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Candidate Graded Ndcg At 10",
+          "type": "number"
+        },
+        "candidate_minus_baseline_graded_ndcg_at_10": {
+          "title": "Candidate Minus Baseline Graded Ndcg At 10",
+          "type": "number"
+        },
+        "strongest_baseline_graded_ndcg_at_10": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Strongest Baseline Graded Ndcg At 10",
+          "type": "number"
+        }
+      },
+      "required": [
+        "candidate_graded_ndcg_at_10",
+        "strongest_baseline_graded_ndcg_at_10",
+        "candidate_minus_baseline_graded_ndcg_at_10"
+      ],
+      "title": "PublicRunMetrics",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.example.invalid/search-rank/public_run_summary.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Allowlisted public evidence; intentionally omits cloud identifiers/URIs.",
+  "properties": {
+    "actual_cost_usd": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Actual Cost Usd"
+    },
+    "base_model_id": {
+      "minLength": 1,
+      "title": "Base Model Id",
+      "type": "string"
+    },
+    "base_model_revision": {
+      "minLength": 1,
+      "title": "Base Model Revision",
+      "type": "string"
+    },
+    "config_hash": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Config Hash",
+      "type": "string"
+    },
+    "cost_evidence": {
+      "minLength": 1,
+      "title": "Cost Evidence",
+      "type": "string"
+    },
+    "dataset_manifest_hash": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Dataset Manifest Hash",
+      "type": "string"
+    },
+    "dataset_name": {
+      "minLength": 1,
+      "title": "Dataset Name",
+      "type": "string"
+    },
+    "dataset_version": {
+      "minLength": 1,
+      "title": "Dataset Version",
+      "type": "string"
+    },
+    "duration_seconds": {
+      "minimum": 0,
+      "title": "Duration Seconds",
+      "type": "number"
+    },
+    "evidence_mode": {
+      "const": "verified",
+      "default": "verified",
+      "title": "Evidence Mode",
+      "type": "string"
+    },
+    "git_sha": {
+      "maxLength": 64,
+      "minLength": 7,
+      "pattern": "^[0-9a-f]{7,64}$",
+      "title": "Git Sha",
+      "type": "string"
+    },
+    "hardware_class": {
+      "minLength": 1,
+      "title": "Hardware Class",
+      "type": "string"
+    },
+    "image_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Image Digest",
+      "type": "string"
+    },
+    "intervals": {
+      "$ref": "#/$defs/PublicRunIntervals"
+    },
+    "limitations": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Limitations",
+      "type": "array"
+    },
+    "locale": {
+      "const": "us",
+      "title": "Locale",
+      "type": "string"
+    },
+    "metrics": {
+      "$ref": "#/$defs/PublicRunMetrics"
+    },
+    "model_artifact_checksum": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Model Artifact Checksum",
+      "type": "string"
+    },
+    "prohibited_claims": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Prohibited Claims",
+      "type": "array"
+    },
+    "region": {
+      "minLength": 1,
+      "title": "Region",
+      "type": "string"
+    },
+    "reproduction_command": {
+      "minLength": 1,
+      "title": "Reproduction Command",
+      "type": "string"
+    },
+    "run_id": {
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    },
+    "status": {
+      "const": "complete",
+      "default": "complete",
+      "title": "Status",
+      "type": "string"
+    },
+    "test_access_count": {
+      "minimum": 1,
+      "title": "Test Access Count",
+      "type": "integer"
+    },
+    "training_strategy": {
+      "minLength": 1,
+      "title": "Training Strategy",
+      "type": "string"
+    }
+  },
+  "required": [
+    "run_id",
+    "config_hash",
+    "dataset_manifest_hash",
+    "git_sha",
+    "image_digest",
+    "model_artifact_checksum",
+    "dataset_name",
+    "dataset_version",
+    "locale",
+    "base_model_id",
+    "base_model_revision",
+    "training_strategy",
+    "hardware_class",
+    "region",
+    "metrics",
+    "intervals",
+    "duration_seconds",
+    "actual_cost_usd",
+    "cost_evidence",
+    "test_access_count",
+    "limitations",
+    "prohibited_claims",
+    "reproduction_command"
+  ],
+  "title": "PublicRunSummary",
+  "type": "object"
+}

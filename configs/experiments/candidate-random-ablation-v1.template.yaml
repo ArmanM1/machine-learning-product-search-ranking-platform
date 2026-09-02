@@ -1,0 +1,27 @@
+# Mandatory sampling ablation. Freeze only after the dataset manifest exists.
+schema_version: "1.0.0"
+config_id: candidate-random-ablation-v1
+config_hash: REPLACE_WITH_CANONICAL_SHA256
+seed: 42
+dataset_manifest_hash: REPLACE_WITH_DATASET_MANIFEST_SHA256
+input_template_version: enriched_v1
+base_model_id: cross-encoder/ms-marco-MiniLM-L6-v2
+base_model_revision: 233902d25c440f23af6f7d6e94d2946bac0bee0a
+base_model_license: Apache-2.0
+max_sequence_length: 256
+loss_name: BinaryCrossEntropyLoss
+label_mapping_version: project_graded_v1
+sampling_strategy: random_only_v1
+hard_example_sources: []
+learning_rate: 0.00002
+effective_batch_size: 32
+gradient_accumulation_steps: 2
+max_epochs: 3
+warmup_ratio: 0.10
+early_stopping:
+  enabled: true
+  patience: 2
+  min_delta: 0.0001
+precision: auto
+deterministic_mode: true
+requested_hardware: ml.g4dn.xlarge

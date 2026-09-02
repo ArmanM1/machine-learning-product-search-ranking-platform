@@ -1,0 +1,30 @@
+{
+  "$id": "https://schemas.example.invalid/search-rank/rank_request.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "model_id": {
+      "minLength": 1,
+      "title": "Model Id",
+      "type": "string"
+    },
+    "query_id": {
+      "minLength": 1,
+      "title": "Query Id",
+      "type": "string"
+    },
+    "top_k": {
+      "default": 10,
+      "maximum": 40,
+      "minimum": 1,
+      "title": "Top K",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "query_id",
+    "model_id"
+  ],
+  "title": "RankRequest",
+  "type": "object"
+}

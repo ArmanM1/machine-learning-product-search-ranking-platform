@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0.0",
+  "evidence_status": "template_not_measurement",
+  "observed_at": null,
+  "region": "us-east-1",
+  "service": null,
+  "operation": null,
+  "resource_type": null,
+  "pricing_source": null,
+  "unit_price_usd": null,
+  "maximum_runtime_seconds": null,
+  "maximum_estimated_cost_usd": null,
+  "actual_or_best_available_cost_usd": null,
+  "campaign_spend_to_date_usd": null,
+  "applicable_credit_coverage_verified": false,
+  "credit_balance_redacted_from_public_evidence": true,
+  "required_credit_reserve_usd": "40.00",
+  "maximum_out_of_pocket_usd": "0.00",
+  "billing_lag_acknowledged": true,
+  "workflow_run_id": null,
+  "artifact_sha256": null
+}

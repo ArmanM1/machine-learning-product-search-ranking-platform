@@ -1,0 +1,73 @@
+{
+  "$id": "https://schemas.example.invalid/search-rank/model_summary.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "artifact_checksum": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Artifact Checksum",
+      "type": "string"
+    },
+    "base_model_id": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Base Model Id"
+    },
+    "display_name": {
+      "minLength": 1,
+      "title": "Display Name",
+      "type": "string"
+    },
+    "evaluation_report_id": {
+      "minLength": 1,
+      "title": "Evaluation Report Id",
+      "type": "string"
+    },
+    "kind": {
+      "minLength": 1,
+      "title": "Kind",
+      "type": "string"
+    },
+    "limitations_url": {
+      "minLength": 1,
+      "title": "Limitations Url",
+      "type": "string"
+    },
+    "model_id": {
+      "minLength": 1,
+      "title": "Model Id",
+      "type": "string"
+    },
+    "promoted_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Promoted At"
+    }
+  },
+  "required": [
+    "model_id",
+    "display_name",
+    "kind",
+    "base_model_id",
+    "artifact_checksum",
+    "evaluation_report_id",
+    "promoted_at",
+    "limitations_url"
+  ],
+  "title": "ModelSummary",
+  "type": "object"
+}

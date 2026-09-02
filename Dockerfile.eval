@@ -1,0 +1,37 @@
+# syntax=docker/dockerfile:1.7
+# Multi-architecture digest for the immutable Python 3.11.13 slim-bookworm release.
+FROM python:3.11.13-slim-bookworm@sha256:86adf8dbadc3d6e82ee5dd2c74bec2e1c2467cdad47886280501df722372d2e1
+
+ARG UV_VERSION=0.12.9
+ARG APP_UID=10001
+ARG APP_GID=10001
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    PATH="/app/.venv/bin:${PATH}" \
+    HF_HOME=/opt/ml/cache/huggingface \
+    TRANSFORMERS_CACHE=/opt/ml/cache/huggingface
+
+WORKDIR /app
+
+RUN groupadd --gid "${APP_GID}" app \
+    && useradd --uid "${APP_UID}" --gid "${APP_GID}" --create-home --shell /usr/sbin/nologin app \
+    && mkdir -p /opt/ml/processing/input /opt/ml/processing/output /opt/ml/cache/huggingface \
+    && chown -R app:app /app /opt/ml
+
+COPY pyproject.toml uv.lock README.md LICENSE ./
+COPY src ./src
+COPY configs ./configs
+COPY scripts/container_eval.py ./scripts/container_eval.py
+
+RUN python -m pip install --no-cache-dir "uv==${UV_VERSION}" \
+    && uv sync --frozen --no-dev --no-editable \
+    && python -m pip uninstall --yes uv \
+    && find /app/.venv -type d -name __pycache__ -prune -exec rm -rf '{}' +
+
+USER ${APP_UID}:${APP_GID}
+
+ENTRYPOINT ["python", "/app/scripts/container_eval.py"]

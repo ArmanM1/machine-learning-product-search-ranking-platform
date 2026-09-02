@@ -1,0 +1,13 @@
+owner_alias                      = "REPLACE_WITH_NON_SENSITIVE_ALIAS"
+github_repository                 = "REPLACE_WITH_GITHUB_OWNER/machine-learning-product-search-ranking-platform"
+create_github_oidc_provider       = false
+existing_github_oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+
+# Keep false until the owner approves the alert address and confirms it directly in AWS.
+enable_budgets            = false
+budget_notification_email = ""
+alarm_notification_email  = ""
+
+# A separate public-deployment approval and an immutable ECR digest are required.
+enable_serving    = false
+serving_image_uri = ""

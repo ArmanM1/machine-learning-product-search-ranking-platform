@@ -1,0 +1,108 @@
+name: Build immutable AWS images
+
+on:
+  workflow_dispatch:
+    inputs:
+      authorization:
+        description: Type PUSH AWS IMAGES after reviewing the ECR storage estimate
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: aws-image-push
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  ALLOW_HELDOUT_EVAL: "0"
+  CAMPAIGN_BUDGET_USD: "40"
+  REQUIRED_CREDIT_RESERVE_USD: "40"
+  MAXIMUM_OUT_OF_POCKET_USD: "0"
+
+jobs:
+  build-and-push:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment: aws-images
+    env:
+      AUTHORIZATION: ${{ inputs.authorization }}
+      CAMPAIGN_SPEND_TO_DATE_USD: ${{ secrets.AWS_CAMPAIGN_SPEND_TO_DATE_USD }}
+      REMAINING_APPLICABLE_CREDIT_USD: ${{ secrets.AWS_REMAINING_APPLICABLE_CREDIT_USD }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Enforce explicit authorization
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${AUTHORIZATION}" = "PUSH AWS IMAGES"
+          test "${ALLOW_HELDOUT_EVAL}" = "0"
+          python - <<'PY'
+          import os
+          from decimal import Decimal, InvalidOperation
+
+          def amount(name: str) -> Decimal:
+              try:
+                  value = Decimal(os.environ[name])
+              except (InvalidOperation, KeyError) as exc:
+                  raise SystemExit(f"{name} must be a decimal number") from exc
+              if value < 0:
+                  raise SystemExit(f"{name} may not be negative")
+              return value
+
+          # The PRD allocates at most USD 1 to private ECR storage.
+          allowance = Decimal("1.00")
+          if amount("MAXIMUM_OUT_OF_POCKET_USD") != 0:
+              raise SystemExit("Out-of-pocket limit must remain zero")
+          if amount("CAMPAIGN_SPEND_TO_DATE_USD") + allowance > amount("CAMPAIGN_BUDGET_USD"):
+              raise SystemExit("Image push would breach the campaign envelope")
+          if amount("REMAINING_APPLICABLE_CREDIT_USD") < allowance + amount("REQUIRED_CREDIT_RESERVE_USD"):
+              raise SystemExit("Applicable credit cannot cover image storage allowance and reserve")
+          print("ECR cost guard passed with the conservative USD 1 storage allowance.")
+          PY
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-images-${{ github.run_id }}
+          mask-aws-account-id: true
+      - uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2
+      - name: Build, push, and capture immutable digests
+        shell: bash
+        env:
+          TRAIN_REPOSITORY: ${{ vars.AWS_TRAIN_ECR_REPOSITORY_URL }}
+          EVAL_REPOSITORY: ${{ vars.AWS_EVAL_ECR_REPOSITORY_URL }}
+          SERVE_REPOSITORY: ${{ vars.AWS_SERVE_ECR_REPOSITORY_URL }}
+        run: |
+          set -euo pipefail
+          : "${TRAIN_REPOSITORY:?Missing repository variable}"
+          : "${EVAL_REPOSITORY:?Missing repository variable}"
+          : "${SERVE_REPOSITORY:?Missing repository variable}"
+          [[ "${TRAIN_REPOSITORY}" =~ ^[0-9]{12}\.dkr\.ecr\.us-east-1\.amazonaws\.com/[a-z0-9/_-]+$ ]]
+          [[ "${EVAL_REPOSITORY}" =~ ^[0-9]{12}\.dkr\.ecr\.us-east-1\.amazonaws\.com/[a-z0-9/_-]+$ ]]
+          [[ "${SERVE_REPOSITORY}" =~ ^[0-9]{12}\.dkr\.ecr\.us-east-1\.amazonaws\.com/[a-z0-9/_-]+$ ]]
+          : > image-digests.txt
+          for kind in train eval serve; do
+            variable_name="${kind^^}_REPOSITORY"
+            repository="${!variable_name}"
+            tag="sha-${GITHUB_SHA}"
+            docker build --file "Dockerfile.${kind}" --tag "${repository}:${tag}" .
+            docker push "${repository}:${tag}"
+            repository_name="${repository#*/}"
+            digest="$(aws ecr describe-images \
+              --repository-name "${repository_name}" \
+              --image-ids imageTag="${tag}" \
+              --query 'imageDetails[0].imageDigest' \
+              --output text)"
+            test "${digest#sha256:}" != "${digest}"
+            printf '%s=%s\n' "${kind}" "${digest}" | tee -a image-digests.txt
+          done
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: image-digests-${{ github.sha }}
+          path: image-digests.txt
+          retention-days: 30

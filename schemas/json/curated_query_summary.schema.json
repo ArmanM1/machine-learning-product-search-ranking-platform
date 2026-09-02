@@ -1,0 +1,30 @@
+{
+  "$id": "https://schemas.example.invalid/search-rank/curated_query_summary.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "candidate_count": {
+      "maximum": 40,
+      "minimum": 1,
+      "title": "Candidate Count",
+      "type": "integer"
+    },
+    "query": {
+      "minLength": 1,
+      "title": "Query",
+      "type": "string"
+    },
+    "query_id": {
+      "minLength": 1,
+      "title": "Query Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "query_id",
+    "query",
+    "candidate_count"
+  ],
+  "title": "CuratedQuerySummary",
+  "type": "object"
+}

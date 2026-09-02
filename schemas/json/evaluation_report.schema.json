@@ -1,0 +1,853 @@
+{
+  "$defs": {
+    "CostEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "actual_cost_usd": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Actual Cost Usd"
+        },
+        "currency": {
+          "const": "USD",
+          "default": "USD",
+          "title": "Currency",
+          "type": "string"
+        },
+        "estimated_cost_usd": {
+          "minimum": 0,
+          "title": "Estimated Cost Usd",
+          "type": "number"
+        },
+        "source": {
+          "minLength": 1,
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "estimated_cost_usd",
+        "actual_cost_usd",
+        "source"
+      ],
+      "title": "CostEvidence",
+      "type": "object"
+    },
+    "ExampleResult": {
+      "additionalProperties": false,
+      "properties": {
+        "baseline_metric": {
+          "title": "Baseline Metric",
+          "type": "number"
+        },
+        "candidate_metric": {
+          "title": "Candidate Metric",
+          "type": "number"
+        },
+        "category": {
+          "enum": [
+            "win",
+            "loss",
+            "tie_or_uncertain",
+            "lexical_preferred",
+            "complement_exact_confusion"
+          ],
+          "title": "Category",
+          "type": "string"
+        },
+        "delta": {
+          "title": "Delta",
+          "type": "number"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notes"
+        },
+        "public_product_ids": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Public Product Ids",
+          "type": "array"
+        },
+        "query_id": {
+          "minLength": 1,
+          "title": "Query Id",
+          "type": "string"
+        },
+        "selection_rule": {
+          "minLength": 1,
+          "title": "Selection Rule",
+          "type": "string"
+        }
+      },
+      "required": [
+        "query_id",
+        "category",
+        "baseline_metric",
+        "candidate_metric",
+        "delta",
+        "selection_rule"
+      ],
+      "title": "ExampleResult",
+      "type": "object"
+    },
+    "LatencyResult": {
+      "additionalProperties": false,
+      "properties": {
+        "architecture": {
+          "minLength": 1,
+          "title": "Architecture",
+          "type": "string"
+        },
+        "candidate_count": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Candidate Count"
+        },
+        "concurrency": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Concurrency"
+        },
+        "lambda_memory_mb": {
+          "anyOf": [
+            {
+              "minimum": 128,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Lambda Memory Mb"
+        },
+        "mean_ms": {
+          "minimum": 0,
+          "title": "Mean Ms",
+          "type": "number"
+        },
+        "model_revision": {
+          "minLength": 1,
+          "title": "Model Revision",
+          "type": "string"
+        },
+        "p50_ms": {
+          "minimum": 0,
+          "title": "P50 Ms",
+          "type": "number"
+        },
+        "p95_ms": {
+          "minimum": 0,
+          "title": "P95 Ms",
+          "type": "number"
+        },
+        "p99_ms": {
+          "minimum": 0,
+          "title": "P99 Ms",
+          "type": "number"
+        },
+        "phase": {
+          "enum": [
+            "cold_model_load",
+            "first_request",
+            "warm_end_to_end",
+            "model_inference",
+            "serialization"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
+        "region": {
+          "minLength": 1,
+          "title": "Region",
+          "type": "string"
+        },
+        "reserved_concurrency": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Reserved Concurrency"
+        },
+        "sample_count": {
+          "minimum": 1,
+          "title": "Sample Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "phase",
+        "candidate_count",
+        "concurrency",
+        "sample_count",
+        "p50_ms",
+        "p95_ms",
+        "p99_ms",
+        "mean_ms",
+        "lambda_memory_mb",
+        "architecture",
+        "region",
+        "reserved_concurrency",
+        "model_revision"
+      ],
+      "title": "LatencyResult",
+      "type": "object"
+    },
+    "MemoryResult": {
+      "additionalProperties": false,
+      "properties": {
+        "measurement_method": {
+          "minLength": 1,
+          "title": "Measurement Method",
+          "type": "string"
+        },
+        "model_artifact_size_bytes": {
+          "minimum": 0,
+          "title": "Model Artifact Size Bytes",
+          "type": "integer"
+        },
+        "peak_resident_memory_mb": {
+          "minimum": 0,
+          "title": "Peak Resident Memory Mb",
+          "type": "number"
+        }
+      },
+      "required": [
+        "peak_resident_memory_mb",
+        "model_artifact_size_bytes",
+        "measurement_method"
+      ],
+      "title": "MemoryResult",
+      "type": "object"
+    },
+    "MetricResult": {
+      "additionalProperties": false,
+      "properties": {
+        "excluded_query_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Excluded Query Count",
+          "type": "integer"
+        },
+        "metric_name": {
+          "minLength": 1,
+          "title": "Metric Name",
+          "type": "string"
+        },
+        "query_count": {
+          "minimum": 0,
+          "title": "Query Count",
+          "type": "integer"
+        },
+        "value": {
+          "title": "Value",
+          "type": "number"
+        }
+      },
+      "required": [
+        "metric_name",
+        "value",
+        "query_count"
+      ],
+      "title": "MetricResult",
+      "type": "object"
+    },
+    "PairedDifference": {
+      "additionalProperties": false,
+      "properties": {
+        "baseline_model_id": {
+          "minLength": 1,
+          "title": "Baseline Model Id",
+          "type": "string"
+        },
+        "bootstrap_resamples": {
+          "minimum": 1,
+          "title": "Bootstrap Resamples",
+          "type": "integer"
+        },
+        "bootstrap_seed": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "title": "Bootstrap Seed",
+          "type": "integer"
+        },
+        "candidate_model_id": {
+          "minLength": 1,
+          "title": "Candidate Model Id",
+          "type": "string"
+        },
+        "ci_lower": {
+          "title": "Ci Lower",
+          "type": "number"
+        },
+        "ci_upper": {
+          "title": "Ci Upper",
+          "type": "number"
+        },
+        "confidence_level": {
+          "exclusiveMaximum": 1,
+          "exclusiveMinimum": 0,
+          "title": "Confidence Level",
+          "type": "number"
+        },
+        "excluded_query_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Excluded Query Count",
+          "type": "integer"
+        },
+        "metric_name": {
+          "minLength": 1,
+          "title": "Metric Name",
+          "type": "string"
+        },
+        "point_estimate": {
+          "title": "Point Estimate",
+          "type": "number"
+        },
+        "query_count": {
+          "minimum": 1,
+          "title": "Query Count",
+          "type": "integer"
+        },
+        "resampling_unit": {
+          "const": "query",
+          "default": "query",
+          "title": "Resampling Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "metric_name",
+        "candidate_model_id",
+        "baseline_model_id",
+        "point_estimate",
+        "ci_lower",
+        "ci_upper",
+        "confidence_level",
+        "query_count",
+        "bootstrap_seed",
+        "bootstrap_resamples"
+      ],
+      "title": "PairedDifference",
+      "type": "object"
+    },
+    "PrimaryMetricResult": {
+      "additionalProperties": false,
+      "properties": {
+        "baseline_values": {
+          "additionalProperties": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "propertyNames": {
+            "minLength": 1
+          },
+          "title": "Baseline Values",
+          "type": "object"
+        },
+        "candidate_minus_baseline": {
+          "title": "Candidate Minus Baseline",
+          "type": "number"
+        },
+        "candidate_value": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Candidate Value",
+          "type": "number"
+        },
+        "metric_name": {
+          "const": "graded_ndcg@10",
+          "default": "graded_ndcg@10",
+          "title": "Metric Name",
+          "type": "string"
+        },
+        "strongest_baseline_id": {
+          "minLength": 1,
+          "title": "Strongest Baseline Id",
+          "type": "string"
+        },
+        "strongest_baseline_value": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Strongest Baseline Value",
+          "type": "number"
+        }
+      },
+      "required": [
+        "candidate_value",
+        "baseline_values",
+        "strongest_baseline_id",
+        "strongest_baseline_value",
+        "candidate_minus_baseline"
+      ],
+      "title": "PrimaryMetricResult",
+      "type": "object"
+    },
+    "ReleaseGateCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "detail": {
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "passed",
+        "detail"
+      ],
+      "title": "ReleaseGateCheck",
+      "type": "object"
+    },
+    "ReleaseGateResult": {
+      "additionalProperties": false,
+      "properties": {
+        "baseline_model_id": {
+          "minLength": 1,
+          "title": "Baseline Model Id",
+          "type": "string"
+        },
+        "candidate_model_id": {
+          "minLength": 1,
+          "title": "Candidate Model Id",
+          "type": "string"
+        },
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/ReleaseGateCheck"
+          },
+          "title": "Checks",
+          "type": "array"
+        },
+        "decision": {
+          "enum": [
+            "promote_candidate",
+            "retain_baseline"
+          ],
+          "title": "Decision",
+          "type": "string"
+        },
+        "negative_result_required": {
+          "title": "Negative Result Required",
+          "type": "boolean"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        },
+        "positive_claim_allowed": {
+          "title": "Positive Claim Allowed",
+          "type": "boolean"
+        },
+        "promoted_model_id": {
+          "minLength": 1,
+          "title": "Promoted Model Id",
+          "type": "string"
+        },
+        "reasons": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Reasons",
+          "type": "array"
+        }
+      },
+      "required": [
+        "passed",
+        "decision",
+        "candidate_model_id",
+        "baseline_model_id",
+        "promoted_model_id",
+        "positive_claim_allowed",
+        "negative_result_required",
+        "checks",
+        "reasons"
+      ],
+      "title": "ReleaseGateResult",
+      "type": "object"
+    },
+    "RuntimeResult": {
+      "additionalProperties": false,
+      "properties": {
+        "duration_seconds": {
+          "minimum": 0,
+          "title": "Duration Seconds",
+          "type": "number"
+        },
+        "hardware": {
+          "minLength": 1,
+          "title": "Hardware",
+          "type": "string"
+        },
+        "measured": {
+          "title": "Measured",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "duration_seconds",
+        "hardware",
+        "measured"
+      ],
+      "title": "RuntimeResult",
+      "type": "object"
+    },
+    "SliceResult": {
+      "additionalProperties": false,
+      "properties": {
+        "adequate_sample_size": {
+          "title": "Adequate Sample Size",
+          "type": "boolean"
+        },
+        "baseline_value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Baseline Value"
+        },
+        "candidate_value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Candidate Value"
+        },
+        "ci_lower": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Ci Lower"
+        },
+        "ci_upper": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Ci Upper"
+        },
+        "dimension": {
+          "minLength": 1,
+          "title": "Dimension",
+          "type": "string"
+        },
+        "excluded_query_count": {
+          "minimum": 0,
+          "title": "Excluded Query Count",
+          "type": "integer"
+        },
+        "finding": {
+          "enum": [
+            "improvement",
+            "regression",
+            "uncertain",
+            "insufficient_data"
+          ],
+          "title": "Finding",
+          "type": "string"
+        },
+        "point_estimate": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Point Estimate"
+        },
+        "query_count": {
+          "minimum": 0,
+          "title": "Query Count",
+          "type": "integer"
+        },
+        "slice_name": {
+          "minLength": 1,
+          "title": "Slice Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "dimension",
+        "slice_name",
+        "query_count",
+        "excluded_query_count",
+        "candidate_value",
+        "baseline_value",
+        "point_estimate",
+        "ci_lower",
+        "ci_upper",
+        "adequate_sample_size",
+        "finding"
+      ],
+      "title": "SliceResult",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.example.invalid/search-rank/evaluation_report.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "baseline_model_ids": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Baseline Model Ids",
+      "type": "array"
+    },
+    "bootstrap_method": {
+      "const": "paired_nonparametric_percentile",
+      "title": "Bootstrap Method",
+      "type": "string"
+    },
+    "bootstrap_resamples": {
+      "minimum": 1,
+      "title": "Bootstrap Resamples",
+      "type": "integer"
+    },
+    "bootstrap_seed": {
+      "maximum": 4294967295,
+      "minimum": 0,
+      "title": "Bootstrap Seed",
+      "type": "integer"
+    },
+    "candidate_model_id": {
+      "minLength": 1,
+      "title": "Candidate Model Id",
+      "type": "string"
+    },
+    "confidence_level": {
+      "exclusiveMaximum": 1,
+      "exclusiveMinimum": 0,
+      "title": "Confidence Level",
+      "type": "number"
+    },
+    "cost_evidence": {
+      "$ref": "#/$defs/CostEvidence"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "evaluation_runtime": {
+      "$ref": "#/$defs/RuntimeResult"
+    },
+    "example_results": {
+      "items": {
+        "$ref": "#/$defs/ExampleResult"
+      },
+      "title": "Example Results",
+      "type": "array"
+    },
+    "excluded_query_count": {
+      "minimum": 0,
+      "title": "Excluded Query Count",
+      "type": "integer"
+    },
+    "latency_results": {
+      "items": {
+        "$ref": "#/$defs/LatencyResult"
+      },
+      "title": "Latency Results",
+      "type": "array"
+    },
+    "limitations": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Limitations",
+      "type": "array"
+    },
+    "memory_results": {
+      "$ref": "#/$defs/MemoryResult"
+    },
+    "metric_definition_version": {
+      "const": "project_graded_v1",
+      "title": "Metric Definition Version",
+      "type": "string"
+    },
+    "paired_differences": {
+      "items": {
+        "$ref": "#/$defs/PairedDifference"
+      },
+      "title": "Paired Differences",
+      "type": "array"
+    },
+    "primary_metric": {
+      "$ref": "#/$defs/PrimaryMetricResult"
+    },
+    "query_count": {
+      "minimum": 0,
+      "title": "Query Count",
+      "type": "integer"
+    },
+    "release_gate_results": {
+      "$ref": "#/$defs/ReleaseGateResult"
+    },
+    "report_id": {
+      "minLength": 1,
+      "title": "Report Id",
+      "type": "string"
+    },
+    "run_id": {
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "secondary_metrics": {
+      "additionalProperties": {
+        "$ref": "#/$defs/MetricResult"
+      },
+      "propertyNames": {
+        "minLength": 1
+      },
+      "title": "Secondary Metrics",
+      "type": "object"
+    },
+    "slice_results": {
+      "items": {
+        "$ref": "#/$defs/SliceResult"
+      },
+      "title": "Slice Results",
+      "type": "array"
+    },
+    "split": {
+      "minLength": 1,
+      "title": "Split",
+      "type": "string"
+    },
+    "system_metrics": {
+      "additionalProperties": {
+        "additionalProperties": {
+          "$ref": "#/$defs/MetricResult"
+        },
+        "propertyNames": {
+          "minLength": 1
+        },
+        "type": "object"
+      },
+      "propertyNames": {
+        "minLength": 1
+      },
+      "title": "System Metrics",
+      "type": "object"
+    },
+    "test_access_count": {
+      "minimum": 0,
+      "title": "Test Access Count",
+      "type": "integer"
+    },
+    "training_runtime": {
+      "$ref": "#/$defs/RuntimeResult"
+    }
+  },
+  "required": [
+    "schema_version",
+    "report_id",
+    "run_id",
+    "candidate_model_id",
+    "baseline_model_ids",
+    "split",
+    "test_access_count",
+    "query_count",
+    "excluded_query_count",
+    "metric_definition_version",
+    "primary_metric",
+    "secondary_metrics",
+    "paired_differences",
+    "bootstrap_method",
+    "bootstrap_seed",
+    "bootstrap_resamples",
+    "confidence_level",
+    "slice_results",
+    "example_results",
+    "latency_results",
+    "memory_results",
+    "training_runtime",
+    "evaluation_runtime",
+    "cost_evidence",
+    "release_gate_results",
+    "limitations",
+    "created_at"
+  ],
+  "title": "EvaluationReport",
+  "type": "object"
+}

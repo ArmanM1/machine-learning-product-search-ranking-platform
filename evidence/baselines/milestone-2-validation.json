@@ -1,0 +1,59 @@
+{
+  "schema_version": "1.0.0",
+  "status": "complete_single_run_reproducibility_pending",
+  "claim_scope": "validation baseline metrics from one full scoring run; no reproducibility, fine-tuning, held-out, cloud, or shopper-impact claim",
+  "dataset_manifest_hash": "sha256:420735e9bba265ae04797129003258974d8fed9e21272be318de7e49c97e24f6",
+  "config_hash": "sha256:190fdd523d1c37b2a3e3a8941fada82bd48fe362f44c0c4167f811578a9f3373",
+  "split": "validation",
+  "validation_query_count": 2057,
+  "excluded_query_count": 0,
+  "test_access_count": 0,
+  "scoring_run_id": "baseline-run-20260902T185031Z-afbcd7e9",
+  "report_recovery_run_id": "baseline-run-20260902T190916Z-dc885605",
+  "recovery_reason": "The scoring run wrote and checksummed every expected ranking before a report schema incorrectly applied the public API's 40-candidate cap to a 70-candidate offline group. The recovery command reverified every source checksum, model identity, row identity, finite score, rank, label, and candidate universe before creating this report.",
+  "independent_scoring_runs": 1,
+  "reproducibility_claim_allowed": false,
+  "strongest_unchanged_baseline": {
+    "model_id": "pretrained-cross-encoder@233902d25c440f23af6f7d6e94d2946bac0bee0a-enriched_v1",
+    "graded_ndcg_at_10": 0.8490371644459062
+  },
+  "systems": {
+    "bm25-v1-text_enriched_v1-unicode_words_casefold_v1-k1-1.5-b-0.75": {
+      "graded_ndcg_at_10": 0.8216266804499482,
+      "p95_offline_inference_ms": 5.826660000457194,
+      "ranking_sha256": "sha256:f5f8f634d88ce3276e4a95dc21ce9f6e07be8939a094bbcfb4b01a30ceb3780f"
+    },
+    "bm25-v1-text_title_v1-unicode_words_casefold_v1-k1-1.5-b-0.75": {
+      "graded_ndcg_at_10": 0.815741817420951,
+      "p95_offline_inference_ms": 0.6888600004458567,
+      "ranking_sha256": "sha256:ff5c16a20acf2b62ba9678bf6bbc3f7acacc0214d49b52cc8ce9c561139ffa55"
+    },
+    "input-order-v1": {
+      "graded_ndcg_at_10": 0.7634122542913055,
+      "p95_offline_inference_ms": 0.036100000215810724,
+      "ranking_sha256": "sha256:a3e010fd9effedb0ba5512482b6d489d91a6046b198c55da86d9610071105965"
+    },
+    "pretrained-cross-encoder@233902d25c440f23af6f7d6e94d2946bac0bee0a-enriched_v1": {
+      "graded_ndcg_at_10": 0.8490371644459062,
+      "p95_offline_inference_ms": 758.3298630361438,
+      "ranking_sha256": "sha256:d1e355f103d9a9de6e068651024fb895dee4f235b3f2185961f69265e81d4b5a"
+    },
+    "pretrained-cross-encoder@233902d25c440f23af6f7d6e94d2946bac0bee0a-title_v1": {
+      "graded_ndcg_at_10": 0.8396112150029522,
+      "p95_offline_inference_ms": 147.897584000001,
+      "ranking_sha256": "sha256:830d60f27751e738f62e7d11d23252695167f7ea61f783bb71e05d5e0e0101f4"
+    },
+    "seeded-random-v1-seed-42": {
+      "graded_ndcg_at_10": 0.7591952677159576,
+      "p95_offline_inference_ms": 0.1000200009002583,
+      "ranking_sha256": "sha256:57b78da8ca7c0d6c0ac261e04f2ee76cd44551ef00e304d3d9f31bc7f584f9c4"
+    }
+  },
+  "baseline_summary_sha256": "sha256:31c8d6fa599747d01577c6a285a2e0908ff2413c5e7e94ea01a2464c6e66e66a",
+  "curated_queries_sha256": "sha256:4dc9876b1b0909c466fb2d637eee3f42715b2271297d3f129e6392f75be5ee40",
+  "limitations": [
+    "Latency is local offline model-inference timing apportioned to query groups, not AWS Lambda latency.",
+    "A second independent full scoring run has not been completed, so empirical reproducibility remains pending.",
+    "The held-out test split was not loaded or evaluated."
+  ]
+}

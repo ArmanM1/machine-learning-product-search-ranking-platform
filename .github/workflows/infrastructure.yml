@@ -1,0 +1,203 @@
+name: Review or apply approved Terraform infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Plan is read-only; apply requires protected-environment approval
+        required: true
+        type: choice
+        options: [plan, apply]
+      environment:
+        description: Protected cloud environment (disposable dev is reviewed/applied from a temporary human session)
+        required: true
+        type: choice
+        options: [prod]
+      enable_budgets:
+        description: Enable only after the alert address and thresholds are approved
+        required: true
+        default: false
+        type: boolean
+      enable_serving:
+        description: Preserve the current serving state; enabling also needs public-deploy approval
+        required: true
+        default: false
+        type: boolean
+      serving_image_uri:
+        description: Required immutable @sha256 URI when serving is enabled
+        required: false
+        type: string
+      authorization:
+        description: For apply, type APPLY APPROVED AWS BOOTSTRAP
+        required: false
+        type: string
+      approved_plan_sha256:
+        description: For apply, SHA-256 from the separately reviewed plan run
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: terraform-${{ inputs.environment }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  ALLOW_HELDOUT_EVAL: "0"
+  MAXIMUM_OUT_OF_POCKET_USD: "0"
+  CAMPAIGN_BUDGET_USD: "40"
+  REQUIRED_CREDIT_RESERVE_USD: "40"
+
+jobs:
+  terraform:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: aws-infrastructure
+    env:
+      OPERATION: ${{ inputs.operation }}
+      DEPLOYMENT_ENVIRONMENT: ${{ inputs.environment }}
+      ENABLE_BUDGETS: ${{ inputs.enable_budgets }}
+      ENABLE_SERVING: ${{ inputs.enable_serving }}
+      SERVING_IMAGE_URI: ${{ inputs.serving_image_uri }}
+      CAMPAIGN_SPEND_TO_DATE_USD: ${{ secrets.AWS_CAMPAIGN_SPEND_TO_DATE_USD }}
+      REMAINING_APPLICABLE_CREDIT_USD: ${{ secrets.AWS_REMAINING_APPLICABLE_CREDIT_USD }}
+      AUTHORIZATION: ${{ inputs.authorization }}
+      APPROVED_PLAN_SHA256: ${{ inputs.approved_plan_sha256 }}
+      TF_STATE_BUCKET: ${{ vars.AWS_TERRAFORM_STATE_BUCKET }}
+      TF_OWNER_ALIAS: ${{ vars.TF_OWNER_ALIAS }}
+      TF_GITHUB_REPOSITORY: ${{ github.repository }}
+      TF_GITHUB_OIDC_PROVIDER_ARN: ${{ vars.AWS_GITHUB_OIDC_PROVIDER_ARN }}
+      TF_CREATE_GITHUB_OIDC_PROVIDER: ${{ vars.TF_CREATE_GITHUB_OIDC_PROVIDER || 'false' }}
+      TF_BUDGET_NOTIFICATION_EMAIL: ${{ vars.AWS_BUDGET_NOTIFICATION_EMAIL }}
+      TF_ALARM_NOTIFICATION_EMAIL: ${{ vars.AWS_ALARM_NOTIFICATION_EMAIL }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Validate authorization and zero-out-of-pocket boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${ALLOW_HELDOUT_EVAL}" = "0"
+          if [[ "${OPERATION}" == "apply" ]]; then
+            test "${AUTHORIZATION}" = "APPLY APPROVED AWS BOOTSTRAP"
+            [[ "${APPROVED_PLAN_SHA256}" =~ ^[0-9a-f]{64}$ ]]
+          fi
+          if [[ "${ENABLE_SERVING}" == "true" ]]; then
+            [[ "${SERVING_IMAGE_URI}" =~ @sha256:[0-9a-f]{64}$ ]]
+          else
+            test -z "${SERVING_IMAGE_URI}"
+          fi
+          if [[ "${ENABLE_BUDGETS}" == "true" ]]; then
+            : "${TF_BUDGET_NOTIFICATION_EMAIL:?Budget email is required when budgets are enabled}"
+          fi
+          python - <<'PY'
+          import os
+          from decimal import Decimal, InvalidOperation
+
+          def amount(name: str) -> Decimal:
+              try:
+                  value = Decimal(os.environ[name])
+              except (InvalidOperation, KeyError) as exc:
+                  raise SystemExit(f"{name} must be a decimal number") from exc
+              if value < 0:
+                  raise SystemExit(f"{name} may not be negative")
+              return value
+
+          bootstrap_allowance = Decimal("3.00")
+          spent = amount("CAMPAIGN_SPEND_TO_DATE_USD")
+          credit = amount("REMAINING_APPLICABLE_CREDIT_USD")
+          if amount("MAXIMUM_OUT_OF_POCKET_USD") != 0:
+              raise SystemExit("Out-of-pocket limit must remain zero")
+          if spent + bootstrap_allowance > amount("CAMPAIGN_BUDGET_USD"):
+              raise SystemExit("Bootstrap would breach the USD 40 campaign envelope")
+          if credit < bootstrap_allowance + amount("REQUIRED_CREDIT_RESERVE_USD"):
+              raise SystemExit("Applicable credit cannot cover bootstrap allowance and reserve")
+          print("Cost guard passed using a conservative USD 3 bootstrap allowance.")
+          PY
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-terraform-${{ github.run_id }}
+          mask-aws-account-id: true
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: "1.10.5"
+      - name: Format check, initialize, validate, and plan
+        id: plan
+        working-directory: infra/terraform/environments/${{ inputs.environment }}
+        shell: bash
+        env:
+          TF_IN_AUTOMATION: "true"
+        run: |
+          set -euo pipefail
+          terraform fmt -check -recursive ../../
+          terraform init -input=false \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="key=product-search-ranking/${DEPLOYMENT_ENVIRONMENT}/terraform.tfstate" \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config="encrypt=true" \
+            -backend-config="use_lockfile=true"
+          terraform validate
+          terraform plan -input=false -out=reviewed.tfplan \
+            -var="owner_alias=${TF_OWNER_ALIAS}" \
+            -var="github_repository=${TF_GITHUB_REPOSITORY}" \
+            -var="create_github_oidc_provider=${TF_CREATE_GITHUB_OIDC_PROVIDER}" \
+            -var="existing_github_oidc_provider_arn=${TF_GITHUB_OIDC_PROVIDER_ARN}" \
+            -var="enable_budgets=${ENABLE_BUDGETS}" \
+            -var="budget_notification_email=${TF_BUDGET_NOTIFICATION_EMAIL}" \
+            -var="alarm_notification_email=${TF_ALARM_NOTIFICATION_EMAIL}" \
+            -var="enable_serving=${ENABLE_SERVING}" \
+            -var="serving_image_uri=${SERVING_IMAGE_URI}"
+          terraform show -json reviewed.tfplan > reviewed-plan.private.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          source = Path("reviewed-plan.private.json")
+          payload = json.loads(source.read_text(encoding="utf-8"))
+          destructive = []
+          for change in payload.get("resource_changes", []):
+              actions = change.get("change", {}).get("actions", [])
+              if "delete" in actions:
+                  destructive.append({"address": change.get("address"), "actions": actions})
+          if destructive:
+              raise SystemExit(
+                  "infrastructure workflow refuses delete/replace actions; use the audited human teardown path: "
+                  + json.dumps(destructive, sort_keys=True)
+              )
+          payload.pop("timestamp", None)
+          Path("reviewed-plan.canonical.json").write_text(
+              json.dumps(payload, sort_keys=True, separators=(",", ":")), encoding="utf-8"
+          )
+          PY
+          plan_hash="$(sha256sum reviewed-plan.canonical.json | cut -d' ' -f1)"
+          printf '%s\n' "${plan_hash}" > reviewed-plan.sha256
+          terraform show -no-color reviewed.tfplan \
+            | sed -E \
+                -e 's/[0-9]{12}/<redacted-account-id>/g' \
+                -e 's/[[:alnum:]._%+-]+@[[:alnum:].-]+\.[[:alpha:]]{2,}/<redacted-email>/g' \
+            > reviewed-plan.txt
+          {
+            echo "Canonical reviewed plan SHA-256: \`${plan_hash}\`"
+            echo "Apply requires this exact hash in a separate protected dispatch."
+          } >> "${GITHUB_STEP_SUMMARY}"
+          if [[ "${OPERATION}" == "apply" ]]; then
+            test "${plan_hash}" = "${APPROVED_PLAN_SHA256}"
+          fi
+      - name: Apply the exact reviewed plan
+        if: inputs.operation == 'apply'
+        working-directory: infra/terraform/environments/${{ inputs.environment }}
+        env:
+          TF_IN_AUTOMATION: "true"
+        run: terraform apply -input=false -auto-approve reviewed.tfplan
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: terraform-${{ inputs.environment }}-${{ inputs.operation }}-${{ github.run_id }}
+          path: |
+            infra/terraform/environments/${{ inputs.environment }}/reviewed-plan.txt
+            infra/terraform/environments/${{ inputs.environment }}/reviewed-plan.sha256
+          retention-days: 30

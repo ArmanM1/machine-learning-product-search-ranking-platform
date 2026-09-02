@@ -1,0 +1,13 @@
+Machine Learning Product Search Ranking Platform
+Copyright 2026 ArmanM1
+
+This product includes or is designed to process the Amazon Shopping Queries
+Dataset, pinned to revision 7916cdf6ab75a462e77f20ab40428a10923998d5 and
+licensed under Apache License 2.0. The upstream NOTICE states:
+
+Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+
+The configured pretrained model cross-encoder/ms-marco-MiniLM-L6-v2 is pinned
+to revision 233902d25c440f23af6f7d6e94d2946bac0bee0a and is distributed under
+Apache License 2.0 by its upstream authors. Model weights are not committed to
+this repository.

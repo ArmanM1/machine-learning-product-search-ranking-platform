@@ -1,0 +1,137 @@
+name: Pull request checks
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  ALLOW_HELDOUT_EVAL: "0"
+  AWS_EC2_METADATA_DISABLED: "true"
+
+jobs:
+  python:
+    name: Python quality and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: true
+      - name: Install locked dependencies
+        run: uv sync --frozen --all-extras --dev
+      - name: Format
+        run: uv run ruff format --check .
+      - name: Lint
+        run: uv run ruff check .
+      - name: Type check
+        run: uv run mypy src/search_rank
+      - name: Unit, contract, and integration tests without held-out access
+        run: uv run pytest -m "not heldout" tests
+      - name: Refuse held-out enablement in CI
+        shell: bash
+        run: |
+          test "${ALLOW_HELDOUT_EVAL}" = "0"
+          ! grep -R --line-number --fixed-strings 'ALLOW_HELDOUT_EVAL=1' .github/workflows/pull-request.yml
+
+  web:
+    name: Web quality and tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  terraform:
+    name: Terraform format and validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: "1.10.5"
+      - run: terraform fmt -check -recursive infra/terraform
+      - name: Validate bootstrap
+        working-directory: infra/terraform/environments/bootstrap
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+      - name: Validate dev
+        working-directory: infra/terraform/environments/dev
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+      - name: Validate prod
+        working-directory: infra/terraform/environments/prod
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+
+  containers:
+    name: Build and scan containers
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [train, eval, serve]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Build without pushing
+        run: docker build --file "Dockerfile.${{ matrix.image }}" --tag "local/${{ matrix.image }}:${GITHUB_SHA}" .
+      - name: Scan image
+        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+        with:
+          image-ref: local/${{ matrix.image }}:${{ github.sha }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+
+  dependency-scan:
+    name: Dependency and IaC scans
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+      - name: Python dependency audit
+        run: |
+          uv export --frozen --all-extras --no-emit-project --format requirements-txt --output-file /tmp/requirements.txt
+          uvx pip-audit --requirement /tmp/requirements.txt
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: JavaScript dependency audit
+        working-directory: web
+        run: npm audit --audit-level=high
+      - name: Terraform configuration scan
+        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+        with:
+          scan-type: config
+          scan-ref: infra/terraform
+          format: table
+          exit-code: "1"
+          severity: CRITICAL,HIGH

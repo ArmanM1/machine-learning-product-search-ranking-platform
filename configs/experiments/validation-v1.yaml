@@ -1,0 +1,7 @@
+schema_version: "1.0.0"
+split: validation
+bootstrap_resamples: 2000
+bootstrap_seed: 42
+confidence_level: 0.95
+metric_definition_version: project_graded_v1
+slice_min_query_count: 50

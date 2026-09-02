@@ -1,0 +1,110 @@
+{
+  "$id": "https://schemas.example.invalid/search-rank/rank_response.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "RankedProduct": {
+      "additionalProperties": false,
+      "properties": {
+        "product_id": {
+          "minLength": 1,
+          "title": "Product Id",
+          "type": "string"
+        },
+        "rank": {
+          "maximum": 40,
+          "minimum": 1,
+          "title": "Rank",
+          "type": "integer"
+        },
+        "score": {
+          "title": "Score",
+          "type": "number"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rank",
+        "product_id",
+        "title",
+        "score"
+      ],
+      "title": "RankedProduct",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "candidate_count": {
+      "maximum": 40,
+      "minimum": 1,
+      "title": "Candidate Count",
+      "type": "integer"
+    },
+    "dataset_manifest_hash": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Dataset Manifest Hash",
+      "type": "string"
+    },
+    "latency_ms": {
+      "minimum": 0,
+      "title": "Latency Ms",
+      "type": "number"
+    },
+    "model_artifact_checksum": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Model Artifact Checksum",
+      "type": "string"
+    },
+    "model_id": {
+      "minLength": 1,
+      "title": "Model Id",
+      "type": "string"
+    },
+    "query": {
+      "minLength": 1,
+      "title": "Query",
+      "type": "string"
+    },
+    "query_id": {
+      "minLength": 1,
+      "title": "Query Id",
+      "type": "string"
+    },
+    "request_id": {
+      "minLength": 1,
+      "title": "Request Id",
+      "type": "string"
+    },
+    "results": {
+      "items": {
+        "$ref": "#/$defs/RankedProduct"
+      },
+      "title": "Results",
+      "type": "array"
+    },
+    "top_k": {
+      "maximum": 40,
+      "minimum": 1,
+      "title": "Top K",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "request_id",
+    "query_id",
+    "query",
+    "model_id",
+    "model_artifact_checksum",
+    "dataset_manifest_hash",
+    "candidate_count",
+    "top_k",
+    "latency_ms",
+    "results"
+  ],
+  "title": "RankResponse",
+  "type": "object"
+}

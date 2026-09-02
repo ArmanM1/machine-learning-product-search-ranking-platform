@@ -1,0 +1,23 @@
+{
+  "$id": "https://schemas.example.invalid/search-rank/health_response.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "service_version": {
+      "minLength": 1,
+      "title": "Service Version",
+      "type": "string"
+    },
+    "status": {
+      "const": "ok",
+      "default": "ok",
+      "title": "Status",
+      "type": "string"
+    }
+  },
+  "required": [
+    "service_version"
+  ],
+  "title": "HealthResponse",
+  "type": "object"
+}

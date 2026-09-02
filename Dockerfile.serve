@@ -1,0 +1,47 @@
+# syntax=docker/dockerfile:1.7
+# Both release-stage images are pinned. The Lambda digest below is linux/amd64,
+# matching the project's x86_64 deployment contract.
+FROM node:22.18.0-bookworm-slim@sha256:752ea8a2f758c34002a0461bd9f1cee4f9a3c36d48494586f60ffce1fc708e0e AS web-build
+
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --ignore-scripts --no-audit --no-fund
+COPY web ./
+RUN npm run build
+
+FROM public.ecr.aws/lambda/python:3.11@sha256:2ea867b833fa01eb695da424a1a91d78a586b1794822d8c61807dceb097badde
+
+ARG UV_VERSION=0.12.9
+ARG APP_UID=10001
+ARG APP_GID=10001
+ARG MODEL_ARTIFACT_DIR=scripts/container-assets/empty-release
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PROJECT_ENVIRONMENT=/opt/search-rank-venv \
+    PATH="/opt/search-rank-venv/bin:${PATH}" \
+    PYTHONPATH="/opt/search-rank-venv/lib/python3.11/site-packages:${LAMBDA_TASK_ROOT}" \
+    HF_HOME=/tmp/huggingface \
+    TRANSFORMERS_CACHE=/tmp/huggingface
+
+WORKDIR ${LAMBDA_TASK_ROOT}
+
+COPY pyproject.toml uv.lock README.md LICENSE ./
+COPY src ./src
+COPY --from=web-build /web/dist ./web/dist
+COPY ${MODEL_ARTIFACT_DIR} ./release
+
+RUN python -m pip install --no-cache-dir "uv==${UV_VERSION}" \
+    && uv sync --frozen --no-dev --no-editable \
+    && python -m pip uninstall --yes uv \
+    && find /opt/search-rank-venv -type d -name __pycache__ -prune -exec rm -rf '{}' + \
+    && chmod -R a=rX "${LAMBDA_TASK_ROOT}" /opt/search-rank-venv
+
+# Lambda also supplies a least-privileged user, but the image declares one so
+# local execution and image scanners verify the same non-root boundary.
+USER ${APP_UID}:${APP_GID}
+
+CMD ["search_rank.serving.app.handler"]

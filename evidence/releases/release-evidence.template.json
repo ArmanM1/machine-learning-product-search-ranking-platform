@@ -1,0 +1,64 @@
+{
+  "schema_version": "1.0.0",
+  "evidence_status": "template_not_measurement",
+  "evidence_mode": null,
+  "release_id": null,
+  "workflow_run_id": null,
+  "generated_at": null,
+  "reviewer": null,
+  "bundle_s3_key": null,
+  "promotion_pointer_version_id": null,
+  "candidate_run_id": null,
+  "baseline_run_id": null,
+  "dataset_processed_sha256": null,
+  "frozen_config_sha256": null,
+  "candidate_checkpoint_sha256": null,
+  "declared_baseline_ids": [],
+  "validation_only_evidence": {
+    "applicable_when_evidence_mode": "validation_only",
+    "baseline_command_summary_sha256": null,
+    "baseline_summary_sha256": null,
+    "bootstrap_command_summary_sha256": null,
+    "test_access_count": 0,
+    "held_out_claims_allowed": false
+  },
+  "verified_evidence": {
+    "applicable_when_evidence_mode": "verified",
+    "test_access_counters": [],
+    "clean_evaluations": [
+      {
+        "ordinal": 1,
+        "test_access_counter": null,
+        "processing_job_id": null,
+        "command_summary_sha256": null,
+        "evaluation_report_sha256": null,
+        "evaluation_provenance_sha256": null,
+        "processing_job_evidence_sha256": null
+      },
+      {
+        "ordinal": 2,
+        "test_access_counter": null,
+        "processing_job_id": null,
+        "command_summary_sha256": null,
+        "evaluation_report_sha256": null,
+        "evaluation_provenance_sha256": null,
+        "processing_job_evidence_sha256": null
+      }
+    ],
+    "bound_evaluation_report_sha256": null,
+    "bound_evaluation_provenance_sha256": null
+  },
+  "mode_specific_evidence_source_sha256": null,
+  "release_manifest_sha256": null,
+  "public_evidence_sha256": null,
+  "bundle_checksums_sha256": null,
+  "promotion_decision": null,
+  "serving_image_digest": null,
+  "lambda_version": null,
+  "static_release_id": null,
+  "smoke_tests_passed": null,
+  "rollback_tested": null,
+  "public_url": null,
+  "verified_metrics": null,
+  "verified_latency": null
+}

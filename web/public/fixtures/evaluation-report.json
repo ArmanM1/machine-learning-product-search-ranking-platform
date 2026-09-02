@@ -1,0 +1,16 @@
+{
+  "schema_version": "fixture-1",
+  "evidence_mode": "fixture",
+  "warning": "Illustrative interface data only. These are not measured results or portfolio claims.",
+  "report_id": "report-demo-fixture",
+  "run_id": "run-demo-fixture",
+  "release_status": "fixture",
+  "primary_metric": {
+    "name": "graded_ndcg_at_10",
+    "illustrative_candidate": 0.672,
+    "illustrative_strongest_baseline": 0.641,
+    "illustrative_delta": 0.031,
+    "illustrative_paired_95_percent_interval": [0.012, 0.049]
+  },
+  "disclaimer": "Replace this file with a checksum-addressed verified report only after the held-out guard and reproduction checks pass."
+}

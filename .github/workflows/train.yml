@@ -1,0 +1,506 @@
+name: Submit one bounded SageMaker training job
+
+on:
+  workflow_dispatch:
+    inputs:
+      experiment_config_path:
+        description: Versioned experiment configuration in this repository
+        required: true
+        default: configs/experiments/candidate-v1.yaml
+        type: string
+      dataset_manifest_hash:
+        description: Content identity from DatasetManifest.processed_checksum (sha256:...)
+        required: true
+        type: string
+      prepared_data_s3_prefix:
+        description: Immutable data/processed/... source prefix; only train/validation artifacts are staged
+        required: true
+        type: string
+      training_image_digest:
+        description: Immutable train image digest in sha256:... form
+        required: true
+        type: string
+      run_kind:
+        description: Controls the maximum permitted GPU timeout
+        required: true
+        type: choice
+        options: [development, ablation, final]
+      instance_type:
+        description: Small approved SageMaker training instance
+        required: true
+        type: choice
+        options: [ml.m5.xlarge, ml.g4dn.xlarge]
+      accelerator:
+        description: Must match the selected instance
+        required: true
+        type: choice
+        options: [cpu, gpu]
+      maximum_timeout_seconds:
+        description: Hard SageMaker runtime limit
+        required: true
+        default: "3600"
+        type: string
+      declared_job_cost_cap_usd:
+        description: Must cover the current on-demand upper-bound estimate
+        required: true
+        default: "1.00"
+        type: string
+      estimated_remaining_non_job_usd:
+        description: Conservative remaining storage, serving, logs, and transfer estimate
+        required: true
+        default: "10.00"
+        type: string
+      gpu_hours_used_to_date:
+        description: Billed GPU instance-hours already consumed by this campaign
+        required: true
+        default: "0"
+        type: string
+      cpu_hours_used_to_date:
+        description: Paid CPU instance-hours already consumed by this campaign
+        required: true
+        default: "0"
+        type: string
+      authorization:
+        description: Type SUBMIT ONE SAGEMAKER TRAINING JOB after reviewing the estimate
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: sagemaker-training-campaign
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  ALLOW_HELDOUT_EVAL: "0"
+  CAMPAIGN_BUDGET_USD: "40"
+  REQUIRED_CREDIT_RESERVE_USD: "40"
+  MAXIMUM_OUT_OF_POCKET_USD: "0"
+
+jobs:
+  submit:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    environment: aws-training
+    env:
+      CONFIG_PATH: ${{ inputs.experiment_config_path }}
+      DATASET_MANIFEST_HASH: ${{ inputs.dataset_manifest_hash }}
+      PREPARED_DATA_S3_PREFIX: ${{ inputs.prepared_data_s3_prefix }}
+      PREPARED_DATA_S3_URI: s3://${{ vars.AWS_ARTIFACT_BUCKET }}/${{ inputs.prepared_data_s3_prefix }}
+      TRAINING_IMAGE_DIGEST: ${{ inputs.training_image_digest }}
+      TRAINING_IMAGE_URI: ${{ vars.AWS_TRAIN_ECR_REPOSITORY_URL }}@${{ inputs.training_image_digest }}
+      RUN_KIND: ${{ inputs.run_kind }}
+      INSTANCE_TYPE: ${{ inputs.instance_type }}
+      ACCELERATOR: ${{ inputs.accelerator }}
+      MAX_TIMEOUT_SECONDS: ${{ inputs.maximum_timeout_seconds }}
+      DECLARED_JOB_COST_CAP_USD: ${{ inputs.declared_job_cost_cap_usd }}
+      CAMPAIGN_SPEND_TO_DATE_USD: ${{ secrets.AWS_CAMPAIGN_SPEND_TO_DATE_USD }}
+      REMAINING_APPLICABLE_CREDIT_USD: ${{ secrets.AWS_REMAINING_APPLICABLE_CREDIT_USD }}
+      ESTIMATED_REMAINING_NON_JOB_USD: ${{ inputs.estimated_remaining_non_job_usd }}
+      GPU_HOURS_USED_TO_DATE: ${{ inputs.gpu_hours_used_to_date }}
+      CPU_HOURS_USED_TO_DATE: ${{ inputs.cpu_hours_used_to_date }}
+      AUTHORIZATION: ${{ inputs.authorization }}
+      ARTIFACT_BUCKET: ${{ vars.AWS_ARTIFACT_BUCKET }}
+      TRAINING_ROLE_ARN: ${{ vars.AWS_SAGEMAKER_TRAINING_ROLE_ARN }}
+      TRAIN_REPOSITORY: ${{ vars.AWS_TRAIN_ECR_REPOSITORY_URL }}
+      PROJECT_NAME: product-search-ranking
+      ENVIRONMENT_NAME: prod
+      OWNER_ALIAS: ${{ vars.TF_OWNER_ALIAS }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+      - name: Validate immutable inputs and explicit authorization
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${AUTHORIZATION}" = "SUBMIT ONE SAGEMAKER TRAINING JOB"
+          test "${ALLOW_HELDOUT_EVAL}" = "0"
+          test "${AWS_REGION}" = "us-east-1"
+          [[ "${CONFIG_PATH}" =~ ^configs/experiments/[A-Za-z0-9._/-]+\.ya?ml$ ]]
+          [[ "${CONFIG_PATH}" != *".."* ]]
+          test -f "${CONFIG_PATH}"
+          [[ "${DATASET_MANIFEST_HASH}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "${TRAINING_IMAGE_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          test "${TRAINING_IMAGE_URI}" = "${TRAIN_REPOSITORY}@${TRAINING_IMAGE_DIGEST}"
+          [[ "${PREPARED_DATA_S3_PREFIX}" == data/processed/* ]]
+          [[ "${PREPARED_DATA_S3_URI}" =~ ^s3://[a-z0-9.-]+/[A-Za-z0-9._/-]+$ ]]
+          [[ "${PREPARED_DATA_S3_URI}" != *".."* ]]
+          : "${TRAINING_ROLE_ARN:?Missing AWS_SAGEMAKER_TRAINING_ROLE_ARN variable}"
+          : "${TRAIN_REPOSITORY:?Missing AWS_TRAIN_ECR_REPOSITORY_URL variable}"
+          [[ "${OWNER_ALIAS}" =~ ^[A-Za-z0-9_.-]{2,32}$ ]]
+          case "${INSTANCE_TYPE}:${ACCELERATOR}" in
+            ml.m5.xlarge:cpu|ml.g4dn.xlarge:gpu) ;;
+            *) echo "Instance and accelerator do not match the approved allowlist." >&2; exit 1 ;;
+          esac
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-train-${{ github.run_id }}
+          mask-aws-account-id: true
+      - name: Retrieve current on-demand upper-bound price
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws pricing get-products \
+            --region us-east-1 \
+            --service-code AmazonSageMaker \
+            --filters \
+              "Type=TERM_MATCH,Field=regionCode,Value=${AWS_REGION}" \
+              "Type=TERM_MATCH,Field=instanceType,Value=${INSTANCE_TYPE}" \
+            --max-results 100 > pricing.json
+          python - <<'PY'
+          import json
+          from decimal import Decimal
+
+          with open("pricing.json", encoding="utf-8") as handle:
+              response = json.load(handle)
+          prices = []
+          for encoded in response.get("PriceList", []):
+              product = json.loads(encoded)
+              for term in product.get("terms", {}).get("OnDemand", {}).values():
+                  for dimension in term.get("priceDimensions", {}).values():
+                      if dimension.get("unit") in {"Hrs", "Hours"}:
+                          value = Decimal(dimension.get("pricePerUnit", {}).get("USD", "0"))
+                          if value > 0:
+                              prices.append(value)
+          if not prices:
+              raise SystemExit("No current hourly SageMaker price found; refusing submission")
+          # The highest matching hourly dimension is a deliberately conservative upper bound.
+          with open("unit-price.txt", "w", encoding="utf-8") as handle:
+              handle.write(format(max(prices), "f"))
+          PY
+      - name: Enforce zero-out-of-pocket campaign guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          export UNIT_PRICE_USD="$(cat unit-price.txt)"
+          python - <<'PY'
+          import json
+          import os
+          from decimal import Decimal, InvalidOperation, ROUND_UP
+
+          def amount(name: str) -> Decimal:
+              try:
+                  value = Decimal(os.environ[name])
+              except (InvalidOperation, KeyError) as exc:
+                  raise SystemExit(f"{name} must be a decimal number") from exc
+              if value < 0:
+                  raise SystemExit(f"{name} may not be negative")
+              return value
+
+          timeout = int(os.environ["MAX_TIMEOUT_SECONDS"])
+          if timeout <= 0:
+              raise SystemExit("MAX_TIMEOUT_SECONDS must be positive")
+          run_kind = os.environ["RUN_KIND"]
+          accelerator = os.environ["ACCELERATOR"]
+          if accelerator == "gpu":
+              limit = 18000 if run_kind == "final" else 14400
+          else:
+              limit = 18000
+          if timeout > limit:
+              raise SystemExit(f"timeout {timeout}s exceeds the {limit}s {run_kind}/{accelerator} limit")
+
+          hours = (Decimal(timeout) / Decimal(3600)).quantize(Decimal("0.0001"), rounding=ROUND_UP)
+          unit_price = amount("UNIT_PRICE_USD")
+          estimate = (hours * unit_price).quantize(Decimal("0.01"), rounding=ROUND_UP)
+          declared_cap = amount("DECLARED_JOB_COST_CAP_USD")
+          spent = amount("CAMPAIGN_SPEND_TO_DATE_USD")
+          credit = amount("REMAINING_APPLICABLE_CREDIT_USD")
+          remaining = amount("ESTIMATED_REMAINING_NON_JOB_USD")
+          campaign_cap = amount("CAMPAIGN_BUDGET_USD")
+          reserve = amount("REQUIRED_CREDIT_RESERVE_USD")
+          if amount("MAXIMUM_OUT_OF_POCKET_USD") != 0:
+              raise SystemExit("Owner-approved out-of-pocket limit must be exactly zero")
+          if estimate > declared_cap:
+              raise SystemExit(f"current upper-bound estimate ${estimate} exceeds declared job cap ${declared_cap}")
+          if spent + estimate + remaining > campaign_cap:
+              raise SystemExit("job would breach the USD 40 pre-credit campaign envelope")
+          if credit < estimate + remaining + reserve:
+              raise SystemExit("applicable credit cannot cover the job, remaining plan, and USD 40 reserve")
+          if accelerator == "gpu":
+              if amount("GPU_HOURS_USED_TO_DATE") + hours > 20:
+                  raise SystemExit("job would breach the 20 GPU-instance-hour campaign cap")
+          elif amount("CPU_HOURS_USED_TO_DATE") + hours > 10:
+              raise SystemExit("job would breach the 10 paid CPU-instance-hour campaign cap")
+
+          evidence = {
+              "region": os.environ["AWS_REGION"],
+              "instance_type": os.environ["INSTANCE_TYPE"],
+              "accelerator": accelerator,
+              "maximum_runtime_seconds": timeout,
+              "on_demand_hourly_upper_bound_usd": str(unit_price),
+              "maximum_job_estimate_usd": str(estimate),
+              "campaign_and_credit_guard_passed": True,
+              "credit_balance_redacted_from_public_evidence": True,
+              "required_credit_reserve_usd": str(reserve),
+              "maximum_out_of_pocket_usd": "0",
+              "pricing_basis": "live AWS Price List response; highest matching hourly dimension",
+          }
+          with open("cost-preflight.json", "w", encoding="utf-8") as handle:
+              json.dump(evidence, handle, indent=2, sort_keys=True)
+          print(f"Guard passed; current upper-bound training estimate is ${estimate}.")
+          PY
+      - name: Verify the immutable prepared-dataset identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws s3 cp "${PREPARED_DATA_S3_URI%/}/manifest.json" prepared-manifest.json --no-progress
+          aws s3 cp "${PREPARED_DATA_S3_URI%/}/artifact-checksums.json" \
+            prepared-artifact-checksums.json --no-progress
+          jq -e --arg expected "${DATASET_MANIFEST_HASH}" \
+            '.processed_checksum == $expected and
+             (.split_counts.train.query_count | type == "number") and
+             (.split_counts.validation.query_count | type == "number") and
+             (.split_counts.test.query_count | type == "number")' \
+            prepared-manifest.json >/dev/null
+          jq -e \
+            'type == "object" and
+             (["train.parquet", "validation.parquet", "test.parquet"] - keys | length == 0) and
+             all(to_entries[]; .value | test("^sha256:[0-9a-f]{64}$"))' \
+            prepared-artifact-checksums.json >/dev/null
+      - name: Upload frozen configuration and submit exactly one job
+        shell: bash
+        run: |
+          set -euo pipefail
+          short_sha="${GITHUB_SHA:0:12}"
+          run_id="${PROJECT_NAME}-${ENVIRONMENT_NAME}-${RUN_KIND}-${GITHUB_RUN_ID}"
+          run_id="${run_id:0:63}"
+          config_file_hash="$(sha256sum "${CONFIG_PATH}" | cut -d' ' -f1)"
+          config_uri="s3://${ARTIFACT_BUCKET}/runs/${run_id}/config/experiment.yaml"
+          training_input_uri="s3://${ARTIFACT_BUCKET}/runs/${run_id}/training-input/"
+          output_uri="s3://${ARTIFACT_BUCKET}/runs/${run_id}/"
+          aws s3 cp "${CONFIG_PATH}" "${config_uri}" --checksum-algorithm SHA256 --no-progress
+          for artifact in manifest.json artifact-checksums.json train.parquet validation.parquet; do
+            aws s3 cp \
+              "${PREPARED_DATA_S3_URI%/}/${artifact}" \
+              "${training_input_uri}${artifact}" \
+              --checksum-algorithm SHA256 \
+              --no-progress
+          done
+          aws s3api list-objects-v2 \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --prefix "runs/${run_id}/training-input/" \
+            --query 'Contents[].Key' \
+            --output json > staged-training-inputs.json
+          jq -e --arg prefix "runs/${run_id}/training-input/" \
+            'map(ltrimstr($prefix)) | sort ==
+             ["artifact-checksums.json", "manifest.json", "train.parquet", "validation.parquet"]' \
+            staged-training-inputs.json >/dev/null
+          jq -n \
+            --arg job "${run_id}" \
+            --arg role "${TRAINING_ROLE_ARN}" \
+            --arg image "${TRAINING_IMAGE_URI}" \
+            --arg instance "${INSTANCE_TYPE}" \
+            --arg data "${training_input_uri}" \
+            --arg config "s3://${ARTIFACT_BUCKET}/runs/${run_id}/config/" \
+            --arg output "${output_uri}" \
+            --arg checkpoint "s3://${ARTIFACT_BUCKET}/runs/${run_id}/checkpoints/" \
+            --arg dataset_hash "${DATASET_MANIFEST_HASH}" \
+            --arg config_file_hash "${config_file_hash}" \
+            --arg commit "${GITHUB_SHA}" \
+            --arg project "${PROJECT_NAME}" \
+            --arg environment "${ENVIRONMENT_NAME}" \
+            --arg owner "${OWNER_ALIAS}" \
+            --argjson timeout "${MAX_TIMEOUT_SECONDS}" \
+            '{
+              TrainingJobName: $job,
+              RoleArn: $role,
+              AlgorithmSpecification: {
+                TrainingImage: $image,
+                TrainingInputMode: "File"
+              },
+              InputDataConfig: [
+                {ChannelName: "training", DataSource: {S3DataSource: {S3DataType: "S3Prefix", S3Uri: $data, S3DataDistributionType: "FullyReplicated"}}},
+                {ChannelName: "config", DataSource: {S3DataSource: {S3DataType: "S3Prefix", S3Uri: $config, S3DataDistributionType: "FullyReplicated"}}}
+              ],
+              OutputDataConfig: {S3OutputPath: $output},
+              ResourceConfig: {InstanceType: $instance, InstanceCount: 1, VolumeSizeInGB: 50},
+              StoppingCondition: {MaxRuntimeInSeconds: $timeout, MaxWaitTimeInSeconds: ($timeout + 1800)},
+              EnableManagedSpotTraining: true,
+              CheckpointConfig: {S3Uri: $checkpoint, LocalPath: "/opt/ml/checkpoints"},
+              Environment: {
+                RUN_ID: $job,
+                DATASET_MANIFEST_HASH: $dataset_hash,
+                EXPERIMENT_CONFIG_FILE_SHA256: $config_file_hash,
+                CODE_COMMIT: $commit,
+                ALLOW_HELDOUT_EVAL: "0"
+              },
+              Tags: [
+                {Key: "Project", Value: $project},
+                {Key: "Environment", Value: $environment},
+                {Key: "Owner", Value: $owner},
+                {Key: "RunId", Value: $job},
+                {Key: "CodeCommit", Value: $commit}
+              ]
+            }' > training-job.json
+          aws sagemaker create-training-job --cli-input-json file://training-job.json >/dev/null
+          printf '%s' "${run_id}" > job-name.txt
+          printf '%s' "${output_uri}" > output-uri.txt
+      - name: Wait for completion and capture sanitized evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          job_name="$(cat job-name.txt)"
+          set +e
+          aws sagemaker wait training-job-completed-or-stopped --training-job-name "${job_name}"
+          waiter_status=$?
+          set -e
+          aws sagemaker describe-training-job --training-job-name "${job_name}" > training-job-description-private.json
+          jq --arg artifact_prefix "s3://${ARTIFACT_BUCKET}/" '{
+            training_job_name: .TrainingJobName,
+            status: .TrainingJobStatus,
+            instance_type: .ResourceConfig.InstanceType,
+            instance_count: .ResourceConfig.InstanceCount,
+            managed_spot: .EnableManagedSpotTraining,
+            training_seconds: .TrainingTimeInSeconds,
+            billable_seconds: .BillableTimeInSeconds,
+            creation_time: .CreationTime,
+            end_time: .TrainingEndTime,
+            image_digest: (.AlgorithmSpecification.TrainingImage | split("@") | .[-1]),
+            output_key_prefix: (.OutputDataConfig.S3OutputPath | ltrimstr($artifact_prefix)),
+            model_artifact_key: (.ModelArtifacts.S3ModelArtifacts | ltrimstr($artifact_prefix))
+          }' training-job-description-private.json > training-job-evidence.json
+          aws s3 cp training-job-evidence.json "$(cat output-uri.txt)reports/cloud-training-job.json" --checksum-algorithm SHA256 --no-progress
+          status="$(jq -r '.status' training-job-evidence.json)"
+          if [[ "${waiter_status}" -ne 0 || "${status}" != "Completed" ]]; then
+            echo "Training job did not complete successfully; inspect private AWS logs." >&2
+            exit 1
+          fi
+      - name: Verify and record immutable candidate release inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          model_key="$(jq -r '.model_artifact_key' training-job-evidence.json)"
+          [[ "${model_key}" == runs/* ]]
+          [[ "${model_key}" != *".."* ]]
+          model_uri="s3://${ARTIFACT_BUCKET}/${model_key}"
+          [[ "${model_uri}" == "s3://${ARTIFACT_BUCKET}/runs/"* ]]
+          [[ "${model_uri}" == *.tar.gz ]]
+          aws s3 cp "${model_uri}" candidate-model.tar.gz --no-progress
+          export CANDIDATE_ARTIFACT_SHA256="$(sha256sum candidate-model.tar.gz | cut -d' ' -f1)"
+          export MODEL_ARTIFACT_S3_URI="${model_uri}"
+          export CLOUD_TRAINING_RUN_ID="$(cat job-name.txt)"
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import tarfile
+          from pathlib import Path
+
+          archive = Path("candidate-model.tar.gz")
+          destination = Path("candidate-model")
+          destination.mkdir()
+          root = destination.resolve()
+          with tarfile.open(archive, "r:gz") as handle:
+              for member in handle.getmembers():
+                  target = (destination / member.name).resolve()
+                  if target != root and root not in target.parents:
+                      raise SystemExit(f"unsafe path in SageMaker model archive: {member.name}")
+                  if member.issym() or member.islnk():
+                      raise SystemExit(f"link rejected in SageMaker model archive: {member.name}")
+              handle.extractall(destination, filter="data")
+
+          summaries = []
+          for path in sorted(destination.rglob("summary.json")):
+              payload = json.loads(path.read_text(encoding="utf-8"))
+              if payload.get("command") == "train" and payload.get("status") == "succeeded":
+                  summaries.append(payload)
+          if len(summaries) != 1:
+              raise SystemExit("model archive must contain exactly one successful training summary")
+          summary = summaries[0]
+          result = summary["result"]
+
+          def file_hash(path: Path) -> str:
+              digest = hashlib.sha256()
+              with path.open("rb") as handle:
+                  while chunk := handle.read(1024 * 1024):
+                      digest.update(chunk)
+              return digest.hexdigest()
+
+          def directory_hash(path: Path) -> str:
+              digest = hashlib.sha256()
+              for item in sorted(candidate for candidate in path.rglob("*") if candidate.is_file()):
+                  digest.update(item.relative_to(path).as_posix().encode())
+                  digest.update(b"\0")
+                  digest.update(file_hash(item).encode("ascii"))
+                  digest.update(b"\n")
+              return digest.hexdigest()
+
+          expected_checkpoint = str(result["checkpoint_checksum"])
+          matches = [
+              path for path in destination.rglob("best")
+              if path.is_dir() and "sha256:" + directory_hash(path) == expected_checkpoint
+          ]
+          if len(matches) != 1:
+              raise SystemExit("model archive checkpoint does not match its training summary")
+          if result["dataset_manifest_hash"] != os.environ["DATASET_MANIFEST_HASH"]:
+              raise SystemExit("training summary dataset identity differs from the workflow input")
+          config_hash = str(result["config_hash"])
+          if not config_hash.startswith("sha256:") or len(config_hash) != 71:
+              raise SystemExit("training summary has no canonical configuration hash")
+          frozen_configs = list(destination.rglob("frozen-experiment.yaml"))
+          if len(frozen_configs) != 1:
+              raise SystemExit("model archive must contain its frozen experiment configuration")
+          evidence = {
+              "schema_version": "1.0.0",
+              "candidate_run_id": os.environ["CLOUD_TRAINING_RUN_ID"],
+              "candidate_model_id": result["candidate_model_id"],
+              "candidate_artifact_s3_key": os.environ["MODEL_ARTIFACT_S3_URI"].split("/", 3)[3],
+              "candidate_artifact_sha256": os.environ["CANDIDATE_ARTIFACT_SHA256"],
+              "candidate_checkpoint_sha256": expected_checkpoint.removeprefix("sha256:"),
+              "candidate_training_config_sha256": config_hash,
+              "candidate_training_config_path": os.environ["CONFIG_PATH"],
+              "dataset_manifest_hash": result["dataset_manifest_hash"],
+          }
+          Path("candidate-release-inputs.json").write_text(
+              json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+          )
+          PY
+          aws s3 cp candidate-release-inputs.json "$(cat output-uri.txt)reports/candidate-release-inputs.json" \
+            --checksum-algorithm SHA256 --no-progress
+          without_scheme="${model_uri#s3://}"
+          model_bucket="${without_scheme%%/*}"
+          model_key="${without_scheme#*/}"
+          aws s3api put-object-tagging \
+            --bucket "${model_bucket}" \
+            --key "${model_key}" \
+            --tagging 'TagSet=[{Key=RetentionClass,Value=candidate}]'
+      - name: Mark bounded checkpoints for lifecycle expiration
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f job-name.txt ]]; then
+            exit 0
+          fi
+          job_name="$(cat job-name.txt)"
+          prefix="runs/${job_name}/checkpoints/"
+          aws s3api list-objects-v2 \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --prefix "${prefix}" \
+            --query 'Contents[].Key' \
+            --output text | tr '\t' '\n' | while IFS= read -r key; do
+              if [[ -n "${key}" && "${key}" != "None" ]]; then
+                aws s3api put-object-tagging \
+                  --bucket "${ARTIFACT_BUCKET}" \
+                  --key "${key}" \
+                  --tagging 'TagSet=[{Key=RetentionClass,Value=intermediate}]'
+              fi
+            done
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: training-job-evidence-${{ github.run_id }}
+          path: |
+            cost-preflight.json
+            candidate-release-inputs.json
+            training-job-evidence.json
+          if-no-files-found: warn
+          retention-days: 30

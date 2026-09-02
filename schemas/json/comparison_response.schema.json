@@ -1,0 +1,202 @@
+{
+  "$id": "https://schemas.example.invalid/search-rank/comparison_response.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "BenchmarkJudgment": {
+      "additionalProperties": false,
+      "properties": {
+        "esci_label": {
+          "enum": [
+            "Exact",
+            "Substitute",
+            "Complement",
+            "Irrelevant"
+          ],
+          "title": "Esci Label",
+          "type": "string"
+        },
+        "product_id": {
+          "minLength": 1,
+          "title": "Product Id",
+          "type": "string"
+        },
+        "source": {
+          "const": "ground_truth_annotation",
+          "default": "ground_truth_annotation",
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "product_id",
+        "esci_label"
+      ],
+      "title": "BenchmarkJudgment",
+      "type": "object"
+    },
+    "RankMovement": {
+      "additionalProperties": false,
+      "properties": {
+        "baseline_rank": {
+          "maximum": 40,
+          "minimum": 1,
+          "title": "Baseline Rank",
+          "type": "integer"
+        },
+        "candidate_rank": {
+          "maximum": 40,
+          "minimum": 1,
+          "title": "Candidate Rank",
+          "type": "integer"
+        },
+        "product_id": {
+          "minLength": 1,
+          "title": "Product Id",
+          "type": "string"
+        },
+        "rank_delta": {
+          "maximum": 39,
+          "minimum": -39,
+          "title": "Rank Delta",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "product_id",
+        "baseline_rank",
+        "candidate_rank",
+        "rank_delta"
+      ],
+      "title": "RankMovement",
+      "type": "object"
+    },
+    "RankedProduct": {
+      "additionalProperties": false,
+      "properties": {
+        "product_id": {
+          "minLength": 1,
+          "title": "Product Id",
+          "type": "string"
+        },
+        "rank": {
+          "maximum": 40,
+          "minimum": 1,
+          "title": "Rank",
+          "type": "integer"
+        },
+        "score": {
+          "title": "Score",
+          "type": "number"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rank",
+        "product_id",
+        "title",
+        "score"
+      ],
+      "title": "RankedProduct",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "baseline_latency_ms": {
+      "minimum": 0,
+      "title": "Baseline Latency Ms",
+      "type": "number"
+    },
+    "baseline_model_id": {
+      "minLength": 1,
+      "title": "Baseline Model Id",
+      "type": "string"
+    },
+    "baseline_results": {
+      "items": {
+        "$ref": "#/$defs/RankedProduct"
+      },
+      "title": "Baseline Results",
+      "type": "array"
+    },
+    "benchmark_judgments": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/BenchmarkJudgment"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Benchmark Judgments"
+    },
+    "candidate_count": {
+      "maximum": 40,
+      "minimum": 1,
+      "title": "Candidate Count",
+      "type": "integer"
+    },
+    "candidate_latency_ms": {
+      "minimum": 0,
+      "title": "Candidate Latency Ms",
+      "type": "number"
+    },
+    "candidate_model_id": {
+      "minLength": 1,
+      "title": "Candidate Model Id",
+      "type": "string"
+    },
+    "candidate_results": {
+      "items": {
+        "$ref": "#/$defs/RankedProduct"
+      },
+      "title": "Candidate Results",
+      "type": "array"
+    },
+    "query": {
+      "minLength": 1,
+      "title": "Query",
+      "type": "string"
+    },
+    "query_id": {
+      "minLength": 1,
+      "title": "Query Id",
+      "type": "string"
+    },
+    "rank_movements": {
+      "items": {
+        "$ref": "#/$defs/RankMovement"
+      },
+      "title": "Rank Movements",
+      "type": "array"
+    },
+    "request_id": {
+      "minLength": 1,
+      "title": "Request Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "request_id",
+    "query_id",
+    "query",
+    "baseline_model_id",
+    "candidate_model_id",
+    "candidate_count",
+    "baseline_latency_ms",
+    "candidate_latency_ms",
+    "baseline_results",
+    "candidate_results",
+    "rank_movements"
+  ],
+  "title": "ComparisonResponse",
+  "type": "object"
+}

@@ -1,0 +1,206 @@
+{
+  "$defs": {
+    "EarlyStoppingConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "min_delta": {
+          "default": 0.0,
+          "minimum": 0,
+          "title": "Min Delta",
+          "type": "number"
+        },
+        "patience": {
+          "default": 2,
+          "minimum": 1,
+          "title": "Patience",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "title": "EarlyStoppingConfig",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.example.invalid/search-rank/experiment_config.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "All inputs needed to reproduce one model-training experiment.",
+  "properties": {
+    "base_model_id": {
+      "minLength": 1,
+      "title": "Base Model Id",
+      "type": "string"
+    },
+    "base_model_license": {
+      "minLength": 1,
+      "title": "Base Model License",
+      "type": "string"
+    },
+    "base_model_revision": {
+      "minLength": 1,
+      "title": "Base Model Revision",
+      "type": "string"
+    },
+    "config_hash": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Config Hash",
+      "type": "string"
+    },
+    "config_id": {
+      "minLength": 1,
+      "title": "Config Id",
+      "type": "string"
+    },
+    "dataset_manifest_hash": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Dataset Manifest Hash",
+      "type": "string"
+    },
+    "deterministic_mode": {
+      "title": "Deterministic Mode",
+      "type": "boolean"
+    },
+    "early_stopping": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EarlyStoppingConfig"
+        },
+        {
+          "type": "boolean"
+        }
+      ],
+      "title": "Early Stopping"
+    },
+    "effective_batch_size": {
+      "minimum": 1,
+      "title": "Effective Batch Size",
+      "type": "integer"
+    },
+    "gradient_accumulation_steps": {
+      "minimum": 1,
+      "title": "Gradient Accumulation Steps",
+      "type": "integer"
+    },
+    "hard_example_sources": {
+      "items": {
+        "enum": [
+          "bm25",
+          "pretrained_cross_encoder"
+        ],
+        "type": "string"
+      },
+      "title": "Hard Example Sources",
+      "type": "array"
+    },
+    "input_template_version": {
+      "enum": [
+        "title_v1",
+        "enriched_v1"
+      ],
+      "title": "Input Template Version",
+      "type": "string"
+    },
+    "label_mapping_version": {
+      "const": "project_graded_v1",
+      "title": "Label Mapping Version",
+      "type": "string"
+    },
+    "learning_rate": {
+      "exclusiveMinimum": 0,
+      "title": "Learning Rate",
+      "type": "number"
+    },
+    "loss_name": {
+      "const": "BinaryCrossEntropyLoss",
+      "title": "Loss Name",
+      "type": "string"
+    },
+    "max_epochs": {
+      "minimum": 1,
+      "title": "Max Epochs",
+      "type": "integer"
+    },
+    "max_sequence_length": {
+      "minimum": 1,
+      "title": "Max Sequence Length",
+      "type": "integer"
+    },
+    "precision": {
+      "enum": [
+        "float32",
+        "float16",
+        "bfloat16",
+        "fp32",
+        "fp16",
+        "bf16",
+        "auto"
+      ],
+      "title": "Precision",
+      "type": "string"
+    },
+    "requested_hardware": {
+      "minLength": 1,
+      "title": "Requested Hardware",
+      "type": "string"
+    },
+    "sampling_strategy": {
+      "enum": [
+        "mixed_hard_random_v1",
+        "random_only_v1"
+      ],
+      "title": "Sampling Strategy",
+      "type": "string"
+    },
+    "schema_version": {
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "seed": {
+      "maximum": 4294967295,
+      "minimum": 0,
+      "title": "Seed",
+      "type": "integer"
+    },
+    "warmup_ratio": {
+      "maximum": 1,
+      "minimum": 0,
+      "title": "Warmup Ratio",
+      "type": "number"
+    }
+  },
+  "required": [
+    "schema_version",
+    "config_id",
+    "config_hash",
+    "seed",
+    "dataset_manifest_hash",
+    "input_template_version",
+    "base_model_id",
+    "base_model_revision",
+    "base_model_license",
+    "max_sequence_length",
+    "loss_name",
+    "label_mapping_version",
+    "sampling_strategy",
+    "hard_example_sources",
+    "learning_rate",
+    "effective_batch_size",
+    "gradient_accumulation_steps",
+    "max_epochs",
+    "warmup_ratio",
+    "early_stopping",
+    "precision",
+    "deterministic_mode",
+    "requested_hardware"
+  ],
+  "title": "ExperimentConfig",
+  "type": "object"
+}

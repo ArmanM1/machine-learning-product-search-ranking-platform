@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.0.0",
+  "status": "preflight_only_not_authorized",
+  "currency": "USD",
+  "region": "us-east-1",
+  "price_list_publication_date": "2026-08-31T09:22:25Z",
+  "price_list_source": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonSageMaker/current/us-east-1/index.json",
+  "prices": {
+    "sagemaker_training_ml_g4dn_xlarge_per_hour": 0.736,
+    "sagemaker_training_ml_m5_xlarge_per_hour": 0.23,
+    "sagemaker_processing_ml_m5_xlarge_per_hour": 0.23
+  },
+  "worst_case_caps": {
+    "gpu_training_instance_hours": 20,
+    "paid_cpu_instance_hours": 10,
+    "remaining_storage_serving_logs_and_transfer_usd": 10.0
+  },
+  "worst_case_on_demand_estimate_usd": 27.02,
+  "campaign_envelope_usd": 40.0,
+  "required_credit_reserve_usd": 40.0,
+  "maximum_out_of_pocket_usd": 0.0,
+  "visible_credit_check": {
+    "verified_in_authenticated_console": true,
+    "sufficient_for_campaign_plus_reserve_at_inspection": true,
+    "exact_balance_withheld_from_public_evidence": true,
+    "credit_applicability_to_every_planned_service_confirmed": false
+  },
+  "tax_warning": "AWS promotional credits generally do not guarantee coverage of taxes. A literal zero-charge guarantee cannot be made until credit applicability and tax handling are confirmed by the owner.",
+  "authorization": false,
+  "notes": [
+    "On-demand prices are used as conservative ceilings; Managed Spot Training may cost less.",
+    "This document records a read-only price check and does not authorize any AWS resource or job.",
+    "The workflow fails closed if live prices, credit reserve, or campaign bounds are not satisfied."
+  ]
+}

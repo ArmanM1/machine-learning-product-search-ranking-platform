@@ -1,0 +1,1012 @@
+name: Benchmark the promoted public Lambda release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_id:
+        description: Immutable promoted release ID currently served in production
+        required: true
+        type: string
+      model_id:
+        description: Immutable promoted model ID currently served in production
+        required: true
+        type: string
+      cloudfront_base_url:
+        description: Generated HTTPS CloudFront base URL for the public deployment
+        required: true
+        type: string
+      authorization:
+        description: Type RUN PUBLIC SERVING BENCHMARK after reviewing the cost guard
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: production-serving-benchmark
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  ALLOW_HELDOUT_EVAL: "0"
+  CAMPAIGN_BUDGET_USD: "40"
+  REQUIRED_CREDIT_RESERVE_USD: "40"
+  MAXIMUM_OUT_OF_POCKET_USD: "0"
+  BENCHMARK_COST_ALLOWANCE_USD: "0.50"
+
+jobs:
+  benchmark:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: production
+    env:
+      RELEASE_ID: ${{ inputs.release_id }}
+      MODEL_ID: ${{ inputs.model_id }}
+      BASE_URL: ${{ inputs.cloudfront_base_url }}
+      AUTHORIZATION: ${{ inputs.authorization }}
+      CAMPAIGN_SPEND_TO_DATE_USD: ${{ secrets.AWS_CAMPAIGN_SPEND_TO_DATE_USD }}
+      REMAINING_APPLICABLE_CREDIT_USD: ${{ secrets.AWS_REMAINING_APPLICABLE_CREDIT_USD }}
+      ARTIFACT_BUCKET: ${{ vars.AWS_ARTIFACT_BUCKET }}
+      LAMBDA_FUNCTION_NAME: ${{ vars.AWS_LAMBDA_FUNCTION_NAME }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+      - name: Enforce immutable inputs and the zero-out-of-pocket guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${AUTHORIZATION}" = "RUN PUBLIC SERVING BENCHMARK"
+          test "${ALLOW_HELDOUT_EVAL}" = "0"
+          [[ "${RELEASE_ID}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{2,62}$ ]]
+          [[ "${MODEL_ID}" =~ ^[A-Za-z0-9][A-Za-z0-9._@-]{2,99}$ ]]
+          : "${ARTIFACT_BUCKET:?Missing AWS_ARTIFACT_BUCKET variable}"
+          : "${LAMBDA_FUNCTION_NAME:?Missing AWS_LAMBDA_FUNCTION_NAME variable}"
+          mkdir -p .benchmark-evidence
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import urllib.parse
+          from decimal import Decimal, InvalidOperation
+          from pathlib import Path
+
+          def amount(name: str) -> Decimal:
+              try:
+                  value = Decimal(os.environ[name])
+              except (InvalidOperation, KeyError) as exc:
+                  raise SystemExit(f"{name} must be a decimal number") from exc
+              if not value.is_finite() or value < 0:
+                  raise SystemExit(f"{name} must be finite and non-negative")
+              return value
+
+          parsed = urllib.parse.urlsplit(os.environ["BASE_URL"])
+          host = parsed.hostname or ""
+          if (
+              parsed.scheme != "https"
+              or not re.fullmatch(r"[a-z0-9-]+\.cloudfront\.net", host)
+              or parsed.port is not None
+              or parsed.username is not None
+              or parsed.password is not None
+              or parsed.path not in {"", "/"}
+              or parsed.query
+              or parsed.fragment
+          ):
+              raise SystemExit("cloudfront_base_url must be a generated HTTPS *.cloudfront.net origin URL")
+
+          allowance = amount("BENCHMARK_COST_ALLOWANCE_USD")
+          spent = amount("CAMPAIGN_SPEND_TO_DATE_USD")
+          credit = amount("REMAINING_APPLICABLE_CREDIT_USD")
+          campaign = amount("CAMPAIGN_BUDGET_USD")
+          reserve = amount("REQUIRED_CREDIT_RESERVE_USD")
+          if amount("MAXIMUM_OUT_OF_POCKET_USD") != 0:
+              raise SystemExit("Owner-approved out-of-pocket limit must be exactly zero")
+          if campaign != Decimal("40") or reserve < Decimal("40"):
+              raise SystemExit("The approved USD 40 campaign envelope and reserve must remain intact")
+          if spent + allowance > campaign:
+              raise SystemExit("Benchmark allowance would breach the USD 40 campaign envelope")
+          if credit < reserve + allowance:
+              raise SystemExit("Applicable credit cannot cover both the benchmark and required reserve")
+
+          normalized = f"https://{host}"
+          with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as handle:
+              handle.write(f"BENCHMARK_BASE_URL={normalized}\n")
+          Path(".benchmark-evidence/cost-preflight.json").write_text(
+              json.dumps(
+                  {
+                      "schema_version": "1.0.0",
+                      "status": "passed",
+                      "maximum_out_of_pocket_usd": "0",
+                      "campaign_envelope_usd": "40",
+                      "required_credit_reserve_usd": "40",
+                      "conservative_benchmark_allowance_usd": str(allowance),
+                      "heldout_access_enabled": False,
+                      "sensitive_balance_values_recorded": False,
+                  },
+                  indent=2,
+                  sort_keys=True,
+              )
+              + "\n",
+              encoding="utf-8",
+          )
+          PY
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-benchmark-${{ github.run_id }}
+          mask-aws-account-id: true
+      - name: Bind the benchmark to the current promoted release
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws s3api head-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key promoted/current.json > current-pointer-head.json
+          aws s3api get-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key promoted/current.json \
+            current-pointer.json >/dev/null
+          jq -e \
+            --arg release "${RELEASE_ID}" \
+            --arg model "${MODEL_ID}" \
+             '.release_id == $release and .model_id == $model and
+              .bundle_s3_key == ("promoted/" + $model + "/") and
+              (.evidence_mode == "validation_only" or .evidence_mode == "verified") and
+              (.git_sha | test("^[0-9a-f]{40}$"))' \
+            current-pointer.json >/dev/null
+          aws s3 cp \
+            "s3://${ARTIFACT_BUCKET}/promoted/${MODEL_ID}/release-manifest.json" \
+            release-manifest.json --no-progress
+          aws s3 cp \
+            "s3://${ARTIFACT_BUCKET}/promoted/${MODEL_ID}/bundle-checksums.json" \
+            bundle-checksums.json --no-progress
+          aws s3 cp \
+            "s3://${ARTIFACT_BUCKET}/promoted/${MODEL_ID}/public-evidence.json" \
+            public-evidence.json --no-progress
+          aws s3 cp \
+            "s3://${ARTIFACT_BUCKET}/promoted/${MODEL_ID}/curated-queries.json" \
+            curated-queries.json --no-progress
+          evidence_mode="$(jq -r '.evidence_mode' current-pointer.json)"
+          case "${evidence_mode}" in
+            validation_only)
+              aws s3 cp \
+                "s3://${ARTIFACT_BUCKET}/promoted/${MODEL_ID}/baseline-summary.json" \
+                baseline-summary.json --no-progress
+              ;;
+            verified)
+              aws s3 cp \
+                "s3://${ARTIFACT_BUCKET}/promoted/${MODEL_ID}/evaluation-report.json" \
+                evaluation-report.json --no-progress
+              aws s3 cp \
+                "s3://${ARTIFACT_BUCKET}/promoted/${MODEL_ID}/evaluation-provenance.json" \
+                evaluation-provenance.json --no-progress
+              ;;
+            *)
+              echo "Unsupported release evidence mode" >&2
+              exit 1
+              ;;
+          esac
+          aws s3api list-objects-v2 \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --prefix "promoted/${MODEL_ID}/" > promoted-bundle-objects.json
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+          def digest(path: Path) -> str:
+              return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+
+          def require_sha256(value: object, label: str) -> str:
+              if not isinstance(value, str) or SHA256.fullmatch(value) is None:
+                  raise SystemExit(f"{label} is not a canonical SHA-256 identity")
+              return value
+
+          pointer = json.loads(Path("current-pointer.json").read_text(encoding="utf-8"))
+          manifest_path = Path("release-manifest.json")
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          checksums = json.loads(Path("bundle-checksums.json").read_text(encoding="utf-8"))
+          public = json.loads(Path("public-evidence.json").read_text(encoding="utf-8"))
+          objects = json.loads(Path("promoted-bundle-objects.json").read_text(encoding="utf-8"))
+          expected_release = os.environ["RELEASE_ID"]
+          expected_model = os.environ["MODEL_ID"]
+          if manifest.get("release_id") != expected_release:
+              raise SystemExit("release manifest does not bind the requested immutable release")
+          if manifest.get("promoted_model_id") != expected_model:
+              raise SystemExit("release manifest does not bind the requested immutable model")
+          if pointer.get("bundle_s3_key") != f"promoted/{expected_model}/":
+              raise SystemExit("promotion pointer bundle prefix is not canonical")
+          mode = manifest.get("evidence_mode")
+          if mode not in {"validation_only", "verified"}:
+              raise SystemExit("release manifest has an unsupported evidence mode")
+          if mode != pointer.get("evidence_mode") or mode != public.get("evidence_mode"):
+              raise SystemExit("pointer, manifest, and public evidence modes differ")
+
+          files = checksums.get("files")
+          if checksums.get("schema_version") != "1.0.0" or not isinstance(files, dict):
+              raise SystemExit("bundle checksum inventory has an invalid schema")
+          if any(require_sha256(value, f"bundle checksum for {name}") != value for name, value in files.items()):
+              raise SystemExit("bundle checksum inventory is invalid")
+          prefix = f"promoted/{expected_model}/"
+          if objects.get("IsTruncated"):
+              raise SystemExit("promoted bundle inventory response was unexpectedly truncated")
+          object_names = {
+              item["Key"][len(prefix):]
+              for item in objects.get("Contents", [])
+              if isinstance(item.get("Key"), str) and item["Key"].startswith(prefix)
+          }
+          if object_names != set(files) | {"bundle-checksums.json"}:
+              raise SystemExit("S3 object inventory differs from the checksummed release inventory")
+
+          mode_files = (
+              {"baseline-summary.json"}
+              if mode == "validation_only"
+              else {"evaluation-report.json", "evaluation-provenance.json"}
+          )
+          local_files = {
+              "release-manifest.json",
+              "public-evidence.json",
+              "curated-queries.json",
+              *mode_files,
+          }
+          for name in local_files:
+              path = Path(name)
+              if not path.is_file() or files.get(name) != digest(path):
+                  raise SystemExit(f"release artifact checksum is absent or invalid: {name}")
+
+          artifact_checksums = manifest.get("artifact_checksums")
+          expected_artifacts = {"public-evidence.json", "curated-queries.json", *mode_files}
+          if not isinstance(artifact_checksums, dict) or set(artifact_checksums) != expected_artifacts:
+              raise SystemExit("release manifest public artifact inventory is not exact")
+          for name in expected_artifacts:
+              if artifact_checksums[name] != files[name]:
+                  raise SystemExit(f"release manifest and bundle checksum differ: {name}")
+
+          dataset_hash = require_sha256(
+              manifest.get("dataset_manifest_hash"), "release dataset content identity"
+          )
+          models = manifest.get("models")
+          if not isinstance(models, list) or not models:
+              raise SystemExit("release manifest has no model inventory")
+          selected = [item for item in models if item.get("model_id") == expected_model]
+          if len(selected) != 1:
+              raise SystemExit("promoted model is absent or duplicated in the release manifest")
+          model_checksum = require_sha256(
+              selected[0].get("artifact_checksum"), "promoted model artifact checksum"
+          )
+
+          run = public.get("run")
+          evaluation = public.get("evaluation")
+          analysis = public.get("failure_analysis")
+          if public.get("schema_version") != "1.0.0" or not all(
+              isinstance(item, dict) for item in (run, evaluation, analysis)
+          ):
+              raise SystemExit("public evidence envelope is incomplete")
+          assert isinstance(run, dict) and isinstance(evaluation, dict) and isinstance(analysis, dict)
+          run_id = run.get("run_id")
+          if not isinstance(run_id, str) or not run_id or {
+              run_id, evaluation.get("run_id"), analysis.get("run_id")
+          } != {run_id}:
+              raise SystemExit("public evidence sections do not share one run ID")
+          if any(item.get("evidence_mode") != mode for item in (run, evaluation, analysis)):
+              raise SystemExit("public evidence sections do not share the release mode")
+          if run.get("dataset_manifest_hash") != dataset_hash:
+              raise SystemExit("public run and release dataset identities differ")
+          if run.get("git_sha") != manifest.get("git_sha"):
+              raise SystemExit("public run and release Git identities differ")
+          if run.get("model_artifact_checksum") != model_checksum:
+              raise SystemExit("public run and promoted model checksums differ")
+          if mode == "validation_only":
+              if (
+                  run.get("status") != "validation_only"
+                  or run.get("selected_model_id") != expected_model
+                  or run.get("test_access_count") != 0
+                  or run.get("held_out_claims_allowed") is not False
+                  or evaluation.get("status") != "validation_only"
+                  or evaluation.get("selected_model_id") != expected_model
+                  or evaluation.get("test_access_count") != 0
+                  or evaluation.get("held_out") is not False
+                  or evaluation.get("evidence_id") != manifest.get("evaluation_report_id")
+                  or analysis.get("status") != "not_performed"
+              ):
+                  raise SystemExit("validation-only public evidence semantics are invalid")
+          elif (
+              run.get("status") != "complete"
+              or not isinstance(run.get("test_access_count"), int)
+              or run["test_access_count"] < 1
+              or evaluation.get("report_id") != manifest.get("evaluation_report_id")
+              or evaluation.get("candidate_model_id") != expected_model
+              or evaluation.get("release_status") != "passed"
+          ):
+              raise SystemExit("verified public evidence semantics are invalid")
+
+          with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as handle:
+              handle.write(f"PUBLIC_RUN_ID={run_id}\n")
+              handle.write(f"EVIDENCE_MODE={mode}\n")
+              handle.write(f"DATASET_MANIFEST_HASH={dataset_hash}\n")
+              handle.write(f"MODEL_ARTIFACT_CHECKSUM={model_checksum}\n")
+          PY
+      - name: Verify the live bounded Lambda configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws lambda get-alias \
+            --function-name "${LAMBDA_FUNCTION_NAME}" \
+            --name production > lambda-alias-raw.json
+          aws lambda get-function-configuration \
+            --function-name "${LAMBDA_FUNCTION_NAME}" \
+            --qualifier production > lambda-configuration-raw.json
+          aws lambda get-function-concurrency \
+            --function-name "${LAMBDA_FUNCTION_NAME}" > lambda-concurrency-raw.json
+
+          set +e
+          aws lambda get-provisioned-concurrency-config \
+            --function-name "${LAMBDA_FUNCTION_NAME}" \
+            --qualifier production \
+            > lambda-provisioned-raw.json 2> lambda-provisioned-error.txt
+          provisioned_status=$?
+          set -e
+          if [[ "${provisioned_status}" -eq 0 ]]; then
+            echo "A provisioned-concurrency configuration exists; the zero-provisioned invariant failed." >&2
+            exit 1
+          fi
+          if ! grep -Eq 'ResourceNotFoundException|ProvisionedConcurrencyConfigNotFoundException' lambda-provisioned-error.txt; then
+            cat lambda-provisioned-error.txt >&2
+            exit 1
+          fi
+
+          python - <<'PY'
+          import json
+          import os
+          from datetime import UTC, datetime
+          from pathlib import Path
+
+          alias = json.loads(Path("lambda-alias-raw.json").read_text(encoding="utf-8"))
+          config = json.loads(Path("lambda-configuration-raw.json").read_text(encoding="utf-8"))
+          concurrency = json.loads(Path("lambda-concurrency-raw.json").read_text(encoding="utf-8"))
+          architectures = config.get("Architectures")
+          if config.get("MemorySize") != 4096:
+              raise SystemExit("live Lambda memory must remain exactly 4096 MB")
+          if architectures != ["x86_64"]:
+              raise SystemExit("live Lambda architecture must remain exactly x86_64")
+          if concurrency.get("ReservedConcurrentExecutions") != 2:
+              raise SystemExit("live Lambda reserved concurrency must remain exactly two")
+          if alias.get("Name") != "production" or alias.get("FunctionVersion") != config.get("Version"):
+              raise SystemExit("production alias and queried immutable Lambda version do not agree")
+          sanitized = {
+              "schema_version": "1.0.0",
+              "checked_at": datetime.now(UTC).isoformat(),
+              "function_name": os.environ["LAMBDA_FUNCTION_NAME"],
+              "alias": "production",
+              "function_version": config["Version"],
+              "memory_mb": config["MemorySize"],
+              "architecture": architectures[0],
+              "reserved_concurrency": concurrency["ReservedConcurrentExecutions"],
+              "provisioned_concurrency": 0,
+              "provisioned_concurrency_verification": (
+                  "live GetProvisionedConcurrencyConfig returned a not-found response"
+              ),
+              "region": os.environ["AWS_REGION"],
+          }
+          Path(".benchmark-evidence/lambda-configuration.json").write_text(
+              json.dumps(sanitized, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+          )
+          PY
+      - name: Execute the fixed public performance matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from __future__ import annotations
+
+          import concurrent.futures
+          import json
+          import math
+          import os
+          import statistics
+          import time
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+          import uuid
+          from collections import Counter
+          from datetime import UTC, datetime
+          from pathlib import Path
+          from typing import Any
+
+          CANDIDATE_COUNTS = (10, 20, 40)
+          OFFERED_CONCURRENCY = (1, 4, 8)
+          WARMUP_REQUESTS = 10
+          MEASURED_REQUESTS = 200
+          MAX_RESPONSE_BYTES = 1_048_576
+          REQUEST_TIMEOUT_SECONDS = 20
+          BASE_URL = os.environ["BENCHMARK_BASE_URL"]
+          MODEL_ID = os.environ["MODEL_ID"]
+          PUBLIC_RUN_ID = os.environ["PUBLIC_RUN_ID"]
+          EVIDENCE_MODE = os.environ["EVIDENCE_MODE"]
+          DATASET_MANIFEST_HASH = os.environ["DATASET_MANIFEST_HASH"]
+          MODEL_ARTIFACT_CHECKSUM = os.environ["MODEL_ARTIFACT_CHECKSUM"]
+
+          def request_json(path: str, payload: dict[str, Any] | None = None) -> tuple[Any, float, int]:
+              request = urllib.request.Request(
+                  urllib.parse.urljoin(BASE_URL + "/", path.lstrip("/")),
+                  data=None if payload is None else json.dumps(payload).encode("utf-8"),
+                  method="GET" if payload is None else "POST",
+                  headers={
+                      "Accept": "application/json",
+                      "Cache-Control": "no-cache",
+                      "Content-Type": "application/json",
+                      "User-Agent": "search-rank-release-benchmark/1.0",
+                  },
+              )
+              started = time.perf_counter()
+              with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+                  raw = response.read(MAX_RESPONSE_BYTES + 1)
+                  status = int(response.status)
+              elapsed = (time.perf_counter() - started) * 1000.0
+              if len(raw) > MAX_RESPONSE_BYTES:
+                  raise RuntimeError("response_too_large")
+              return json.loads(raw), elapsed, status
+
+          def percentile(values: list[float], probability: float) -> float:
+              ordered = sorted(values)
+              position = (len(ordered) - 1) * probability
+              lower = math.floor(position)
+              upper = math.ceil(position)
+              if lower == upper:
+                  return ordered[lower]
+              fraction = position - lower
+              return ordered[lower] * (1.0 - fraction) + ordered[upper] * fraction
+
+          def latency_summary(values: list[float]) -> dict[str, float] | None:
+              if not values:
+                  return None
+              return {
+                  "p50": percentile(values, 0.50),
+                  "p95": percentile(values, 0.95),
+                  "p99": percentile(values, 0.99),
+                  "mean": statistics.fmean(values),
+                  "minimum": min(values),
+                  "maximum": max(values),
+              }
+
+          def rank_once(query_id: str, candidate_count: int, ordinal: int) -> dict[str, Any]:
+              payload = {"query_id": query_id, "model_id": MODEL_ID, "top_k": candidate_count}
+              request = urllib.request.Request(
+                  urllib.parse.urljoin(BASE_URL + "/", "api/v1/rank"),
+                  data=json.dumps(payload).encode("utf-8"),
+                  method="POST",
+                  headers={
+                      "Accept": "application/json",
+                      "Cache-Control": "no-cache",
+                      "Content-Type": "application/json",
+                      "User-Agent": "search-rank-release-benchmark/1.0",
+                  },
+              )
+              started = time.perf_counter()
+              try:
+                  with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+                      raw = response.read(MAX_RESPONSE_BYTES + 1)
+                      status = int(response.status)
+                  elapsed = (time.perf_counter() - started) * 1000.0
+                  if len(raw) > MAX_RESPONSE_BYTES:
+                      raise RuntimeError("response_too_large")
+                  body = json.loads(raw)
+                  model_ms = float(body["latency_ms"])
+                  if (
+                      status != 200
+                      or body.get("query_id") != query_id
+                      or body.get("model_id") != MODEL_ID
+                      or body.get("dataset_manifest_hash") != DATASET_MANIFEST_HASH
+                      or body.get("model_artifact_checksum") != MODEL_ARTIFACT_CHECKSUM
+                      or body.get("candidate_count") != candidate_count
+                      or body.get("top_k") != candidate_count
+                      or len(body.get("results", [])) != candidate_count
+                      or not math.isfinite(model_ms)
+                      or model_ms < 0
+                  ):
+                      raise ValueError("invalid_rank_contract")
+                  return {
+                      "ordinal": ordinal,
+                      "ok": True,
+                      "http_status": status,
+                      "throttled": False,
+                      "end_to_end_ms": elapsed,
+                      "model_ms": model_ms,
+                  }
+              except urllib.error.HTTPError as error:
+                  elapsed = (time.perf_counter() - started) * 1000.0
+                  marker = str(error.headers.get("x-amzn-ErrorType", ""))
+                  throttled = error.code == 429 or "throttl" in marker.lower()
+                  return {
+                      "ordinal": ordinal,
+                      "ok": False,
+                      "http_status": int(error.code),
+                      "throttled": throttled,
+                      "end_to_end_ms": elapsed,
+                      "error_category": "http_throttle" if throttled else "http_error",
+                  }
+              except (json.JSONDecodeError, KeyError, TypeError, ValueError, RuntimeError):
+                  return {
+                      "ordinal": ordinal,
+                      "ok": False,
+                      "http_status": 200,
+                      "throttled": False,
+                      "end_to_end_ms": (time.perf_counter() - started) * 1000.0,
+                      "error_category": "invalid_response",
+                  }
+              except (TimeoutError, OSError, urllib.error.URLError):
+                  return {
+                      "ordinal": ordinal,
+                      "ok": False,
+                      "http_status": None,
+                      "throttled": False,
+                      "end_to_end_ms": (time.perf_counter() - started) * 1000.0,
+                      "error_category": "transport_error",
+                  }
+
+          def run_samples(
+              query_id: str, candidate_count: int, offered_concurrency: int, count: int
+          ) -> list[dict[str, Any]]:
+              with concurrent.futures.ThreadPoolExecutor(
+                  max_workers=offered_concurrency
+              ) as executor:
+                  return list(
+                      executor.map(
+                          lambda ordinal: rank_once(query_id, candidate_count, ordinal),
+                          range(1, count + 1),
+                      )
+                  )
+
+          def sample_summary(samples: list[dict[str, Any]]) -> dict[str, Any]:
+              successes = [sample for sample in samples if sample["ok"]]
+              status_counts = Counter(
+                  str(sample["http_status"])
+                  if sample.get("http_status") is not None
+                  else str(sample["error_category"])
+                  for sample in samples
+              )
+              end_to_end = [float(sample["end_to_end_ms"]) for sample in successes]
+              model = [float(sample["model_ms"]) for sample in successes]
+              return {
+                  "sample_count": len(samples),
+                  "success_count": len(successes),
+                  "error_count": len(samples) - len(successes),
+                  "throttle_count": sum(bool(sample["throttled"]) for sample in samples),
+                  "http_status_and_transport_counts": dict(sorted(status_counts.items())),
+                  "end_to_end_latency_ms": latency_summary(end_to_end),
+                  "model_latency_ms": latency_summary(model),
+                  "samples": samples,
+              }
+
+          started_at = datetime.now(UTC).isoformat()
+          cold_nonce = uuid.uuid4().hex
+          health, health_ms, health_status = request_json(f"/healthz?benchmark={cold_nonce}")
+          if health_status != 200 or health.get("status") != "ok":
+              raise SystemExit("first health request did not satisfy the public contract")
+          ready, ready_ms, ready_status = request_json(f"/readyz?benchmark={cold_nonce}")
+          if (
+              ready_status != 200
+              or ready.get("status") != "ready"
+              or ready.get("model_id") != MODEL_ID
+              or ready.get("dataset_manifest_hash") != DATASET_MANIFEST_HASH
+          ):
+              raise SystemExit("public readiness does not bind the requested promoted model")
+          models, models_ms, models_status = request_json("/api/v1/models")
+          selected_models = (
+              [item for item in models if item.get("model_id") == MODEL_ID]
+              if isinstance(models, list)
+              else []
+          )
+          if (
+              models_status != 200
+              or len(selected_models) != 1
+              or selected_models[0].get("artifact_checksum") != MODEL_ARTIFACT_CHECKSUM
+          ):
+              raise SystemExit("requested model is absent from the public model registry")
+          queries, queries_ms, queries_status = request_json("/api/v1/queries?limit=50")
+          if queries_status != 200 or not isinstance(queries, list):
+              raise SystemExit("public curated-query registry is unavailable")
+          run_path = "/api/v1/runs/" + urllib.parse.quote(PUBLIC_RUN_ID, safe="")
+          run_evidence, run_ms, run_status = request_json(run_path)
+          if (
+              run_status != 200
+              or run_evidence.get("schema_version") != "1.0.0"
+              or run_evidence.get("evidence_mode") != EVIDENCE_MODE
+              or run_evidence.get("run", {}).get("run_id") != PUBLIC_RUN_ID
+              or run_evidence.get("run", {}).get("dataset_manifest_hash")
+              != DATASET_MANIFEST_HASH
+              or run_evidence.get("run", {}).get("model_artifact_checksum")
+              != MODEL_ARTIFACT_CHECKSUM
+          ):
+              raise SystemExit("public run endpoint is not bound to the promoted release")
+          if EVIDENCE_MODE == "validation_only":
+              if (
+                  run_evidence.get("run", {}).get("selected_model_id") != MODEL_ID
+                  or run_evidence.get("run", {}).get("held_out_claims_allowed") is not False
+              ):
+                  raise SystemExit("validation-only run endpoint semantics are invalid")
+          elif (
+              run_evidence.get("evaluation", {}).get("candidate_model_id") != MODEL_ID
+              or run_evidence.get("evaluation", {}).get("release_status") != "passed"
+          ):
+              raise SystemExit("verified run endpoint semantics are invalid")
+          by_count: dict[int, str] = {}
+          for count in CANDIDATE_COUNTS:
+              candidates = sorted(
+                  str(item["query_id"])
+                  for item in queries
+                  if int(item.get("candidate_count", -1)) == count
+              )
+              if not candidates:
+                  raise SystemExit(f"no curated public query has candidate_count={count}")
+              by_count[count] = candidates[0]
+
+          first_rank = rank_once(by_count[40], 40, 1)
+          if not first_rank["ok"]:
+              raise SystemExit("the separately recorded first rank request failed")
+
+          conditions: list[dict[str, Any]] = []
+          for candidate_count in CANDIDATE_COUNTS:
+              query_id = by_count[candidate_count]
+              for offered_concurrency in OFFERED_CONCURRENCY:
+                  print(
+                      f"candidate_count={candidate_count}, offered_concurrency={offered_concurrency}: "
+                      f"{WARMUP_REQUESTS} warmups then {MEASURED_REQUESTS} measured requests",
+                      flush=True,
+                  )
+                  warmups = run_samples(
+                      query_id, candidate_count, offered_concurrency, WARMUP_REQUESTS
+                  )
+                  measured = run_samples(
+                      query_id, candidate_count, offered_concurrency, MEASURED_REQUESTS
+                  )
+                  conditions.append(
+                      {
+                          "candidate_count": candidate_count,
+                          "query_id": query_id,
+                          "offered_concurrency": offered_concurrency,
+                          "warmup": sample_summary(warmups),
+                          "measured": sample_summary(measured),
+                      }
+                  )
+
+          lambda_config = json.loads(
+              Path(".benchmark-evidence/lambda-configuration.json").read_text(encoding="utf-8")
+          )
+          pointer = json.loads(Path("current-pointer.json").read_text(encoding="utf-8"))
+          pointer_head = json.loads(Path("current-pointer-head.json").read_text(encoding="utf-8"))
+          manifest_bytes = Path("release-manifest.json").read_bytes()
+          manifest = json.loads(manifest_bytes)
+          public_evidence_bytes = Path("public-evidence.json").read_bytes()
+          bundle_checksums_bytes = Path("bundle-checksums.json").read_bytes()
+          measured_samples = [
+              sample for condition in conditions for sample in condition["measured"]["samples"]
+          ]
+          warmup_samples = [
+              sample for condition in conditions for sample in condition["warmup"]["samples"]
+          ]
+          report = {
+              "schema_version": "1.0.0",
+              "status": "completed",
+              "scope": "manual_post_deployment_lambda_performance_protocol",
+              "started_at": started_at,
+              "completed_at": datetime.now(UTC).isoformat(),
+              "identifiers": {
+                  "release_id": os.environ["RELEASE_ID"],
+                  "public_run_id": PUBLIC_RUN_ID,
+                  "model_id": MODEL_ID,
+                  "evidence_mode": EVIDENCE_MODE,
+                  "release_git_sha": pointer["git_sha"],
+                  "benchmark_harness_git_sha": os.environ["GITHUB_SHA"],
+                  "dataset_manifest_hash": manifest["dataset_manifest_hash"],
+                  "region": os.environ["AWS_REGION"],
+                  "public_origin": BASE_URL,
+              },
+              "release_binding": {
+                  "promotion_pointer_version_id": pointer_head.get("VersionId"),
+                  "promotion_pointer_etag": pointer_head.get("ETag"),
+                  "bundle_s3_key": pointer["bundle_s3_key"],
+                  "release_manifest_sha256": "sha256:"
+                  + __import__("hashlib").sha256(manifest_bytes).hexdigest(),
+                  "public_evidence_sha256": "sha256:"
+                  + __import__("hashlib").sha256(public_evidence_bytes).hexdigest(),
+                  "bundle_checksums_sha256": "sha256:"
+                  + __import__("hashlib").sha256(bundle_checksums_bytes).hexdigest(),
+              },
+              "lambda_configuration": lambda_config,
+              "protocol": {
+                  "candidate_counts": list(CANDIDATE_COUNTS),
+                  "offered_concurrency_levels": list(OFFERED_CONCURRENCY),
+                  "warmup_requests_per_condition": WARMUP_REQUESTS,
+                  "measured_requests_per_condition": MEASURED_REQUESTS,
+                  "condition_count": len(conditions),
+                  "request_timeout_seconds": REQUEST_TIMEOUT_SECONDS,
+                  "response_size_limit_bytes": MAX_RESPONSE_BYTES,
+              },
+              "first_observed_requests": {
+                  "cold_start_controlled": False,
+                  "health": {
+                      "http_status": health_status,
+                      "end_to_end_ms": health_ms,
+                      "service_status": health["status"],
+                  },
+                  "ready": {"http_status": ready_status, "end_to_end_ms": ready_ms},
+                  "models": {"http_status": models_status, "end_to_end_ms": models_ms},
+                  "queries": {"http_status": queries_status, "end_to_end_ms": queries_ms},
+                  "run_evidence": {"http_status": run_status, "end_to_end_ms": run_ms},
+                  "first_rank": first_rank,
+                  "excluded_from_warm_latency_percentiles": True,
+              },
+              "conditions": conditions,
+              "totals": {
+                  "warmup_request_count": len(warmup_samples),
+                  "measured_request_count": len(measured_samples),
+                  "measured_success_count": sum(bool(sample["ok"]) for sample in measured_samples),
+                  "measured_error_count": sum(not bool(sample["ok"]) for sample in measured_samples),
+                  "measured_throttle_count": sum(
+                      bool(sample["throttled"]) for sample in measured_samples
+                  ),
+              },
+              "interpretation": {
+                  "latency_claim": "Observed public CloudFront end-to-end and model latency only.",
+                  "throughput_claim_eligible": False,
+                  "scaling_claim_eligible": False,
+                  "concurrency_above_reserved_expected_to_expose_bound": [4, 8],
+                  "reserved_concurrency_is_a_cost_and_capacity_bound": True,
+              },
+              "limitations": [
+                  "Offered client concurrency is not a throughput or autoscaling measurement.",
+                  "Concurrency four and eight exceed reserved Lambda concurrency two and may throttle by design.",
+                  "The first health and first rank observations do not force or prove a Lambda cold start.",
+                  "Client timing includes CloudFront, API Gateway, network, serialization, and model work.",
+                  "No hidden or held-out evaluation data is accessed by this public serving benchmark.",
+              ],
+          }
+          Path(".benchmark-evidence/performance-report.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+          )
+          PY
+      - name: Validate and checksum the complete evidence bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib
+          import json
+          import math
+          import os
+          import statistics
+          from collections import Counter
+          from datetime import UTC, datetime
+          from pathlib import Path
+
+          root = Path(".benchmark-evidence")
+          report = json.loads((root / "performance-report.json").read_text(encoding="utf-8"))
+          config = json.loads((root / "lambda-configuration.json").read_text(encoding="utf-8"))
+          if report.get("status") != "completed":
+              raise SystemExit("benchmark report is not complete")
+          identifiers = report.get("identifiers", {})
+          if identifiers.get("release_id") != os.environ["RELEASE_ID"]:
+              raise SystemExit("benchmark release identifier changed")
+          if identifiers.get("model_id") != os.environ["MODEL_ID"]:
+              raise SystemExit("benchmark model identifier changed")
+          if identifiers.get("public_run_id") != os.environ["PUBLIC_RUN_ID"]:
+              raise SystemExit("benchmark public run identifier changed")
+          if identifiers.get("evidence_mode") != os.environ["EVIDENCE_MODE"]:
+              raise SystemExit("benchmark evidence mode changed")
+          if identifiers.get("dataset_manifest_hash") != os.environ["DATASET_MANIFEST_HASH"]:
+              raise SystemExit("benchmark dataset identity changed")
+          if identifiers.get("region") != "us-east-1":
+              raise SystemExit("benchmark region changed")
+          if identifiers.get("benchmark_harness_git_sha") != os.environ["GITHUB_SHA"]:
+              raise SystemExit("benchmark harness commit changed")
+          binding = report.get("release_binding", {})
+          for name in (
+              "release_manifest_sha256",
+              "public_evidence_sha256",
+              "bundle_checksums_sha256",
+          ):
+              value = binding.get(name)
+              if not isinstance(value, str) or len(value) != 71 or not value.startswith("sha256:"):
+                  raise SystemExit(f"benchmark release binding is invalid: {name}")
+          if (
+              config.get("memory_mb") != 4096
+              or config.get("architecture") != "x86_64"
+              or config.get("reserved_concurrency") != 2
+              or config.get("provisioned_concurrency") != 0
+          ):
+              raise SystemExit("bounded Lambda configuration is not exact")
+
+          expected_conditions = {(count, concurrency) for count in (10, 20, 40) for concurrency in (1, 4, 8)}
+          conditions = report.get("conditions", [])
+          observed_conditions = {
+              (condition.get("candidate_count"), condition.get("offered_concurrency"))
+              for condition in conditions
+          }
+          if len(conditions) != 9 or observed_conditions != expected_conditions:
+              raise SystemExit("benchmark condition matrix is incomplete or duplicated")
+
+          def percentile(values: list[float], probability: float) -> float:
+              ordered = sorted(values)
+              position = (len(ordered) - 1) * probability
+              lower = math.floor(position)
+              upper = math.ceil(position)
+              if lower == upper:
+                  return ordered[lower]
+              fraction = position - lower
+              return ordered[lower] * (1.0 - fraction) + ordered[upper] * fraction
+
+          def validate_latency_summary(
+              name: str, summary: object, values: list[float]
+          ) -> None:
+              if not values:
+                  if summary is not None:
+                      raise SystemExit(f"{name} must be null when there are no successful samples")
+                  return
+              if not isinstance(summary, dict):
+                  raise SystemExit(f"{name} is absent for successful samples")
+              expected = {
+                  "p50": percentile(values, 0.50),
+                  "p95": percentile(values, 0.95),
+                  "p99": percentile(values, 0.99),
+                  "mean": statistics.fmean(values),
+                  "minimum": min(values),
+                  "maximum": max(values),
+              }
+              for key, value in expected.items():
+                  observed = float(summary.get(key, float("nan")))
+                  if not math.isfinite(observed) or not math.isclose(
+                      observed, value, rel_tol=1e-12, abs_tol=1e-9
+                  ):
+                      raise SystemExit(f"{name}.{key} does not match raw successful samples")
+
+          all_measured = []
+          all_warmups = []
+          for condition in conditions:
+              for phase_name, expected_count in (("warmup", 10), ("measured", 200)):
+                  phase = condition[phase_name]
+                  samples = phase.get("samples", [])
+                  if len(samples) != expected_count or phase.get("sample_count") != expected_count:
+                      raise SystemExit(f"{phase_name} request count is not exact")
+                  if [sample.get("ordinal") for sample in samples] != list(range(1, expected_count + 1)):
+                      raise SystemExit(f"{phase_name} request ordinals are incomplete")
+                  success_count = sum(bool(sample.get("ok")) for sample in samples)
+                  error_count = expected_count - success_count
+                  throttle_count = sum(bool(sample.get("throttled")) for sample in samples)
+                  if (
+                      phase.get("success_count") != success_count
+                      or phase.get("error_count") != error_count
+                      or phase.get("throttle_count") != throttle_count
+                  ):
+                      raise SystemExit(f"{phase_name} aggregate counts do not match raw samples")
+                  statuses = Counter(
+                      str(sample["http_status"])
+                      if sample.get("http_status") is not None
+                      else str(sample.get("error_category"))
+                      for sample in samples
+                  )
+                  if phase.get("http_status_and_transport_counts") != dict(sorted(statuses.items())):
+                      raise SystemExit(f"{phase_name} status counts do not match raw samples")
+                  for sample in samples:
+                      latency = float(sample.get("end_to_end_ms", -1))
+                      if not math.isfinite(latency) or latency < 0:
+                          raise SystemExit("a request has an invalid end-to-end latency")
+                      if sample.get("ok"):
+                          model_latency = float(sample.get("model_ms", -1))
+                          if not math.isfinite(model_latency) or model_latency < 0:
+                              raise SystemExit("a successful request has invalid model latency")
+                          if sample.get("http_status") != 200 or sample.get("throttled") is not False:
+                              raise SystemExit("a successful request has an inconsistent status")
+                      elif sample.get("error_category") not in {
+                          "http_throttle",
+                          "http_error",
+                          "invalid_response",
+                          "transport_error",
+                      }:
+                          raise SystemExit("a failed request has an invalid error category")
+                  successful = [sample for sample in samples if sample.get("ok")]
+                  validate_latency_summary(
+                      f"{phase_name}.end_to_end_latency_ms",
+                      phase.get("end_to_end_latency_ms"),
+                      [float(sample["end_to_end_ms"]) for sample in successful],
+                  )
+                  validate_latency_summary(
+                      f"{phase_name}.model_latency_ms",
+                      phase.get("model_latency_ms"),
+                      [float(sample["model_ms"]) for sample in successful],
+                  )
+                  (all_warmups if phase_name == "warmup" else all_measured).extend(samples)
+
+          totals = report.get("totals", {})
+          if totals.get("warmup_request_count") != 90 or len(all_warmups) != 90:
+              raise SystemExit("total warmup count must be exactly 90")
+          if totals.get("measured_request_count") != 1800 or len(all_measured) != 1800:
+              raise SystemExit("total measured count must be exactly 1800")
+          if totals.get("measured_success_count") != sum(bool(sample["ok"]) for sample in all_measured):
+              raise SystemExit("total success count is inconsistent")
+          if totals.get("measured_error_count") != sum(not bool(sample["ok"]) for sample in all_measured):
+              raise SystemExit("total error count is inconsistent")
+          if totals.get("measured_throttle_count") != sum(
+              bool(sample["throttled"]) for sample in all_measured
+          ):
+              raise SystemExit("total throttle count is inconsistent")
+          interpretation = report.get("interpretation", {})
+          if interpretation.get("throughput_claim_eligible") is not False:
+              raise SystemExit("benchmark must not make a throughput claim")
+          if interpretation.get("scaling_claim_eligible") is not False:
+              raise SystemExit("benchmark must not make a scaling claim")
+          if report.get("first_observed_requests", {}).get("cold_start_controlled") is not False:
+              raise SystemExit("benchmark must not claim a controlled cold start")
+
+          validation = {
+              "schema_version": "1.0.0",
+              "status": "passed",
+              "validated_at": datetime.now(UTC).isoformat(),
+              "condition_count": 9,
+              "warmup_request_count": 90,
+              "measured_request_count": 1800,
+              "immutability_required": True,
+          }
+          (root / "validation.json").write_text(
+              json.dumps(validation, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+          )
+          files = {}
+          for path in sorted(root.glob("*.json")):
+              if path.name == "evidence-checksums.json":
+                  continue
+              files[path.name] = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+          checksum_manifest = {"schema_version": "1.0.0", "files": files}
+          (root / "evidence-checksums.json").write_text(
+              json.dumps(checksum_manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+          )
+
+          reloaded = json.loads((root / "evidence-checksums.json").read_text(encoding="utf-8"))
+          for relative, expected in reloaded["files"].items():
+              path = root / relative
+              actual = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+              if not path.is_file() or actual != expected:
+                  raise SystemExit(f"evidence checksum validation failed: {relative}")
+          PY
+      - name: Publish the immutable validated performance evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          prefix="public/${RELEASE_ID}/performance/github-${GITHUB_RUN_ID}-attempt-${GITHUB_RUN_ATTEMPT}/"
+          existing="$(aws s3api list-objects-v2 \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --prefix "${prefix}" \
+            --max-keys 1 \
+            --query 'KeyCount' \
+            --output text)"
+          test "${existing}" = "0"
+          while IFS= read -r -d '' file; do
+            relative="${file#.benchmark-evidence/}"
+            aws s3api put-object \
+              --bucket "${ARTIFACT_BUCKET}" \
+              --key "${prefix}${relative}" \
+              --body "${file}" \
+              --content-type application/json \
+              --checksum-algorithm SHA256 \
+              --tagging "RetentionClass=public" \
+              --if-none-match '*' >/dev/null
+          done < <(find .benchmark-evidence -maxdepth 1 -type f -name '*.json' -print0 | sort -z)
+          printf '%s' "${prefix}" > .benchmark-evidence/published-prefix.txt
+          echo "Validated immutable evidence was published under the release's immutable performance prefix." >> "${GITHUB_STEP_SUMMARY}"
+          echo "No throughput or scaling claim is made; offered concurrency above two exercises the configured bound." >> "${GITHUB_STEP_SUMMARY}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: serving-performance-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .benchmark-evidence/
+          if-no-files-found: warn
+          retention-days: 90

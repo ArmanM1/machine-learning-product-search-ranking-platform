@@ -1,0 +1,115 @@
+{
+  "schema_version": "1.0.0",
+  "status": "passed",
+  "claim_scope": "deterministic local data preparation only",
+  "dataset": "Amazon Shopping Queries ESCI, task 1, small_version=1, locale=us",
+  "source_revision": "7916cdf6ab75a462e77f20ab40428a10923998d5",
+  "raw_checksums": {
+    "examples": "sha256:4a735b693b4a424a6fc67f5be6e4c811495c488bbf66d02a602d308b2744263a",
+    "products": "sha256:25124442d064d64b26f74082d6fa09438d679efc0c183cf28d19064a2b65a265",
+    "sources": "sha256:a5fed8ecc016443de40bf3c63098f0e3f23bbe4daa4236f1c38b8c3184778c50"
+  },
+  "license_notice_hash": "sha256:09e8a9bcec8067104652c168685ab0931e7868f9c8284b66f5ae6edae5f1130b",
+  "raw_source_checksums": {
+    "examples": "sha256:4a735b693b4a424a6fc67f5be6e4c811495c488bbf66d02a602d308b2744263a",
+    "products": "sha256:25124442d064d64b26f74082d6fa09438d679efc0c183cf28d19064a2b65a265",
+    "sources": "sha256:a5fed8ecc016443de40bf3c63098f0e3f23bbe4daa4236f1c38b8c3184778c50"
+  },
+  "config_file_sha256": "sha256:a82d3312ba9c21f7bcfc4545e1050b99944f87d3a20a9948e31991ce3ba879ca",
+  "preparation_runs": 2,
+  "runs": [
+    {
+      "run_id": "data-prepare-20260902T184104Z-319c2b64",
+      "started_at": "2026-09-02T12:41:04.612215-06:00",
+      "ended_at": "2026-09-02T12:43:54.401951-06:00",
+      "manifest_transport_sha256": "sha256:3f6902e720163f54b98dd7fd915fd76c8b7b3a365df3c7080733997e6c4cf09d",
+      "data_quality_sha256": "sha256:7f0c6ca0471acd13bbe57828923396e975fa43ae195d5231d4e5349c0b9cb81f",
+      "artifact_checksum_index_sha256": "sha256:a1567ca53246067d3d51554081cccf421d0b0b08ad14f24fd390421d5ca1c732"
+    },
+    {
+      "run_id": "data-prepare-20260902T184412Z-65c8f19f",
+      "started_at": "2026-09-02T12:44:12.261241-06:00",
+      "ended_at": "2026-09-02T12:47:04.918765-06:00",
+      "manifest_transport_sha256": "sha256:3f6902e720163f54b98dd7fd915fd76c8b7b3a365df3c7080733997e6c4cf09d",
+      "data_quality_sha256": "sha256:7f0c6ca0471acd13bbe57828923396e975fa43ae195d5231d4e5349c0b9cb81f",
+      "artifact_checksum_index_sha256": "sha256:a1567ca53246067d3d51554081cccf421d0b0b08ad14f24fd390421d5ca1c732"
+    }
+  ],
+  "identical_processed_checksums": true,
+  "identical_transport_checksums": true,
+  "processed_checksum": "sha256:420735e9bba265ae04797129003258974d8fed9e21272be318de7e49c97e24f6",
+  "transport_artifact_hashes": {
+    "artifact-checksums.json": "sha256:a1567ca53246067d3d51554081cccf421d0b0b08ad14f24fd390421d5ca1c732",
+    "data-quality.json": "sha256:7f0c6ca0471acd13bbe57828923396e975fa43ae195d5231d4e5349c0b9cb81f",
+    "manifest.json": "sha256:3f6902e720163f54b98dd7fd915fd76c8b7b3a365df3c7080733997e6c4cf09d"
+  },
+  "preparation_run_evidence": [
+    {
+      "run_id": "data-prepare-20260902T184104Z-319c2b64",
+      "started_at": "2026-09-02T18:41:04.612215+00:00",
+      "ended_at": "2026-09-02T18:43:54.401951+00:00",
+      "summary_sha256": "sha256:704c837f8f0effaa699f17e705c107737a15791bce8865ba1ee638582c80ed6c",
+      "git_sha": "unavailable",
+      "repository_dirty": true,
+      "python": "3.11.9",
+      "platform": "Windows-10-10.0.26200-SP0"
+    },
+    {
+      "run_id": "data-prepare-20260902T184412Z-65c8f19f",
+      "started_at": "2026-09-02T18:44:12.261241+00:00",
+      "ended_at": "2026-09-02T18:47:04.918765+00:00",
+      "summary_sha256": "sha256:39a16914645de6eb8f76161cffa83e410145e16021aa3d764aaf7eca44b11562",
+      "git_sha": "unavailable",
+      "repository_dirty": true,
+      "python": "3.11.9",
+      "platform": "Windows-10-10.0.26200-SP0"
+    }
+  ],
+  "independent_review_completed": false,
+  "independent_reviewer": null,
+  "row_count": 601354,
+  "query_count": 29844,
+  "product_count": 482105,
+  "split_counts": {
+    "train": {"query_count": 18831, "row_count": 378153, "product_count": 320610},
+    "validation": {"query_count": 2057, "row_count": 41500, "product_count": 40431},
+    "test": {"query_count": 8956, "row_count": 181701, "product_count": 164900}
+  },
+  "split_query_id_hashes": {
+    "train": "sha256:c00f113133e2ea652a6b036df27337ed56a53e1f34895b5c928b0fb19bf2cdf8",
+    "validation": "sha256:260f7ee04c25b0ff2c161584b8b83d9395f4e99a4244f67478ea47b31e1c00af",
+    "test": "sha256:6ad7fab9294a756dfa8199148d63519e7532cf7bd1adbcd30e2435e753ab23d5"
+  },
+  "query_overlap": 0,
+  "duplicate_rows_dropped": 0,
+  "join_missing_products": 0,
+  "queries_without_relevant_candidates": 0,
+  "label_diagnostics_scope": "train_and_validation_only",
+  "optional_diagnostics_scope": "train_and_validation_only",
+  "label_distribution": {
+    "Exact": 181819,
+    "Substitute": 147628,
+    "Complement": 19090,
+    "Irrelevant": 71116
+  },
+  "missing_optional_fields": {
+    "product_brand": 20446,
+    "product_bullet_point": 48605,
+    "product_color": 129176,
+    "product_description": 209360,
+    "product_source": 0,
+    "product_title": 0
+  },
+  "command": "python -m search_rank.cli data prepare --config configs/data/esci-us-v1.yaml",
+  "environment": {
+    "python": "3.11.9",
+    "platform": "Windows-10-10.0.26200-SP0",
+    "git_sha": "unavailable because the initial repository commit had not yet been created"
+  },
+  "verification_actor": "automated local verification; no external reviewer",
+  "limitations": [
+    "This evidence does not claim baseline execution, model training, held-out evaluation, or AWS execution.",
+    "Raw and processed data remain gitignored and are not redistributed by this repository.",
+    "Both local runs were produced before a Git commit existed and record repository_dirty=true; the byte-level summaries and output hashes are retained, but commit-bound independent review remains pending."
+  ]
+}

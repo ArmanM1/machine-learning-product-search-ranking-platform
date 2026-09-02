@@ -1,0 +1,101 @@
+{
+  "$id": "https://schemas.example.invalid/search-rank/model_artifact.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "artifact_checksum": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Artifact Checksum",
+      "type": "string"
+    },
+    "artifact_size_bytes": {
+      "minimum": 0,
+      "title": "Artifact Size Bytes",
+      "type": "integer"
+    },
+    "base_model_id": {
+      "minLength": 1,
+      "title": "Base Model Id",
+      "type": "string"
+    },
+    "base_model_revision": {
+      "minLength": 1,
+      "title": "Base Model Revision",
+      "type": "string"
+    },
+    "checkpoint_uri": {
+      "minLength": 1,
+      "title": "Checkpoint Uri",
+      "type": "string"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "evaluation_report_id": {
+      "minLength": 1,
+      "title": "Evaluation Report Id",
+      "type": "string"
+    },
+    "input_contract_version": {
+      "minLength": 1,
+      "title": "Input Contract Version",
+      "type": "string"
+    },
+    "label_mapping_version": {
+      "minLength": 1,
+      "title": "Label Mapping Version",
+      "type": "string"
+    },
+    "model_id": {
+      "minLength": 1,
+      "title": "Model Id",
+      "type": "string"
+    },
+    "promoted": {
+      "title": "Promoted",
+      "type": "boolean"
+    },
+    "promotion_reason": {
+      "minLength": 1,
+      "title": "Promotion Reason",
+      "type": "string"
+    },
+    "run_id": {
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "tokenizer_revision": {
+      "minLength": 1,
+      "title": "Tokenizer Revision",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "model_id",
+    "run_id",
+    "base_model_id",
+    "base_model_revision",
+    "tokenizer_revision",
+    "checkpoint_uri",
+    "artifact_checksum",
+    "artifact_size_bytes",
+    "input_contract_version",
+    "label_mapping_version",
+    "promoted",
+    "promotion_reason",
+    "evaluation_report_id",
+    "created_at"
+  ],
+  "title": "ModelArtifact",
+  "type": "object"
+}

@@ -1,0 +1,7 @@
+schema_version: "1.0.0"
+model_id: cross-encoder/ms-marco-MiniLM-L6-v2
+revision: 233902d25c440f23af6f7d6e94d2946bac0bee0a
+license: Apache-2.0
+license_url: https://huggingface.co/cross-encoder/ms-marco-MiniLM-L6-v2/blob/233902d25c440f23af6f7d6e94d2946bac0bee0a/README.md
+trust_remote_code: false
+max_sequence_length: 256

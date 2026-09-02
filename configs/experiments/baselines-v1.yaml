@@ -1,0 +1,21 @@
+schema_version: "1.0.0"
+config_id: baselines-v1
+dataset_manifest: data/processed/esci-us-v1/current.json
+split: validation
+input_templates:
+  - title_v1
+  - enriched_v1
+systems:
+  - input_order
+  - seeded_random
+  - bm25
+  - pretrained_cross_encoder
+random_seed: 42
+bm25:
+  k1: 1.5
+  b: 0.75
+  tokenizer: unicode_words_v1
+cross_encoder:
+  model_config: configs/models/cross-encoder-minilm-l6-v2.yaml
+  batch_size: 32
+  device: auto

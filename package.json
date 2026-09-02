@@ -1,0 +1,11 @@
+{
+  "name": "machine-learning-product-search-ranking-platform",
+  "private": true,
+  "scripts": {
+    "build": "npm --prefix web run build",
+    "lint": "npm --prefix web run lint",
+    "test": "npm --prefix web run test",
+    "test:e2e": "npm --prefix web run test:e2e",
+    "typecheck": "npm --prefix web run typecheck"
+  }
+}

@@ -1,0 +1,223 @@
+{
+  "$id": "https://schemas.example.invalid/search-rank/dataset_manifest.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "SplitCounts": {
+      "additionalProperties": false,
+      "description": "Auditable counts for one query-isolated split.",
+      "properties": {
+        "product_count": {
+          "minimum": 0,
+          "title": "Product Count",
+          "type": "integer"
+        },
+        "query_count": {
+          "minimum": 0,
+          "title": "Query Count",
+          "type": "integer"
+        },
+        "row_count": {
+          "minimum": 0,
+          "title": "Row Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "query_count",
+        "row_count",
+        "product_count"
+      ],
+      "title": "SplitCounts",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Immutable description of a prepared dataset release.",
+  "properties": {
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "dataset_name": {
+      "minLength": 1,
+      "title": "Dataset Name",
+      "type": "string"
+    },
+    "dataset_version": {
+      "minLength": 1,
+      "title": "Dataset Version",
+      "type": "string"
+    },
+    "dropped_rows": {
+      "additionalProperties": {
+        "minimum": 0,
+        "type": "integer"
+      },
+      "propertyNames": {
+        "minLength": 1
+      },
+      "title": "Dropped Rows",
+      "type": "object"
+    },
+    "label_distribution": {
+      "additionalProperties": {
+        "minimum": 0,
+        "type": "integer"
+      },
+      "propertyNames": {
+        "minLength": 1
+      },
+      "title": "Label Distribution",
+      "type": "object"
+    },
+    "license_notice_hash": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "License Notice Hash",
+      "type": "string"
+    },
+    "license_url": {
+      "minLength": 1,
+      "title": "License Url",
+      "type": "string"
+    },
+    "locale": {
+      "minLength": 1,
+      "title": "Locale",
+      "type": "string"
+    },
+    "missingness": {
+      "additionalProperties": {
+        "minimum": 0,
+        "type": "integer"
+      },
+      "propertyNames": {
+        "minLength": 1
+      },
+      "title": "Missingness",
+      "type": "object"
+    },
+    "preprocessing_version": {
+      "minLength": 1,
+      "title": "Preprocessing Version",
+      "type": "string"
+    },
+    "processed_artifact_uri": {
+      "minLength": 1,
+      "title": "Processed Artifact Uri",
+      "type": "string"
+    },
+    "processed_checksum": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Processed Checksum",
+      "type": "string"
+    },
+    "product_count": {
+      "minimum": 0,
+      "title": "Product Count",
+      "type": "integer"
+    },
+    "query_count": {
+      "minimum": 0,
+      "title": "Query Count",
+      "type": "integer"
+    },
+    "raw_checksums": {
+      "additionalProperties": {
+        "pattern": "^sha256:[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "propertyNames": {
+        "minLength": 1
+      },
+      "minProperties": 1,
+      "title": "Raw Checksums",
+      "type": "object"
+    },
+    "row_count": {
+      "minimum": 0,
+      "title": "Row Count",
+      "type": "integer"
+    },
+    "schema_version": {
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "source_revision": {
+      "minLength": 1,
+      "title": "Source Revision",
+      "type": "string"
+    },
+    "source_url": {
+      "minLength": 1,
+      "title": "Source Url",
+      "type": "string"
+    },
+    "split_counts": {
+      "additionalProperties": {
+        "$ref": "#/$defs/SplitCounts"
+      },
+      "propertyNames": {
+        "minLength": 1
+      },
+      "title": "Split Counts",
+      "type": "object"
+    },
+    "split_query_id_hashes": {
+      "additionalProperties": {
+        "pattern": "^sha256:[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "propertyNames": {
+        "minLength": 1
+      },
+      "title": "Split Query Id Hashes",
+      "type": "object"
+    },
+    "split_salt_hash": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Split Salt Hash",
+      "type": "string"
+    },
+    "split_strategy": {
+      "minLength": 1,
+      "title": "Split Strategy",
+      "type": "string"
+    },
+    "task": {
+      "minLength": 1,
+      "title": "Task",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "dataset_name",
+    "dataset_version",
+    "source_url",
+    "source_revision",
+    "license_url",
+    "license_notice_hash",
+    "task",
+    "locale",
+    "raw_checksums",
+    "preprocessing_version",
+    "split_strategy",
+    "split_salt_hash",
+    "split_counts",
+    "split_query_id_hashes",
+    "row_count",
+    "query_count",
+    "product_count",
+    "label_distribution",
+    "missingness",
+    "dropped_rows",
+    "processed_artifact_uri",
+    "processed_checksum",
+    "created_at"
+  ],
+  "title": "DatasetManifest",
+  "type": "object"
+}
