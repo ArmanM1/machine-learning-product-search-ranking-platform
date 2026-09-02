@@ -41,7 +41,19 @@ jobs:
         shell: bash
         run: |
           test "${ALLOW_HELDOUT_EVAL}" = "0"
-          ! grep -R --line-number --fixed-strings 'ALLOW_HELDOUT_EVAL=1' .github/workflows/pull-request.yml
+          python - <<'PY'
+          from pathlib import Path
+
+          forbidden = (
+              "ALLOW_HELDOUT_EVAL=" + str(1),
+              "ALLOW_HELDOUT_EVAL:" + ' "' + str(1) + '"',
+          )
+          path = Path(".github/workflows/pull-request.yml")
+          workflow = path.read_text(encoding="utf-8")
+          violations = [f"{path}: {needle}" for needle in forbidden if needle in workflow]
+          if violations:
+              raise SystemExit("Held-out enablement is forbidden in CI: " + ", ".join(violations))
+          PY
 
   web:
     name: Web quality and tests

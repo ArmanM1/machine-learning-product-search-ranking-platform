@@ -9,7 +9,7 @@ RUN npm ci --ignore-scripts --no-audit --no-fund
 COPY web ./
 RUN npm run build
 
-FROM public.ecr.aws/lambda/python:3.11@sha256:2ea867b833fa01eb695da424a1a91d78a586b1794822d8c61807dceb097badde
+FROM public.ecr.aws/lambda/python:3.12@sha256:c852b0b4649ab25e5020a85e4073100d9c2c1da90e0ffb86ea2e5c7ae07b7478
 
 ARG UV_VERSION=0.12.9
 ARG APP_UID=10001
@@ -23,7 +23,7 @@ ENV PYTHONUNBUFFERED=1 \
     UV_LINK_MODE=copy \
     UV_PROJECT_ENVIRONMENT=/opt/search-rank-venv \
     PATH="/opt/search-rank-venv/bin:${PATH}" \
-    PYTHONPATH="/opt/search-rank-venv/lib/python3.11/site-packages:${LAMBDA_TASK_ROOT}" \
+    PYTHONPATH="/opt/search-rank-venv/lib/python3.12/site-packages:${LAMBDA_TASK_ROOT}" \
     HF_HOME=/tmp/huggingface \
     TRANSFORMERS_CACHE=/tmp/huggingface
 
@@ -34,9 +34,10 @@ COPY src ./src
 COPY --from=web-build /web/dist ./web/dist
 COPY ${MODEL_ARTIFACT_DIR} ./release
 
-RUN python -m pip install --no-cache-dir "uv==${UV_VERSION}" \
+RUN system_python="$(command -v python)" \
+    && "${system_python}" -m pip install --no-cache-dir "uv==${UV_VERSION}" \
     && uv sync --frozen --no-dev --no-editable \
-    && python -m pip uninstall --yes uv \
+    && "${system_python}" -m pip uninstall --yes uv \
     && find /opt/search-rank-venv -type d -name __pycache__ -prune -exec rm -rf '{}' + \
     && chmod -R a=rX "${LAMBDA_TASK_ROOT}" /opt/search-rank-venv
 
