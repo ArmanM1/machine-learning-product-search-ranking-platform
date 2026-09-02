@@ -13,7 +13,8 @@
 - [ ] Applicable-credit balance and expiration recorded privately.
 - [x] Owner MFA decision recorded. The owner declined it on 2026-09-02 as an accepted exception; the PRD control remains unmet, but the exception is not itself an operational apply blocker.
 - [ ] Temporary non-root access verified.
-- [ ] Intended repository `ArmanM1/machine-learning-product-search-ranking-platform` exists and its exact owner/repository is inserted into OIDC trust.
+- [x] Public repository `ArmanM1/machine-learning-product-search-ranking-platform` exists.
+- [ ] Its exact owner/repository and protected environments are inserted into and verified against OIDC trust.
 - [ ] Existing GitHub OIDC provider state inspected.
 - [ ] Budget yes/no and notification-email confirmation resolved.
 - [ ] Owner accepts credits-only AWS risk despite the inability to hard-guarantee USD 0, or elects to keep the project undeployed.

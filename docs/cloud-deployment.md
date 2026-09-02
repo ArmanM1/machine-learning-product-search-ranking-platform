@@ -12,7 +12,7 @@ Do not run an apply until all fields below are recorded privately and the bounde
 - `us-east-1` access for S3, ECR, IAM, Lambda, API Gateway, CloudFront, CloudWatch, Budgets, and SageMaker.
 - Current SageMaker quota for one allowed instance.
 - Current regional pricing and the applicable-credit balance/expiration.
-- Exact intended GitHub repository: `ArmanM1/machine-learning-product-search-ranking-platform`; repository creation and OIDC binding remain pending.
+- Exact public GitHub repository: `ArmanM1/machine-learning-product-search-ranking-platform`; OIDC binding remains pending.
 - Budget thresholds and notification email approval/confirmation, or an explicit decision to leave budgets disabled.
 - Separate authorization for a job, held-out access, and public deployment when each boundary is reached.
 
@@ -61,7 +61,7 @@ Copy-Item infra/terraform/environments/bootstrap/terraform.tfvars.example infra/
 Copy-Item infra/terraform/environments/prod/terraform.tfvars.example infra/terraform/environments/prod/terraform.tfvars
 ```
 
-The authenticated GitHub CLI identified the intended repository owner as `ArmanM1`; repository creation and application of the exact OIDC trust remain pending. Inspect whether the account already has `token.actions.githubusercontent.com`; duplicate creation will fail. Keep `enable_budgets=false` until the email decision is complete and `enable_serving=false` until public-deployment approval and an immutable serving digest exist.
+The authenticated GitHub CLI identified the repository owner as `ArmanM1`, and the public repository now exists. Application and verification of the exact OIDC trust remain pending. Inspect whether the account already has `token.actions.githubusercontent.com`; duplicate creation will fail. Keep `enable_budgets=false` until the email decision is complete and `enable_serving=false` until public-deployment approval and an immutable serving digest exist.
 
 Format and validate without an AWS backend:
 
@@ -171,7 +171,7 @@ The baseline bundle carries typed `validation_only` public evidence with a zero 
 
 ## Current unresolved prerequisites and owner inputs
 
-- Creation of `ArmanM1/machine-learning-product-search-ranking-platform` and verification of the exact repository/environment OIDC subjects.
+- Application and verification of the exact `ArmanM1/machine-learning-product-search-ranking-platform` repository/environment OIDC subjects.
 - Root/account-owner MFA remains declined as an accepted exception; the default PRD security gate therefore remains unmet, but this exception is not itself an operational apply blocker.
 - Verified temporary non-root AWS CLI/STS access.
 - Approved budget choice (`yes` or `no`) and, if yes, direct AWS email confirmation.

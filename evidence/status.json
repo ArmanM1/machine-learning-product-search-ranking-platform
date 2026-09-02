@@ -2,6 +2,7 @@
   "schema_version": "1.0.0",
   "as_of": "2026-09-02",
   "project_status": "implementation_in_progress",
+  "public_repository_url": "https://github.com/ArmanM1/machine-learning-product-search-ranking-platform",
   "full_prd_completed": false,
   "milestone_0_accepted": false,
   "accepted_security_deviations": [
@@ -33,7 +34,7 @@
   "aws_apply_authorized": false,
   "aws_apply_blockers": [
     "temporary non-root AWS CLI identity is not verified",
-    "the intended public GitHub repository does not yet exist and its OIDC trust has not been applied or verified",
+    "the public GitHub repository exists, but its AWS OIDC trust has not been applied or verified",
     "budget approval and notification-email decision are unresolved",
     "the owner's strict USD 0 out-of-pocket target cannot be guaranteed from promotional credits because applicability, tax, and billing lag remain outside the project controls",
     "no exact Terraform bootstrap plan has been approved"

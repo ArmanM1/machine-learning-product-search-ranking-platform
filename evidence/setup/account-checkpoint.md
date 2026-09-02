@@ -5,7 +5,7 @@ Status: partial owner report; do not add secrets or full cloud identifiers.
 - Owner reported AWS ready in Chrome: yes, 2026-09-02.
 - Selected region: `us-east-1`.
 - Maximum out-of-pocket acceptance: no; effective maximum is USD 0.
-- Repository requested: `ArmanM1/machine-learning-product-search-ranking-platform`, public. The owner portion was confirmed from the authenticated GitHub CLI; the repository did not yet exist at this checkpoint.
+- Repository created: `ArmanM1/machine-learning-product-search-ranking-platform`, public. The owner portion was confirmed from the authenticated GitHub CLI and the initial commit was pushed on 2026-09-02.
 - Demo requested: public, generated CloudFront domain.
 - License requested: MIT.
 - Approved PRD interpretations: yes.
@@ -27,7 +27,7 @@ Explicit security deviation:
 
 Still unresolved:
 
-- Creation of the intended public repository and application/verification of its exact repository-bound OIDC trust.
+- Application and verification of the public repository's exact repository-bound OIDC trust.
 - Temporary non-root CLI path verification; AWS CLI currently has no profile and STS is not authenticated.
 - Redacted `aws sts get-caller-identity` success evidence.
 - SageMaker CPU/GPU quota and service-access status.
