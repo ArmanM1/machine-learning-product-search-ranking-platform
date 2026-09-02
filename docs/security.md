@@ -18,6 +18,8 @@ Status: design and policy configuration. The owner-approved MFA exception preven
 | Stolen long-lived cloud key | No CI access keys; GitHub exchanges OIDC tokens for short-lived role sessions |
 | OIDC use from a fork or unreviewed branch | Trust `sub` must exactly match this repository and a named protected GitHub environment; audience is `sts.amazonaws.com` |
 | Root-account misuse | The owner declined MFA as an accepted exception, so the PRD control is not satisfied. Zero root keys, no routine root use, temporary non-root access, and repository-scoped OIDC are the required compensating controls; the temporary path and OIDC binding remain pending. |
+
+S3 buckets enforce TLS, public-access blocking, and AES-256 SSE-S3. The repository-scoped Trivy exception for `AVD-AWS-0132` is intentional: customer-managed KMS keys add recurring and request costs that conflict with the strict USD 0 target, while the project stores public source data and non-secret model artifacts. Revisit this exception before any sensitive data enters scope.
 | Train/test leakage | Query-level split assertions, train-only miner, a training role with no `test.parquet` permission, manual held-out flag, and versioned access counter |
 | Artifact substitution | Immutable paths/tags, SHA-256 manifests, S3 checksum verification, serving-image digest |
 | Public bucket exposure | Account/bucket public-access blocks and CloudFront origin access control |

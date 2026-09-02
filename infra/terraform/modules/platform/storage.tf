@@ -1,3 +1,5 @@
+# SSE-S3 is deliberate: a customer-managed KMS key adds recurring/request cost to the strict-USD-0 design.
+#trivy:ignore:AVD-AWS-0132
 resource "aws_s3_bucket" "artifacts" {
   bucket        = local.artifact_bucket_name
   force_destroy = false
@@ -142,6 +144,8 @@ resource "aws_s3_bucket_lifecycle_configuration" "artifacts" {
   }
 }
 
+# SSE-S3 is deliberate: a customer-managed KMS key adds recurring/request cost to the strict-USD-0 design.
+#trivy:ignore:AVD-AWS-0132
 resource "aws_s3_bucket" "site" {
   bucket        = local.site_bucket_name
   force_destroy = false
