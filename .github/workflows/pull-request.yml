@@ -98,7 +98,7 @@ jobs:
       - name: Build without pushing
         run: docker build --file "Dockerfile.${{ matrix.image }}" --tag "local/${{ matrix.image }}:${GITHUB_SHA}" .
       - name: Scan image
-        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: local/${{ matrix.image }}:${{ github.sha }}
           format: table
@@ -128,7 +128,7 @@ jobs:
         working-directory: web
         run: npm audit --audit-level=high
       - name: Terraform configuration scan
-        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: config
           scan-ref: infra/terraform
