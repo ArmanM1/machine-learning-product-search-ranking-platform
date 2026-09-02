@@ -9,7 +9,7 @@ RUN npm ci --ignore-scripts --no-audit --no-fund
 COPY web ./
 RUN npm run build
 
-FROM public.ecr.aws/lambda/python:3.12@sha256:c852b0b4649ab25e5020a85e4073100d9c2c1da90e0ffb86ea2e5c7ae07b7478
+FROM python:3.11.16-slim-bookworm@sha256:b1add8a6f2aca6bcfcf0b9c9b522352f7ce0d62a3d556a2f2f32511aa0cca250
 
 ARG UV_VERSION=0.12.9
 ARG APP_UID=10001
@@ -22,8 +22,9 @@ ENV PYTHONUNBUFFERED=1 \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PROJECT_ENVIRONMENT=/opt/search-rank-venv \
+    LAMBDA_TASK_ROOT=/var/task \
     PATH="/opt/search-rank-venv/bin:${PATH}" \
-    PYTHONPATH="/opt/search-rank-venv/lib/python3.12/site-packages:${LAMBDA_TASK_ROOT}" \
+    PYTHONPATH="/opt/search-rank-venv/lib/python3.11/site-packages:${LAMBDA_TASK_ROOT}" \
     HF_HOME=/tmp/huggingface \
     TRANSFORMERS_CACHE=/tmp/huggingface
 
@@ -34,11 +35,9 @@ COPY src ./src
 COPY --from=web-build /web/dist ./web/dist
 COPY ${MODEL_ARTIFACT_DIR} ./release
 
-RUN dnf upgrade -y openssl-fips-provider-latest openssl-snapsafe-libs \
-    && dnf clean all \
-    && system_python="$(command -v python)" \
+RUN system_python="$(command -v python)" \
     && "${system_python}" -m pip install --no-cache-dir "uv==${UV_VERSION}" \
-    && uv sync --frozen --no-dev --no-editable \
+    && uv sync --frozen --no-dev --no-editable --extra serve \
     && "${system_python}" -m pip uninstall --yes uv setuptools wheel \
     && chmod -R a=rX "${LAMBDA_TASK_ROOT}" /opt/search-rank-venv
 
@@ -46,4 +45,5 @@ RUN dnf upgrade -y openssl-fips-provider-latest openssl-snapsafe-libs \
 # local execution and image scanners verify the same non-root boundary.
 USER ${APP_UID}:${APP_GID}
 
+ENTRYPOINT ["/opt/search-rank-venv/bin/python", "-m", "awslambdaric"]
 CMD ["search_rank.serving.app.handler"]

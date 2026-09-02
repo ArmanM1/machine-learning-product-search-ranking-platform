@@ -42,6 +42,7 @@ dev = [
   "types-pyyaml>=6.0,<7",
 ]
 cloud = ["sagemaker>=2.250,<3"]
+serve = ["awslambdaric>=4.0.2,<5"]
 
 [project.scripts]
 search-rank = "search_rank.cli:app"

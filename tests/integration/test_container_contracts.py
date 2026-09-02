@@ -22,6 +22,7 @@ def test_container_contract_is_digest_pinned_and_non_root(filename: str) -> None
     assert "USER ${APP_UID}:${APP_GID}" in text
     assert "USER root" not in text
     if filename == "Dockerfile.serve":
+        assert 'ENTRYPOINT ["/opt/search-rank-venv/bin/python", "-m", "awslambdaric"]' in text
         assert 'CMD ["search_rank.serving.app.handler"]' in text
     else:
         assert "ENTRYPOINT" in text
