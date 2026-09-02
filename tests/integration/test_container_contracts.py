@@ -18,9 +18,9 @@ def test_container_contract_is_digest_pinned_and_non_root(filename: str) -> None
     from_lines = [line for line in text.splitlines() if line.startswith("FROM ")]
     assert from_lines
     assert all("@sha256:" in line for line in from_lines)
+    assert all("latest" not in line.casefold() for line in from_lines)
     assert "USER ${APP_UID}:${APP_GID}" in text
     assert "USER root" not in text
-    assert "latest" not in text.casefold()
     if filename == "Dockerfile.serve":
         assert 'CMD ["search_rank.serving.app.handler"]' in text
     else:
