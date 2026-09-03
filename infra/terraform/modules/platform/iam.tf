@@ -457,10 +457,11 @@ data "aws_iam_policy_document" "github_financial_ledger" {
 }
 
 locals {
-  # Production receives this document through github_production so the role has one
-  # inline policy and its complete aggregate size is enforced by one precondition.
+  # Production and aws-infrastructure receive this document through their consolidated
+  # policies so each quota-sensitive role has one aggregate-size-checked inline policy.
   github_financial_ledger_roles = {
     for environment, role in aws_iam_role.github_workflow : environment => role.id
+    if environment != "aws-infrastructure"
   }
 }
 
@@ -1137,8 +1138,9 @@ resource "aws_iam_role_policy" "github_heldout_release" {
 }
 
 data "aws_iam_policy_document" "github_terraform" {
+  source_policy_documents = [data.aws_iam_policy_document.github_financial_ledger.minified_json]
+
   statement {
-    sid    = "ListOnlyProductionTerraformState"
     effect = "Allow"
     actions = [
       "s3:GetBucketLocation",
@@ -1158,21 +1160,18 @@ data "aws_iam_policy_document" "github_terraform" {
   }
 
   statement {
-    sid       = "ReadWriteOnlyProductionTerraformState"
     effect    = "Allow"
     actions   = ["s3:GetObject", "s3:PutObject"]
     resources = ["arn:${local.partition}:s3:::${local.state_bucket_name}/${var.project_name}/prod/terraform.tfstate"]
   }
 
   statement {
-    sid       = "ManageOnlyProductionTerraformLock"
     effect    = "Allow"
     actions   = ["s3:DeleteObject", "s3:GetObject", "s3:PutObject"]
     resources = ["arn:${local.partition}:s3:::${local.state_bucket_name}/${var.project_name}/prod/terraform.tfstate.tflock"]
   }
 
   statement {
-    sid    = "ReadProjectIdentityConfiguration"
     effect = "Allow"
     actions = [
       "iam:GetOpenIDConnectProvider",
@@ -1197,7 +1196,6 @@ data "aws_iam_policy_document" "github_terraform" {
   }
 
   statement {
-    sid    = "ManageProjectBuckets"
     effect = "Allow"
     actions = [
       "s3:CreateBucket",
@@ -1230,7 +1228,6 @@ data "aws_iam_policy_document" "github_terraform" {
   }
 
   statement {
-    sid    = "ManageProjectRepositoryConfiguration"
     effect = "Allow"
     actions = [
       "ecr:CreateRepository",
@@ -1250,14 +1247,12 @@ data "aws_iam_policy_document" "github_terraform" {
   }
 
   statement {
-    sid       = "ReadApiGatewayInventory"
     effect    = "Allow"
     actions   = ["apigateway:GET"]
     resources = ["arn:${local.partition}:apigateway:${var.aws_region}::/apis*"]
   }
 
   statement {
-    sid       = "CreateTaggedProjectApis"
     effect    = "Allow"
     actions   = ["apigateway:POST"]
     resources = ["arn:${local.partition}:apigateway:${var.aws_region}::/apis"]
@@ -1276,7 +1271,6 @@ data "aws_iam_policy_document" "github_terraform" {
   }
 
   statement {
-    sid       = "ReconcileTaggedProjectApis"
     effect    = "Allow"
     actions   = ["apigateway:PATCH", "apigateway:POST", "apigateway:PUT"]
     resources = ["arn:${local.partition}:apigateway:${var.aws_region}::/apis*"]
@@ -1295,7 +1289,6 @@ data "aws_iam_policy_document" "github_terraform" {
   }
 
   statement {
-    sid    = "ReadCloudFrontInventory"
     effect = "Allow"
     actions = [
       "cloudfront:DescribeFunction",
@@ -1312,14 +1305,12 @@ data "aws_iam_policy_document" "github_terraform" {
   }
 
   statement {
-    sid       = "CreateUntaggedCloudFrontPrimitives"
     effect    = "Allow"
     actions   = ["cloudfront:CreateOriginAccessControl", "cloudfront:CreateResponseHeadersPolicy"]
     resources = ["*"]
   }
 
   statement {
-    sid       = "CreateTaggedCloudFrontResources"
     effect    = "Allow"
     actions   = ["cloudfront:CreateDistribution", "cloudfront:CreateFunction", "cloudfront:TagResource"]
     resources = ["*"]
@@ -1338,7 +1329,6 @@ data "aws_iam_policy_document" "github_terraform" {
   }
 
   statement {
-    sid    = "ReconcileTaggedCloudFrontResources"
     effect = "Allow"
     actions = [
       "cloudfront:CreateInvalidation",
@@ -1367,7 +1357,6 @@ data "aws_iam_policy_document" "github_terraform" {
   }
 
   statement {
-    sid    = "ManageNamedLambdaFunction"
     effect = "Allow"
     actions = [
       "lambda:AddPermission",
@@ -1393,7 +1382,6 @@ data "aws_iam_policy_document" "github_terraform" {
   }
 
   statement {
-    sid     = "PassOnlyProjectWorkloadRolesDuringReconciliation"
     effect  = "Allow"
     actions = ["iam:PassRole"]
     resources = [
@@ -1414,14 +1402,12 @@ data "aws_iam_policy_document" "github_terraform" {
   }
 
   statement {
-    sid       = "ReadGlobalObservabilityInventory"
     effect    = "Allow"
     actions   = ["cloudwatch:DescribeAlarms", "logs:DescribeLogGroups"]
     resources = ["*"]
   }
 
   statement {
-    sid    = "ManageProjectAlarms"
     effect = "Allow"
     actions = [
       "cloudwatch:ListTagsForResource",
@@ -1433,7 +1419,6 @@ data "aws_iam_policy_document" "github_terraform" {
   }
 
   statement {
-    sid    = "ManageProjectEvents"
     effect = "Allow"
     actions = [
       "events:DescribeRule",
@@ -1448,7 +1433,6 @@ data "aws_iam_policy_document" "github_terraform" {
   }
 
   statement {
-    sid    = "ManageProjectLogs"
     effect = "Allow"
     actions = [
       "logs:CreateLogGroup",
@@ -1463,7 +1447,6 @@ data "aws_iam_policy_document" "github_terraform" {
   }
 
   statement {
-    sid    = "ManageProjectNotification"
     effect = "Allow"
     actions = [
       "sns:CreateTopic",
@@ -1484,7 +1467,6 @@ data "aws_iam_policy_document" "github_terraform" {
   }
 
   statement {
-    sid    = "ManageApprovedBudgets"
     effect = "Allow"
     actions = [
       "budgets:CreateBudget",
@@ -1509,8 +1491,8 @@ resource "aws_iam_role_policy" "github_terraform" {
 
   lifecycle {
     precondition {
-      condition     = length(data.aws_iam_policy_document.github_terraform.minified_json) <= 10240
-      error_message = "Infrastructure role inline policy exceeds the AWS per-role character quota."
+      condition     = length(data.aws_iam_policy_document.github_terraform.minified_json) <= 10000
+      error_message = "Infrastructure role aggregate inline policy exceeds the 10,000-character engineering budget below AWS's 10,240-character role quota."
     }
   }
 }
