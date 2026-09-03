@@ -385,13 +385,17 @@ jobs:
             -var="serving_git_sha=${serving_git_sha}" \
             -var="serving_deployment_nonce=${serving_deployment_nonce}"
           terraform show -json reviewed.tfplan > reviewed-plan.private.json
-          python - <<'PY'
+          PYTHONPATH=../../../.. python - <<'PY'
           import json
           import os
           from pathlib import Path
 
+          from scripts.canonicalize_terraform_plan import normalize_volatile_caller_identity
+
           source = Path("reviewed-plan.private.json")
-          payload = json.loads(source.read_text(encoding="utf-8"))
+          payload = normalize_volatile_caller_identity(
+              json.loads(source.read_text(encoding="utf-8"))
+          )
           version = json.loads(Path("terraform-version.private.json").read_text(encoding="utf-8"))
           destructive = []
           protected_identity_changes = []
