@@ -7,7 +7,9 @@
 
 `dataset_manifest_hash` means the semantic `DatasetManifest.processed_checksum` in canonical `sha256:<64 lowercase hex>` form. A byte-level SHA-256 of a transported manifest, model archive, config, report, or bundle remains a separate checksum and must not be substituted for that dataset identity.
 
-The final held-out result is produced by two distinct SageMaker Processing jobs and operating-system processes. Each job reserves and records its own consecutive test-access count before SageMaker receives the test prefix. A local post-job binder checksum-verifies both report/provenance pairs, requires exact configuration, checkpoint, dataset, baseline, image, Git, region, and hardware identity, enforces the 0.002 reproducibility tolerance, and recomputes the gate without reopening test data.
+`split_manifest_hash` means the canonical checksum of `query-split-manifest-v1`, not the bytes of `manifest.json`. It covers the source identity and raw checksums, preprocessing and split strategy/salt, per-split query-ID hashes and counts, and total row/query counts. It is required independently on the dataset manifest, both public run variants, internal evaluation provenance, and release manifest. Preparation and release workflows derive it from the validated dataset manifest; it is never a manual dispatch input.
+
+The final held-out result is produced by two distinct SageMaker Processing jobs and operating-system processes. Each job reserves and records its own consecutive test-access count before SageMaker receives the test prefix. A local post-job binder checksum-verifies both report/provenance pairs, requires exact configuration, checkpoint, semantic dataset, split manifest, baseline, image, Git, region, and hardware identity, enforces the 0.002 reproducibility tolerance, and recomputes the gate without reopening test data.
 
 Before held-out access, a one-time protected workflow may publish a baseline-only release from the completed validation baseline evidence. That workflow has no permission to read `data/processed/*` or submit SageMaker jobs. Its typed `public-evidence.json` is explicitly `validation_only`, records test-access count zero, and prohibits held-out claims. A candidate release uses the `verified` evidence mode and can be created only by the guarded two-job path.
 
@@ -16,6 +18,7 @@ Every serving bundle contains `release-manifest.json`, `curated-queries.json`, `
 ## Consequences
 
 - Host-specific manifest timestamps and paths cannot change dataset identity.
+- Clean evaluations with different split-manifest identities cannot bind, even if another dataset identifier were copied unchanged.
 - A model archive transport digest and its uncompressed checkpoint-directory digest are both required and intentionally differ.
 - A second model load in the first evaluator process does not count as an independent clean run.
 - The baseline can be deployed and verified as a rollback target without inventing test metrics.

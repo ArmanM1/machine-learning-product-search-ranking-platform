@@ -38,6 +38,23 @@ output "github_workflow_role_arns" {
   )
 }
 
+output "github_baseline_role_arn" {
+  value = aws_iam_role.github_workflow["aws-baseline"].arn
+}
+
+output "github_trial_selection_role_arn" {
+  value = aws_iam_role.github_workflow["aws-trial-selection"].arn
+}
+
+output "github_benchmark_role_arn" {
+  value = aws_iam_role.github_workflow["production-benchmark"].arn
+}
+
+output "project_permissions_boundary_arn" {
+  description = "Externally managed maximum-permissions boundary required on every project role."
+  value       = local.project_permissions_boundary_arn
+}
+
 output "lambda_function_name" {
   value = try(aws_lambda_function.api[0].function_name, null)
 }
@@ -58,8 +75,29 @@ output "cloudfront_url" {
   value = try("https://${aws_cloudfront_distribution.site[0].domain_name}", null)
 }
 
+output "budget_kill_switch" {
+  description = "Backward-compatible evidence for the budget-independent public expiry and optional AWS Budget trigger."
+  value = {
+    status = (
+      local.budget_kill_switch_enabled ? "armed" : "disabled"
+    )
+    threshold_usd              = local.budget_kill_switch_threshold_usd
+    trigger_types              = ["ACTUAL", "FORECASTED"]
+    budget_trigger_enabled     = local.budget_kill_switch_topic_enabled
+    automatic_expiry_hours     = local.public_serving_expiry_hours
+    expiry_rule_arn            = try(aws_cloudwatch_event_rule.public_serving_expiry[0].arn, null)
+    topic_arn                  = try(aws_sns_topic.budget_kill_switch[0].arn, null)
+    handler_function_name      = try(aws_lambda_function.budget_kill_switch[0].function_name, null)
+    handler_execution_role_arn = try(aws_iam_role.budget_kill_switch[0].arn, null)
+    target_function_name       = try(aws_lambda_function.api[0].function_name, null)
+    target_distribution_id     = try(aws_cloudfront_distribution.site[0].id, null)
+    no_idle_compute            = true
+    automatic_restore          = false
+  }
+}
+
 output "cost_guard" {
-  description = "Configuration values consumed by manual workflows; AWS Budgets are alerts, not hard stops."
+  description = "Manual cost bounds plus the budget-independent production expiry and optional budget trigger."
   value = {
     campaign_budget_usd          = var.campaign_budget_usd
     maximum_out_of_pocket_usd    = var.maximum_out_of_pocket_usd
@@ -68,5 +106,8 @@ output "cost_guard" {
     provisioned_concurrency      = 0
     lambda_reserved_concurrency  = var.lambda_reserved_concurrency
     sagemaker_realtime_endpoints = 0
+    budget_kill_switch_armed     = local.budget_kill_switch_enabled
+    budget_kill_switch_usd       = local.budget_kill_switch_threshold_usd
+    public_serving_expiry_hours  = local.public_serving_expiry_hours
   }
 }

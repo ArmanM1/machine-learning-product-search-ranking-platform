@@ -50,25 +50,48 @@ variable "github_repository" {
   }
 }
 
+variable "github_repository_owner_id" {
+  description = "Immutable decimal GitHub database ID for the repository owner."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[1-9][0-9]{0,19}$", var.github_repository_owner_id))
+    error_message = "github_repository_owner_id must be a positive decimal GitHub database ID with at most 20 digits."
+  }
+}
+
+variable "github_repository_id" {
+  description = "Immutable decimal GitHub database ID for the repository."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[1-9][0-9]{0,19}$", var.github_repository_id))
+    error_message = "github_repository_id must be a positive decimal GitHub database ID with at most 20 digits."
+  }
+}
+
 variable "github_environments" {
   description = "Protected GitHub environments allowed to request AWS credentials."
   type        = set(string)
   default = [
+    "aws-baseline",
     "aws-data",
     "aws-images",
     "aws-infrastructure",
     "aws-training",
+    "aws-trial-selection",
     "baseline-release",
     "heldout-release",
     "production",
+    "production-benchmark",
   ]
 
   validation {
     condition = alltrue([
-      for required in ["aws-data", "aws-images", "aws-infrastructure", "aws-training", "baseline-release", "heldout-release", "production"] :
+      for required in ["aws-baseline", "aws-data", "aws-images", "aws-infrastructure", "aws-training", "aws-trial-selection", "baseline-release", "heldout-release", "production", "production-benchmark"] :
       contains(var.github_environments, required)
-    ]) && alltrue([for value in var.github_environments : can(regex("^[A-Za-z0-9_.-]+$", value))])
-    error_message = "All seven protected workflow environment names are required."
+    ]) && length(var.github_environments) == 10 && alltrue([for value in var.github_environments : can(regex("^[A-Za-z0-9_.-]+$", value))])
+    error_message = "The exact ten workflow-specific protected environment names are required."
   }
 }
 
@@ -140,9 +163,20 @@ variable "required_credit_reserve_usd" {
 }
 
 variable "enable_serving" {
-  description = "Create public serving resources after an immutable image digest and separate public-deployment approval exist."
+  description = "Create the private Lambda candidate and IAM-authenticated candidate API after an immutable image digest exists."
   type        = bool
   default     = false
+}
+
+variable "enable_public_serving" {
+  description = "Expose the production API and CloudFront site only after the private candidate gates pass. Production public serving is always protected by an independent 24-hour expiry; AWS Budgets are optional defense in depth."
+  type        = bool
+  default     = false
+
+  validation {
+    condition     = !var.enable_public_serving || var.enable_serving
+    error_message = "enable_public_serving requires enable_serving=true."
+  }
 }
 
 variable "serving_image_uri" {
@@ -153,6 +187,28 @@ variable "serving_image_uri" {
   validation {
     condition     = !var.enable_serving || can(regex("^[0-9]{12}\\.dkr\\.ecr\\.us-east-1\\.amazonaws\\.com/[a-z0-9/_-]+@sha256:[0-9a-f]{64}$", var.serving_image_uri))
     error_message = "enable_serving requires an immutable us-east-1 ECR URI with an @sha256 digest."
+  }
+}
+
+variable "serving_git_sha" {
+  description = "Exact lowercase 40-character Git commit served by the immutable Lambda image."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = !var.enable_serving || can(regex("^[0-9a-f]{40}$", var.serving_git_sha))
+    error_message = "enable_serving requires the exact lowercase 40-character serving Git SHA."
+  }
+}
+
+variable "serving_deployment_nonce" {
+  description = "Unique GitHub workflow attempt and release identity used to publish a fresh immutable Lambda version."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = !var.enable_serving || can(regex("^[1-9][0-9]*-[1-9][0-9]*-[A-Za-z0-9][A-Za-z0-9._-]{2,62}$", var.serving_deployment_nonce))
+    error_message = "enable_serving requires a deployment nonce formatted as <run-id>-<attempt>-<release-id>."
   }
 }
 

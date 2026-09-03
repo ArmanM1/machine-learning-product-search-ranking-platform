@@ -1,0 +1,95 @@
+{
+  "$id": "https://schemas.example.invalid/search-rank/benchmark_lambda_configuration.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "alias": {
+      "const": "production",
+      "title": "Alias",
+      "type": "string"
+    },
+    "architecture": {
+      "const": "x86_64",
+      "title": "Architecture",
+      "type": "string"
+    },
+    "benchmark_run_id": {
+      "pattern": "^github-[0-9]+-attempt-[1-9][0-9]*$",
+      "title": "Benchmark Run Id",
+      "type": "string"
+    },
+    "checked_at": {
+      "format": "date-time",
+      "title": "Checked At",
+      "type": "string"
+    },
+    "function_name": {
+      "minLength": 1,
+      "title": "Function Name",
+      "type": "string"
+    },
+    "function_version": {
+      "pattern": "^[1-9][0-9]*$",
+      "title": "Function Version",
+      "type": "string"
+    },
+    "memory_mb": {
+      "const": 4096,
+      "title": "Memory Mb",
+      "type": "integer"
+    },
+    "model_id": {
+      "minLength": 1,
+      "title": "Model Id",
+      "type": "string"
+    },
+    "provisioned_concurrency": {
+      "const": 0,
+      "title": "Provisioned Concurrency",
+      "type": "integer"
+    },
+    "provisioned_concurrency_verification": {
+      "const": "live GetProvisionedConcurrencyConfig returned a not-found response",
+      "title": "Provisioned Concurrency Verification",
+      "type": "string"
+    },
+    "region": {
+      "const": "us-east-1",
+      "title": "Region",
+      "type": "string"
+    },
+    "release_id": {
+      "minLength": 1,
+      "title": "Release Id",
+      "type": "string"
+    },
+    "reserved_concurrency": {
+      "const": 2,
+      "title": "Reserved Concurrency",
+      "type": "integer"
+    },
+    "schema_version": {
+      "const": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "checked_at",
+    "benchmark_run_id",
+    "release_id",
+    "model_id",
+    "function_name",
+    "alias",
+    "function_version",
+    "memory_mb",
+    "architecture",
+    "reserved_concurrency",
+    "provisioned_concurrency",
+    "provisioned_concurrency_verification",
+    "region"
+  ],
+  "title": "BenchmarkLambdaConfiguration",
+  "type": "object"
+}

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+import re
 import subprocess
 import time
 import uuid
@@ -16,16 +17,37 @@ from typing import Any
 from search_rank.artifacts.checksums import sha256_file
 from search_rank.schemas.public import redact_for_public
 
+_FULL_GIT_SHA = re.compile(r"^[0-9a-f]{40}$")
 
-def _git(*args: str) -> str:
-    result = subprocess.run(
-        ["git", *args],
-        check=False,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
-    return result.stdout.strip() if result.returncode == 0 else "unavailable"
+
+def _git(*args: str) -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+    except (FileNotFoundError, OSError):
+        return None
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def _source_identity() -> tuple[str, bool]:
+    """Prefer the workflow-bound image commit when a container has no Git metadata."""
+
+    injected_sha = os.environ.get("SEARCH_RANK_GIT_SHA")
+    if injected_sha is not None:
+        if not _FULL_GIT_SHA.fullmatch(injected_sha):
+            raise ValueError("SEARCH_RANK_GIT_SHA must be a full lowercase Git commit")
+        return injected_sha, False
+
+    git_sha = _git("rev-parse", "HEAD")
+    status = _git("status", "--porcelain")
+    if git_sha is None or not _FULL_GIT_SHA.fullmatch(git_sha) or status is None:
+        return "unavailable", True
+    return git_sha, bool(status)
 
 
 def new_run_id(command: str) -> str:
@@ -71,6 +93,7 @@ class CommandRun:
         failure: str | None = None,
     ) -> Path:
         ended = datetime.now(UTC)
+        git_sha, repository_dirty = _source_identity()
         payload = {
             "schema_version": "1.0.0",
             "run_id": self.run_id,
@@ -80,8 +103,8 @@ class CommandRun:
             "started_at": self.started_at.isoformat(),
             "ended_at": ended.isoformat(),
             "duration_seconds": time.perf_counter() - self.started_clock,
-            "git_sha": _git("rev-parse", "HEAD"),
-            "repository_dirty": bool(_git("status", "--porcelain")),
+            "git_sha": git_sha,
+            "repository_dirty": repository_dirty,
             "runtime": {"python": platform.python_version(), "platform": platform.platform()},
             "artifact_paths": self.artifacts,
             "artifact_hashes": self.checksums,

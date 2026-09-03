@@ -109,6 +109,28 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build without pushing
         run: docker build --file "Dockerfile.${{ matrix.image }}" --tag "local/${{ matrix.image }}:${GITHUB_SHA}" .
+      - name: Run container contract probe
+        shell: bash
+        env:
+          IMAGE_KIND: ${{ matrix.image }}
+        run: |
+          image="local/${IMAGE_KIND}:${GITHUB_SHA}"
+          case "${IMAGE_KIND}" in
+            train)
+              docker run --rm --entrypoint python "${image}" -m search_rank.cli --help
+              ;;
+            eval)
+              docker run --rm "${image}" --help
+              ;;
+            serve)
+              docker run --rm --entrypoint python "${image}" -c \
+                'import os, search_rank.serving.app; assert os.geteuid() != 0'
+              ;;
+            *)
+              echo "Unsupported image kind" >&2
+              exit 1
+              ;;
+          esac
       - name: Scan image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:

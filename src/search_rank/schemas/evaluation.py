@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
@@ -13,6 +14,16 @@ FiniteFloat = Annotated[float, Field(allow_inf_nan=False)]
 NonNegativeFloat = Annotated[float, Field(ge=0, allow_inf_nan=False)]
 UnitFloat = Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
 Count = Annotated[int, Field(ge=0)]
+ExampleCategory = Literal[
+    "win", "loss", "tie_or_uncertain", "lexical_preferred", "complement_exact_confusion"
+]
+HELDOUT_REQUIRED_EXAMPLE_COUNTS: dict[ExampleCategory, int] = {
+    "win": 5,
+    "loss": 5,
+    "tie_or_uncertain": 3,
+    "lexical_preferred": 1,
+    "complement_exact_confusion": 1,
+}
 
 
 class MetricResult(ContractModel):
@@ -93,15 +104,23 @@ class SliceResult(ContractModel):
 
 class ExampleResult(ContractModel):
     query_id: NonEmptyStr
-    category: Literal[
-        "win", "loss", "tie_or_uncertain", "lexical_preferred", "complement_exact_confusion"
-    ]
+    category: ExampleCategory
     baseline_metric: FiniteFloat
     candidate_metric: FiniteFloat
     delta: FiniteFloat
     selection_rule: NonEmptyStr
     public_product_ids: list[NonEmptyStr] = Field(default_factory=list)
     notes: NonEmptyStr | None = None
+
+    @model_validator(mode="after")
+    def metric_delta_is_consistent(self) -> ExampleResult:
+        if abs(self.candidate_metric - self.baseline_metric - self.delta) > 1e-9:
+            raise ValueError("example delta must equal candidate_metric - baseline_metric")
+        if self.category == "win" and self.delta <= 0:
+            raise ValueError("win examples require a positive delta")
+        if self.category == "loss" and self.delta >= 0:
+            raise ValueError("loss examples require a negative delta")
+        return self
 
 
 class LatencyResult(ContractModel):
@@ -233,10 +252,27 @@ class EvaluationReport(ContractModel):
                 raise ValueError("held-out reports require a positive test_access_count")
             if self.bootstrap_resamples < 10_000:
                 raise ValueError("held-out reports require at least 10,000 bootstrap resamples")
+            category_counts = Counter(item.category for item in self.example_results)
+            shortages = [
+                f"{category} required={required} available={category_counts[category]}"
+                for category, required in HELDOUT_REQUIRED_EXAMPLE_COUNTS.items()
+                if category_counts[category] < required
+            ]
+            if shortages:
+                raise ValueError(
+                    "held-out representative-example requirements are incomplete: "
+                    + "; ".join(shortages)
+                )
+            identities = [(item.category, item.query_id) for item in self.example_results]
+            if len(identities) != len(set(identities)):
+                raise ValueError(
+                    "held-out representative examples must have unique category/query pairs"
+                )
         return self
 
 
 __all__ = [
+    "HELDOUT_REQUIRED_EXAMPLE_COUNTS",
     "CostEvidence",
     "EvaluationReport",
     "ExampleResult",

@@ -1,0 +1,41 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "artifact_type": {
+      "const": "object_publication_evidence",
+      "title": "Artifact Type",
+      "type": "string"
+    },
+    "status": {
+      "const": "published",
+      "title": "Status",
+      "type": "string"
+    },
+    "version_id_present": {
+      "const": true,
+      "title": "Version Id Present",
+      "type": "boolean"
+    },
+    "etag_present": {
+      "const": true,
+      "title": "Etag Present",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "status",
+    "version_id_present",
+    "etag_present"
+  ],
+  "title": "PublicationEvidence",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.example.invalid/search-rank/publication_evidence.schema.json"
+}

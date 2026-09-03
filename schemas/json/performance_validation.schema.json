@@ -1,0 +1,116 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "status": {
+      "const": "passed",
+      "title": "Status",
+      "type": "string"
+    },
+    "validated_at": {
+      "format": "date-time",
+      "title": "Validated At",
+      "type": "string"
+    },
+    "benchmark_run_id": {
+      "pattern": "^github-[0-9]+-attempt-[1-9][0-9]*$",
+      "title": "Benchmark Run Id",
+      "type": "string"
+    },
+    "release_id": {
+      "minLength": 1,
+      "title": "Release Id",
+      "type": "string"
+    },
+    "model_id": {
+      "minLength": 1,
+      "title": "Model Id",
+      "type": "string"
+    },
+    "performance_report_sha256": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Performance Report Sha256",
+      "type": "string"
+    },
+    "evidence_file_count": {
+      "const": 5,
+      "title": "Evidence File Count",
+      "type": "integer"
+    },
+    "condition_count": {
+      "const": 9,
+      "title": "Condition Count",
+      "type": "integer"
+    },
+    "controlled_cold_start_sample_count": {
+      "const": 1,
+      "title": "Controlled Cold Start Sample Count",
+      "type": "integer"
+    },
+    "warmup_request_count": {
+      "const": 90,
+      "title": "Warmup Request Count",
+      "type": "integer"
+    },
+    "measured_request_count": {
+      "const": 1800,
+      "title": "Measured Request Count",
+      "type": "integer"
+    },
+    "success_thresholds_enforced": {
+      "const": true,
+      "title": "Success Thresholds Enforced",
+      "type": "boolean"
+    },
+    "minimum_warmup_condition_success_count": {
+      "maximum": 10,
+      "minimum": 1,
+      "title": "Minimum Warmup Condition Success Count",
+      "type": "integer"
+    },
+    "primary_latency_condition_success_count": {
+      "maximum": 200,
+      "minimum": 199,
+      "title": "Primary Latency Condition Success Count",
+      "type": "integer"
+    },
+    "minimum_secondary_condition_success_count": {
+      "maximum": 200,
+      "minimum": 20,
+      "title": "Minimum Secondary Condition Success Count",
+      "type": "integer"
+    },
+    "immutability_required": {
+      "const": true,
+      "title": "Immutability Required",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "schema_version",
+    "status",
+    "validated_at",
+    "benchmark_run_id",
+    "release_id",
+    "model_id",
+    "performance_report_sha256",
+    "evidence_file_count",
+    "condition_count",
+    "controlled_cold_start_sample_count",
+    "warmup_request_count",
+    "measured_request_count",
+    "success_thresholds_enforced",
+    "minimum_warmup_condition_success_count",
+    "primary_latency_condition_success_count",
+    "minimum_secondary_condition_success_count",
+    "immutability_required"
+  ],
+  "title": "PerformanceValidation",
+  "type": "object",
+  "$id": "https://schemas.example.invalid/search-rank/performance_validation.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

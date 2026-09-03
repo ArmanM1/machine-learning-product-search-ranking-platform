@@ -1,0 +1,20 @@
+{
+  "$id": "https://schemas.example.invalid/search-rank/training_image_provenance.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "binding_verified": {"const": true, "title": "Binding Verified", "type": "boolean"},
+    "git_sha": {"pattern": "^[0-9a-f]{40}$", "title": "Git Sha", "type": "string"},
+    "image_digest": {"pattern": "^sha256:[0-9a-f]{64}$", "title": "Image Digest", "type": "string"},
+    "image_uri": {"pattern": "^[0-9]{12}\\.dkr\\.ecr\\.us-east-1\\.amazonaws\\.com/[a-z0-9/_-]+@sha256:[0-9a-f]{64}$", "title": "Image Uri", "type": "string"},
+    "repository_dirty": {"const": false, "title": "Repository Dirty", "type": "boolean"},
+    "schema_version": {"const": "1.0.0", "title": "Schema Version", "type": "string"},
+    "source_tag": {"pattern": "^sha-[0-9a-f]{40}$", "title": "Source Tag", "type": "string"}
+  },
+  "required": [
+    "schema_version", "git_sha", "repository_dirty", "source_tag", "image_uri",
+    "image_digest", "binding_verified"
+  ],
+  "title": "TrainingImageProvenance",
+  "type": "object"
+}

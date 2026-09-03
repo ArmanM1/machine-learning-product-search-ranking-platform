@@ -1,17 +1,164 @@
 {
-  "$id": "https://schemas.example.invalid/search-rank/model_artifact.schema.json",
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "TrainingResultEvidence": {
+      "additionalProperties": false,
+      "description": "Portable subset of the trainer result; paths are bundle-relative.",
+      "properties": {
+        "best_checkpoint": {
+          "const": "candidate/best",
+          "title": "Best Checkpoint",
+          "type": "string"
+        },
+        "best_validation_ndcg_at_10": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Best Validation Ndcg At 10",
+          "type": "number"
+        },
+        "epochs_completed": {
+          "minimum": 1,
+          "title": "Epochs Completed",
+          "type": "integer"
+        },
+        "optimizer_steps": {
+          "minimum": 1,
+          "title": "Optimizer Steps",
+          "type": "integer"
+        },
+        "duration_seconds": {
+          "minimum": 0,
+          "title": "Duration Seconds",
+          "type": "number"
+        },
+        "changed_parameter_count": {
+          "minimum": 1,
+          "title": "Changed Parameter Count",
+          "type": "integer"
+        },
+        "curves_path": {
+          "const": "candidate/curves.json",
+          "title": "Curves Path",
+          "type": "string"
+        },
+        "fresh_load_verified": {
+          "const": true,
+          "title": "Fresh Load Verified",
+          "type": "boolean"
+        },
+        "warmup_steps": {
+          "minimum": 0,
+          "title": "Warmup Steps",
+          "type": "integer"
+        },
+        "planned_optimizer_steps": {
+          "minimum": 1,
+          "title": "Planned Optimizer Steps",
+          "type": "integer"
+        },
+        "device_type": {
+          "enum": [
+            "cpu",
+            "cuda",
+            "mps"
+          ],
+          "title": "Device Type",
+          "type": "string"
+        },
+        "cuda_available": {
+          "title": "Cuda Available",
+          "type": "boolean"
+        },
+        "cuda_device_count": {
+          "minimum": 0,
+          "title": "Cuda Device Count",
+          "type": "integer"
+        },
+        "accelerator_type": {
+          "enum": [
+            "cpu",
+            "gpu"
+          ],
+          "title": "Accelerator Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "best_checkpoint",
+        "best_validation_ndcg_at_10",
+        "epochs_completed",
+        "optimizer_steps",
+        "duration_seconds",
+        "changed_parameter_count",
+        "curves_path",
+        "fresh_load_verified",
+        "warmup_steps",
+        "planned_optimizer_steps",
+        "device_type",
+        "cuda_available",
+        "cuda_device_count",
+        "accelerator_type"
+      ],
+      "title": "TrainingResultEvidence",
+      "type": "object"
+    },
+    "TrainingSampleStatistics": {
+      "additionalProperties": false,
+      "description": "Auditable composition of the exact sample used for training.",
+      "properties": {
+        "row_count": {
+          "minimum": 1,
+          "title": "Row Count",
+          "type": "integer"
+        },
+        "sampling_source_counts": {
+          "additionalProperties": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "propertyNames": {
+            "minLength": 1
+          },
+          "title": "Sampling Source Counts",
+          "type": "object"
+        },
+        "label_counts": {
+          "additionalProperties": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "propertyNames": {
+            "minLength": 1
+          },
+          "title": "Label Counts",
+          "type": "object"
+        }
+      },
+      "required": [
+        "row_count",
+        "sampling_source_counts",
+        "label_counts"
+      ],
+      "title": "TrainingSampleStatistics",
+      "type": "object"
+    }
+  },
   "additionalProperties": false,
+  "description": "The real model-manifest emitted with every training result.\n\nA training job records the truthful pre-evaluation promotion placeholders\nrequired by the PRD. A later immutable promotion-time copy may bind the\nfinal held-out decision and evaluation report.",
   "properties": {
-    "artifact_checksum": {
-      "pattern": "^sha256:[0-9a-f]{64}$",
-      "title": "Artifact Checksum",
+    "schema_version": {
+      "const": "1.0.0",
+      "title": "Schema Version",
       "type": "string"
     },
-    "artifact_size_bytes": {
-      "minimum": 0,
-      "title": "Artifact Size Bytes",
-      "type": "integer"
+    "model_id": {
+      "minLength": 1,
+      "title": "Model Id",
+      "type": "string"
+    },
+    "run_id": {
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
     },
     "base_model_id": {
       "minLength": 1,
@@ -23,35 +170,72 @@
       "title": "Base Model Revision",
       "type": "string"
     },
-    "checkpoint_uri": {
+    "tokenizer_revision": {
       "minLength": 1,
+      "title": "Tokenizer Revision",
+      "type": "string"
+    },
+    "checkpoint_uri": {
+      "const": "candidate/best",
       "title": "Checkpoint Uri",
       "type": "string"
     },
-    "created_at": {
-      "format": "date-time",
-      "title": "Created At",
+    "artifact_checksum": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Artifact Checksum",
       "type": "string"
     },
-    "evaluation_report_id": {
+    "artifact_size_bytes": {
+      "minimum": 1,
+      "title": "Artifact Size Bytes",
+      "type": "integer"
+    },
+    "config_id": {
       "minLength": 1,
-      "title": "Evaluation Report Id",
+      "title": "Config Id",
+      "type": "string"
+    },
+    "config_hash": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Config Hash",
+      "type": "string"
+    },
+    "dataset_manifest_hash": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Dataset Manifest Hash",
       "type": "string"
     },
     "input_contract_version": {
-      "minLength": 1,
+      "enum": [
+        "title_v1",
+        "enriched_v1"
+      ],
       "title": "Input Contract Version",
       "type": "string"
     },
     "label_mapping_version": {
-      "minLength": 1,
+      "const": "project_graded_v1",
       "title": "Label Mapping Version",
       "type": "string"
     },
-    "model_id": {
-      "minLength": 1,
-      "title": "Model Id",
+    "sampling_strategy": {
+      "enum": [
+        "mixed_hard_random_v1",
+        "random_only_v1"
+      ],
+      "title": "Sampling Strategy",
       "type": "string"
+    },
+    "hard_example_sources": {
+      "items": {
+        "enum": [
+          "bm25",
+          "pretrained_cross_encoder"
+        ],
+        "type": "string"
+      },
+      "title": "Hard Example Sources",
+      "type": "array"
     },
     "promoted": {
       "title": "Promoted",
@@ -62,20 +246,71 @@
       "title": "Promotion Reason",
       "type": "string"
     },
-    "run_id": {
+    "evaluation_report_id": {
       "minLength": 1,
-      "title": "Run Id",
+      "title": "Evaluation Report Id",
       "type": "string"
     },
-    "schema_version": {
-      "minLength": 1,
-      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
-      "title": "Schema Version",
+    "git_sha": {
+      "default": "unavailable",
+      "pattern": "^(?:unavailable|[0-9a-f]{7,64})$",
+      "title": "Git Sha",
       "type": "string"
     },
-    "tokenizer_revision": {
-      "minLength": 1,
-      "title": "Tokenizer Revision",
+    "image_digest": {
+      "default": "unavailable",
+      "pattern": "^(?:unavailable|sha256:[0-9a-f]{64})$",
+      "title": "Image Digest",
+      "type": "string"
+    },
+    "source_model_artifact_sha256": {
+      "anyOf": [
+        {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Source Model Artifact Sha256"
+    },
+    "selected_training_run_manifest_sha256": {
+      "anyOf": [
+        {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Selected Training Run Manifest Sha256"
+    },
+    "evaluation_report_sha256": {
+      "anyOf": [
+        {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Evaluation Report Sha256"
+    },
+    "sample_statistics": {
+      "$ref": "#/$defs/TrainingSampleStatistics"
+    },
+    "training_result": {
+      "$ref": "#/$defs/TrainingResultEvidence"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
       "type": "string"
     }
   },
@@ -89,13 +324,22 @@
     "checkpoint_uri",
     "artifact_checksum",
     "artifact_size_bytes",
+    "config_id",
+    "config_hash",
+    "dataset_manifest_hash",
     "input_contract_version",
     "label_mapping_version",
+    "sampling_strategy",
+    "hard_example_sources",
     "promoted",
     "promotion_reason",
     "evaluation_report_id",
+    "sample_statistics",
+    "training_result",
     "created_at"
   ],
   "title": "ModelArtifact",
-  "type": "object"
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.example.invalid/search-rank/model_artifact.schema.json"
 }

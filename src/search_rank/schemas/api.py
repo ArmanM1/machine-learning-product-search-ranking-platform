@@ -14,6 +14,10 @@ FiniteFloat = Annotated[float, Field(allow_inf_nan=False)]
 NonNegativeFloat = Annotated[float, Field(ge=0, allow_inf_nan=False)]
 UnitFloat = Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
 Count = Annotated[int, Field(ge=0)]
+PublicRequestIdentifier = Annotated[
+    str,
+    Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$"),
+]
 PublicMetricName = Literal[
     "graded_ndcg@10",
     "exact_mrr@10",
@@ -81,8 +85,8 @@ class CuratedQuerySummary(ContractModel):
 
 
 class RankRequest(ContractModel):
-    query_id: NonEmptyStr
-    model_id: NonEmptyStr
+    query_id: PublicRequestIdentifier
+    model_id: PublicRequestIdentifier
     top_k: Annotated[int, Field(ge=1, le=40)] = 10
 
 
@@ -174,10 +178,10 @@ class ModelSummary(ContractModel):
     model_id: NonEmptyStr
     display_name: NonEmptyStr
     kind: NonEmptyStr
-    base_model_id: NonEmptyStr | None
+    base_model_id: NonEmptyStr | None = None
     artifact_checksum: Sha256
     evaluation_report_id: NonEmptyStr
-    promoted_at: UtcDateTime | None
+    promoted_at: UtcDateTime | None = None
     limitations_url: NonEmptyStr
 
 
@@ -384,6 +388,51 @@ class PublicValidationRunMetrics(ContractModel):
     selected_model_graded_ndcg_at_10: UnitFloat
 
 
+class PublicTrainingProvenance(ContractModel):
+    """Allowlisted provenance for the validation-selected training execution."""
+
+    trial_selection_id: Annotated[str, Field(pattern=r"^trial-selection-[0-9a-f]{20}$")]
+    trial_selection_sha256: Sha256
+    run_id: NonEmptyStr
+    run_manifest_sha256: Sha256
+    selected_model_id: NonEmptyStr
+    selected_model_artifact_checksum: Sha256
+    config_hash: Sha256
+    git_sha: Annotated[str, Field(pattern=r"^[0-9a-f]{40}$")]
+    image_digest: Sha256
+    hardware_class: Literal["ml.m5.xlarge", "ml.g4dn.xlarge"]
+    accelerator: Literal["cpu", "gpu"]
+    region: Literal["us-east-1"]
+    runtime_seconds: NonNegativeFloat
+    estimated_cost_usd: NonNegativeFloat
+    actual_cost_usd: NonNegativeFloat | None = None
+    cost_evidence: NonEmptyStr
+
+    @model_validator(mode="after")
+    def hardware_matches_accelerator(self) -> PublicTrainingProvenance:
+        if self.hardware_class.endswith("g4dn.xlarge") != (self.accelerator == "gpu"):
+            raise ValueError("training hardware and accelerator do not match")
+        return self
+
+
+class PublicEvaluationProvenance(ContractModel):
+    """Allowlisted provenance for the two clean held-out Processing executions."""
+
+    candidate_model_id: NonEmptyStr
+    candidate_model_artifact_checksum: Sha256
+    evaluation_config_hash: Sha256
+    git_sha: Annotated[str, Field(pattern=r"^[0-9a-f]{40}$")]
+    image_digest: Sha256
+    hardware_class: Literal["ml.m5.xlarge"]
+    region: Literal["us-east-1"]
+    clean_execution_count: Literal[2]
+    runtime_seconds: NonNegativeFloat
+    runtime_basis: Literal["processing_job_wall_clock_sum"]
+    estimated_cost_usd: NonNegativeFloat
+    actual_cost_usd: NonNegativeFloat | None = None
+    cost_evidence: NonEmptyStr
+
+
 class PublicRunSummary(ContractModel):
     """Allowlisted public evidence; intentionally omits cloud identifiers/URIs."""
 
@@ -392,8 +441,8 @@ class PublicRunSummary(ContractModel):
     status: Literal["complete"] = "complete"
     config_hash: Sha256
     dataset_manifest_hash: Sha256
+    split_manifest_hash: Sha256
     git_sha: Annotated[str, Field(pattern=r"^[0-9a-f]{7,64}$", min_length=7, max_length=64)]
-    image_digest: Sha256
     model_artifact_checksum: Sha256
     dataset_name: NonEmptyStr
     dataset_version: NonEmptyStr
@@ -401,17 +450,31 @@ class PublicRunSummary(ContractModel):
     base_model_id: NonEmptyStr
     base_model_revision: NonEmptyStr
     training_strategy: NonEmptyStr
-    hardware_class: NonEmptyStr
-    region: NonEmptyStr
+    training_provenance: PublicTrainingProvenance
+    evaluation_provenance: PublicEvaluationProvenance
     metrics: PublicRunMetrics
     intervals: PublicRunIntervals
-    duration_seconds: NonNegativeFloat
-    actual_cost_usd: NonNegativeFloat | None
-    cost_evidence: NonEmptyStr
     test_access_count: Annotated[int, Field(ge=1)]
     limitations: list[NonEmptyStr]
     prohibited_claims: list[NonEmptyStr]
     reproduction_command: NonEmptyStr
+
+    @model_validator(mode="after")
+    def execution_provenance_is_bound(self) -> PublicRunSummary:
+        training = self.training_provenance
+        evaluation = self.evaluation_provenance
+        if training.config_hash != self.config_hash:
+            raise ValueError("selected training config differs from the public run")
+        if training.git_sha != self.git_sha or evaluation.git_sha != self.git_sha:
+            raise ValueError("training and evaluation commits must match the public run")
+        if training.selected_model_id != evaluation.candidate_model_id:
+            raise ValueError("selected training model differs from the evaluated candidate")
+        if (
+            training.selected_model_artifact_checksum
+            != evaluation.candidate_model_artifact_checksum
+        ):
+            raise ValueError("selected training artifact differs from the evaluated candidate")
+        return self
 
 
 class PublicValidationRunSummary(ContractModel):
@@ -423,6 +486,7 @@ class PublicValidationRunSummary(ContractModel):
     selected_model_id: NonEmptyStr
     config_hash: Sha256
     dataset_manifest_hash: Sha256
+    split_manifest_hash: Sha256
     git_sha: Annotated[str, Field(pattern=r"^[0-9a-f]{7,64}$", min_length=7, max_length=64)]
     image_digest: Sha256
     model_artifact_checksum: Sha256
@@ -527,6 +591,8 @@ class PublicEvidenceEnvelope(ContractModel):
             raise ValueError("verified envelope requires held-out evaluation evidence")
         if not isinstance(self.failure_analysis, PublicFailureAnalysis):
             raise ValueError("verified envelope requires held-out failure analysis")
+        if self.run.training_provenance.selected_model_id != self.evaluation.candidate_model_id:
+            raise ValueError("training provenance differs from the evaluated candidate")
         run_metrics = self.run.metrics
         if (
             abs(run_metrics.candidate_graded_ndcg_at_10 - self.evaluation.primary_metric.value)
@@ -575,6 +641,7 @@ __all__ = [
     "HealthResponse",
     "ModelSummary",
     "PublicEvaluationEvidence",
+    "PublicEvaluationProvenance",
     "PublicEvidenceEnvelope",
     "PublicFailureAnalysis",
     "PublicFailureExample",
@@ -587,6 +654,7 @@ __all__ = [
     "PublicRunMetrics",
     "PublicRunSummary",
     "PublicSliceResult",
+    "PublicTrainingProvenance",
     "PublicValidationEvaluation",
     "PublicValidationFailureAnalysis",
     "PublicValidationRunMetrics",

@@ -1,0 +1,16 @@
+{
+  "baseline_command_summary_s3_key": "runs/baseline-run-001/summary.json",
+  "baseline_command_summary_sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+  "baseline_config_file_sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+  "baseline_config_path": "configs/experiments/baselines-v1.yaml",
+  "baseline_summary_s3_key": "runs/baseline-run-001/baseline-summary.json",
+  "baseline_summary_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+  "curated_queries_s3_key": "runs/baseline-run-001/curated-queries.json",
+  "curated_queries_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "dataset_manifest_s3_key": "runs/data-prepare-001/manifest.json",
+  "dataset_manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "dataset_processed_sha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "evidence_image_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "hardware_class": "github-hosted-ubuntu-x86_64",
+  "strongest_baseline_id": "bm25-enriched_v1"
+}

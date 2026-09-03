@@ -14,6 +14,8 @@ Status: analysis protocol and empty report scaffold; no examples or measured reg
 - Largest uncertain slice.
 - Every predeclared slice below the minimum sample count.
 
+Held-out report creation and clean-run binding fail closed if any example category is short. The error names each required and available count; reducing a quota or substituting a duplicate category/query pair after test inspection is prohibited. Partial selections are allowed only in validation-only exploratory reports.
+
 ## Selection procedure
 
 1. Compute candidate-minus-strongest-baseline per-query primary-metric differences from the immutable report.

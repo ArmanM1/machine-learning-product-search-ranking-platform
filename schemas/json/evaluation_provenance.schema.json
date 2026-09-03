@@ -1,0 +1,292 @@
+{
+  "$defs": {
+    "SourceEvaluation": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate_metric": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Candidate Metric",
+          "type": "number"
+        },
+        "candidate_ranking_hash": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Candidate Ranking Hash",
+          "type": "string"
+        },
+        "provenance_checksum": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Provenance Checksum",
+          "type": "string"
+        },
+        "report_checksum": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Report Checksum",
+          "type": "string"
+        },
+        "report_id": {
+          "minLength": 1,
+          "title": "Report Id",
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "test_access_count": {
+          "minimum": 1,
+          "title": "Test Access Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "run_id",
+        "report_id",
+        "report_checksum",
+        "provenance_checksum",
+        "test_access_count",
+        "candidate_metric",
+        "candidate_ranking_hash"
+      ],
+      "title": "SourceEvaluation",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.example.invalid/search-rank/evaluation_provenance.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Internal, immutable provenance for one clean run or its two-run binding.",
+  "properties": {
+    "artifact_type": {
+      "const": "evaluation_provenance",
+      "title": "Artifact Type",
+      "type": "string"
+    },
+    "candidate_lists_aligned": {
+      "const": true,
+      "title": "Candidate Lists Aligned",
+      "type": "boolean"
+    },
+    "candidate_universe_hash": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Candidate Universe Hash",
+      "type": "string"
+    },
+    "checkpoint_checksum": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Checkpoint Checksum",
+      "type": "string"
+    },
+    "clean_ranking_hashes": {
+      "items": {
+        "pattern": "^sha256:[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "title": "Clean Ranking Hashes",
+      "type": "array"
+    },
+    "clean_run_metric_values": {
+      "items": {
+        "maximum": 1,
+        "minimum": 0,
+        "type": "number"
+      },
+      "title": "Clean Run Metric Values",
+      "type": "array"
+    },
+    "config_hash": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Config Hash",
+      "type": "string"
+    },
+    "dataset_locale": {
+      "const": "us",
+      "title": "Dataset Locale",
+      "type": "string"
+    },
+    "dataset_manifest_hash": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Dataset Manifest Hash",
+      "type": "string"
+    },
+    "split_manifest_hash": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Split Manifest Hash",
+      "type": "string"
+    },
+    "dataset_name": {
+      "minLength": 1,
+      "title": "Dataset Name",
+      "type": "string"
+    },
+    "dataset_version": {
+      "minLength": 1,
+      "title": "Dataset Version",
+      "type": "string"
+    },
+    "evaluated_baseline_model_ids": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Evaluated Baseline Model Ids",
+      "type": "array"
+    },
+    "evaluation_config_checksum": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Evaluation Config Checksum",
+      "type": "string"
+    },
+    "evaluation_git_sha": {
+      "pattern": "^(?:unavailable|[0-9a-f]{7,64})$",
+      "title": "Evaluation Git Sha",
+      "type": "string"
+    },
+    "evaluation_image_digest": {
+      "pattern": "^(?:unavailable|sha256:[0-9a-f]{64})$",
+      "title": "Evaluation Image Digest",
+      "type": "string"
+    },
+    "frozen_config": {
+      "minLength": 1,
+      "title": "Frozen Config",
+      "type": "string"
+    },
+    "hardware_class": {
+      "enum": [
+        "local-cpu",
+        "ml.m5.xlarge"
+      ],
+      "title": "Hardware Class",
+      "type": "string"
+    },
+    "independent_evaluation_count": {
+      "enum": [
+        1,
+        2
+      ],
+      "title": "Independent Evaluation Count",
+      "type": "integer"
+    },
+    "region": {
+      "enum": [
+        "local",
+        "us-east-1"
+      ],
+      "title": "Region",
+      "type": "string"
+    },
+    "report_id": {
+      "minLength": 1,
+      "title": "Report Id",
+      "type": "string"
+    },
+    "reproduction_tolerance": {
+      "minimum": 0,
+      "title": "Reproduction Tolerance",
+      "type": "number"
+    },
+    "schema_version": {
+      "const": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "slice_min_query_count": {
+      "minimum": 1,
+      "title": "Slice Min Query Count",
+      "type": "integer"
+    },
+    "source_evaluations": {
+      "items": {
+        "$ref": "#/$defs/SourceEvaluation"
+      },
+      "title": "Source Evaluations",
+      "type": "array"
+    },
+    "split": {
+      "enum": [
+        "validation",
+        "test"
+      ],
+      "title": "Split",
+      "type": "string"
+    },
+    "staged_evaluation_config_checksum": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Staged Evaluation Config Checksum",
+      "type": "string"
+    },
+    "strongest_baseline_id": {
+      "minLength": 1,
+      "title": "Strongest Baseline Id",
+      "type": "string"
+    },
+    "system_universe_hashes": {
+      "additionalProperties": {
+        "pattern": "^sha256:[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "propertyNames": {
+        "minLength": 1
+      },
+      "title": "System Universe Hashes",
+      "type": "object"
+    },
+    "test_access_count": {
+      "minimum": 0,
+      "title": "Test Access Count",
+      "type": "integer"
+    },
+    "training_strategy": {
+      "enum": [
+        "mixed_hard_random_v1",
+        "random_only_v1"
+      ],
+      "title": "Training Strategy",
+      "type": "string"
+    },
+    "validation_baseline_summary_checksum": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Validation Baseline Summary Checksum",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "report_id",
+    "split",
+    "config_hash",
+    "evaluation_config_checksum",
+    "staged_evaluation_config_checksum",
+    "evaluation_image_digest",
+    "evaluation_git_sha",
+    "hardware_class",
+    "region",
+    "training_strategy",
+    "frozen_config",
+    "checkpoint_checksum",
+    "dataset_manifest_hash",
+    "split_manifest_hash",
+    "dataset_name",
+    "dataset_version",
+    "dataset_locale",
+    "strongest_baseline_id",
+    "validation_baseline_summary_checksum",
+    "candidate_universe_hash",
+    "system_universe_hashes",
+    "candidate_lists_aligned",
+    "clean_run_metric_values",
+    "clean_ranking_hashes",
+    "independent_evaluation_count",
+    "slice_min_query_count",
+    "reproduction_tolerance",
+    "evaluated_baseline_model_ids",
+    "test_access_count",
+    "source_evaluations"
+  ],
+  "title": "EvaluationProvenance",
+  "type": "object"
+}

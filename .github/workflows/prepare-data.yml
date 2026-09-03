@@ -13,7 +13,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: aws-data-preparation
+  group: aws-financial-operations
   cancel-in-progress: false
 
 env:
@@ -36,6 +36,21 @@ jobs:
       ARTIFACT_BUCKET: ${{ vars.AWS_ARTIFACT_BUCKET }}
       CAMPAIGN_SPEND_TO_DATE_USD: ${{ secrets.AWS_CAMPAIGN_SPEND_TO_DATE_USD }}
       REMAINING_APPLICABLE_CREDIT_USD: ${{ secrets.AWS_REMAINING_APPLICABLE_CREDIT_USD }}
+      FINANCIAL_SNAPSHOT_OBSERVED_AT: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_OBSERVED_AT }}
+      FINANCIAL_SNAPSHOT_RECEIPT_SHA256: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_RECEIPT_SHA256 }}
+      FINANCIAL_SNAPSHOT_HMAC_KEY: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_HMAC_KEY }}
+      FINANCIAL_RESERVATION_MAX_USD: ${{ secrets.AWS_FINANCIAL_RESERVATION_MAX_USD }}
+      FINANCIAL_RESERVATION_REMAINING_COMMITTED_USD: ${{ secrets.AWS_FINANCIAL_RESERVATION_REMAINING_COMMITTED_USD }}
+      FINANCIAL_RESERVATION_CPU_HOURS: ${{ secrets.AWS_FINANCIAL_RESERVATION_CPU_HOURS }}
+      FINANCIAL_RESERVATION_GPU_HOURS: ${{ secrets.AWS_FINANCIAL_RESERVATION_GPU_HOURS }}
+      FINANCIAL_CPU_HOURS_USED_TO_DATE: ${{ secrets.AWS_FINANCIAL_CPU_HOURS_USED_TO_DATE }}
+      FINANCIAL_GPU_HOURS_USED_TO_DATE: ${{ secrets.AWS_FINANCIAL_GPU_HOURS_USED_TO_DATE }}
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_WORKFLOW: prepare-data
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_INPUTS_JSON: ${{ toJSON(inputs) }}
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_COMMIT_SHA: ${{ github.sha }}
+      FINANCIAL_SNAPSHOT_SOURCE: "aws_billing_and_cost_management_console"
+      FINANCIAL_SNAPSHOT_MAX_AGE_SECONDS: "21600"
+      TF_STATE_BUCKET: ${{ vars.AWS_TERRAFORM_STATE_BUCKET }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -91,8 +106,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          export SEARCH_RANK_RUN_ROOT="$(pwd)/.data-prepare-command"
-          export SEARCH_RANK_LATEST_ROOT="$(pwd)/.data-prepare-latest"
+          SEARCH_RANK_RUN_ROOT="$(pwd)/.data-prepare-command"
+          export SEARCH_RANK_RUN_ROOT
+          SEARCH_RANK_LATEST_ROOT="$(pwd)/.data-prepare-latest"
+          export SEARCH_RANK_LATEST_ROOT
           uv run python -m search_rank.cli data prepare --config "${DATA_CONFIG_PATH}" \
             > "${RUNNER_TEMP}/data-prepare-command.private.log"
 
@@ -109,8 +126,8 @@ jobs:
           from pathlib import Path
 
           from search_rank.artifacts.checksums import sha256_file
-          from search_rank.config import sha256_value
           from search_rank.data import load_data_config
+          from search_rank.data.identity import dataset_processed_checksum
           from search_rank.schemas.dataset import DatasetManifest
 
           config_path = Path(os.environ["DATA_CONFIG_PATH"]).resolve()
@@ -161,6 +178,9 @@ jobs:
           manifest = DatasetManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
           if manifest.processed_checksum != processed_checksum:
               raise SystemExit("DatasetManifest semantic identity differs from its content directory")
+          split_manifest_hash = str(summary.get("result", {}).get("split_manifest_hash", ""))
+          if manifest.split_manifest_hash != split_manifest_hash:
+              raise SystemExit("command summary split identity differs from the DatasetManifest")
           if (
               manifest.dataset_name != config.dataset_name
               or manifest.dataset_version != config.dataset_version
@@ -183,17 +203,11 @@ jobs:
               expected = "sha256:" + sha256_file(processed_dir / relative)
               if artifact_checksums.get(relative) != expected:
                   raise SystemExit(f"prepared artifact checksum differs: {relative}")
-          recomputed = "sha256:" + sha256_value(
-              {
-                  "preprocessing_version": manifest.preprocessing_version,
-                  "artifacts": {
-                      name: value.removeprefix("sha256:")
-                      for name, value in artifact_checksums.items()
-                  },
-              }
-          )
+          recomputed = dataset_processed_checksum(manifest, artifact_checksums)
           if recomputed != processed_checksum:
-              raise SystemExit("semantic processed checksum does not recompute from the artifacts")
+              raise SystemExit(
+                  "semantic processed checksum does not recompute from the manifest and artifacts"
+              )
 
           summary_hashes = summary.get("artifact_hashes", {})
           summary_paths = summary.get("artifact_paths", {})
@@ -230,6 +244,7 @@ jobs:
               "artifact_hashes": summary_hashes,
               "result": {
                   "processed_checksum": processed_checksum,
+                  "split_manifest_hash": split_manifest_hash,
                   "query_count": manifest.query_count,
                   "row_count": manifest.row_count,
                   "product_count": manifest.product_count,
@@ -268,6 +283,7 @@ jobs:
                   "source_revision": manifest.source_revision,
                   "locale": manifest.locale,
                   "processed_checksum": processed_checksum,
+                  "split_manifest_hash": split_manifest_hash,
                   "query_count": manifest.query_count,
                   "row_count": manifest.row_count,
                   "product_count": manifest.product_count,
@@ -303,33 +319,52 @@ jobs:
           Path(".data-prepare-private/processed-checksum.txt").write_text(
               processed_checksum, encoding="utf-8"
           )
+          Path(".data-prepare-private/split-manifest-hash.txt").write_text(
+              split_manifest_hash, encoding="utf-8"
+          )
           PY
 
           run_id="$(cat .data-prepare-private/run-id.txt)"
           processed_checksum="$(cat .data-prepare-private/processed-checksum.txt)"
+          split_manifest_hash="$(cat .data-prepare-private/split-manifest-hash.txt)"
           processed_directory="$(cat .data-prepare-private/processed-directory.txt)"
           [[ "${run_id}" =~ ^data-prepare-[A-Za-z0-9TZ-]+$ ]]
           [[ "${processed_checksum}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "${split_manifest_hash}" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ "${processed_directory}" =~ ^data/processed/esci-us-v1/[0-9a-f]{64}$ ]]
-          echo "run_id=${run_id}" >> "${GITHUB_OUTPUT}"
-          echo "processed_checksum=${processed_checksum}" >> "${GITHUB_OUTPUT}"
-          echo "processed_directory=${processed_directory}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "run_id=${run_id}"
+            echo "processed_checksum=${processed_checksum}"
+            echo "split_manifest_hash=${split_manifest_hash}"
+            echo "processed_directory=${processed_directory}"
+          } >> "${GITHUB_OUTPUT}"
       - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: gha-data-${{ github.run_id }}
           mask-aws-account-id: true
+      - name: Atomically reserve the signed campaign capacity
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${TF_STATE_BUCKET:?Missing AWS_TERRAFORM_STATE_BUCKET variable}"
+          python -m pip install --disable-pip-version-check pydantic==2.13.5
+          PYTHONPATH=src python scripts/reserve_financial_capacity.py reserve \
+            --bucket "${TF_STATE_BUCKET}" \
+            --output financial-capacity-reservation.json
       - name: Publish and verify the content-addressed dataset and sanitized handoff
         env:
           PREPARATION_RUN_ID: ${{ steps.prepare.outputs.run_id }}
           PROCESSED_CHECKSUM: ${{ steps.prepare.outputs.processed_checksum }}
+          SPLIT_MANIFEST_HASH: ${{ steps.prepare.outputs.split_manifest_hash }}
           PROCESSED_DIRECTORY: ${{ steps.prepare.outputs.processed_directory }}
         shell: bash
         run: |
           set -euo pipefail
           [[ "${PREPARATION_RUN_ID}" =~ ^data-prepare-[A-Za-z0-9TZ-]+$ ]]
           [[ "${PROCESSED_CHECKSUM}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "${SPLIT_MANIFEST_HASH}" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ "${PROCESSED_DIRECTORY}" =~ ^data/processed/esci-us-v1/[0-9a-f]{64}$ ]]
           test -d "${PROCESSED_DIRECTORY}"
           private_dir=".data-prepare-private/aws"
@@ -377,6 +412,8 @@ jobs:
             if remote_matches "${source}" "${key}"; then
               return 0
             fi
+            PYTHONPATH=src uv run python scripts/validate_financial_snapshot.py emit \
+              --output /dev/null
             set +e
             aws s3api put-object \
               --bucket "${ARTIFACT_BUCKET}" \
@@ -592,11 +629,15 @@ jobs:
           if actual != expected:
               raise SystemExit("sanitized run evidence prefix does not have the exact inventory")
           PY
-          echo "processed_checksum=${PROCESSED_CHECKSUM}" >> "${GITHUB_OUTPUT}"
-          echo "processed_s3_key_prefix=${processed_prefix}" >> "${GITHUB_OUTPUT}"
-          echo "run_evidence_s3_key_prefix=${run_prefix}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "processed_checksum=${PROCESSED_CHECKSUM}"
+            echo "split_manifest_hash=${SPLIT_MANIFEST_HASH}"
+            echo "processed_s3_key_prefix=${processed_prefix}"
+            echo "run_evidence_s3_key_prefix=${run_prefix}"
+          } >> "${GITHUB_OUTPUT}"
           {
             echo "Prepared dataset ${PROCESSED_CHECKSUM} was published and SHA-256 verified."
+            echo "Canonical split identity: ${SPLIT_MANIFEST_HASH}"
             echo "Immutable processed key prefix: \`${processed_prefix}\`"
             echo "Sanitized handoff key prefix: \`${run_prefix}\`"
             echo "No held-out evaluation or model-selection command was enabled."

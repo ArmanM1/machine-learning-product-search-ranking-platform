@@ -1,0 +1,245 @@
+{
+  "$id": "https://schemas.example.invalid/search-rank/training_cost_preflight.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "ProtectedFinancialSnapshot": {
+      "additionalProperties": false,
+      "description": "Sanitized provenance for protected spend and applicable-credit inputs.",
+      "properties": {
+        "age_seconds_at_validation": {
+          "maximum": 21600,
+          "minimum": 0,
+          "title": "Age Seconds At Validation",
+          "type": "integer"
+        },
+        "authorization_commit_sha": {
+          "pattern": "^[0-9a-f]{40}$",
+          "title": "Authorization Commit Sha",
+          "type": "string"
+        },
+        "authorization_input_sha256": {
+          "maxLength": 71,
+          "minLength": 71,
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Authorization Input Sha256",
+          "type": "string"
+        },
+        "authorization_operation_id": {
+          "maxLength": 71,
+          "minLength": 71,
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Authorization Operation Id",
+          "type": "string"
+        },
+        "authorization_reservation_sha256": {
+          "maxLength": 71,
+          "minLength": 71,
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Authorization Reservation Sha256",
+          "type": "string"
+        },
+        "authorization_workflow": {
+          "maxLength": 64,
+          "minLength": 2,
+          "pattern": "^[a-z0-9][a-z0-9-]*$",
+          "title": "Authorization Workflow",
+          "type": "string"
+        },
+        "campaign_spend_to_date_redacted": {
+          "const": true,
+          "title": "Campaign Spend To Date Redacted",
+          "type": "boolean"
+        },
+        "maximum_age_seconds": {
+          "const": 21600,
+          "title": "Maximum Age Seconds",
+          "type": "integer"
+        },
+        "observed_at": {
+          "format": "date-time",
+          "title": "Observed At",
+          "type": "string"
+        },
+        "receipt_binding_algorithm": {
+          "const": "hmac-sha256-v2",
+          "title": "Receipt Binding Algorithm",
+          "type": "string"
+        },
+        "receipt_sha256": {
+          "maxLength": 71,
+          "minLength": 71,
+          "pattern": "^sha256:[0-9a-f]*[1-9a-f][0-9a-f]*$",
+          "title": "Receipt Sha256",
+          "type": "string"
+        },
+        "remaining_applicable_credit_redacted": {
+          "const": true,
+          "title": "Remaining Applicable Credit Redacted",
+          "type": "boolean"
+        },
+        "schema_version": {
+          "const": "1.0.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source": {
+          "const": "aws_billing_and_cost_management_console",
+          "title": "Source",
+          "type": "string"
+        },
+        "validated_at": {
+          "format": "date-time",
+          "title": "Validated At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "observed_at",
+        "validated_at",
+        "maximum_age_seconds",
+        "age_seconds_at_validation",
+        "source",
+        "authorization_workflow",
+        "authorization_operation_id",
+        "authorization_input_sha256",
+        "authorization_commit_sha",
+        "authorization_reservation_sha256",
+        "receipt_binding_algorithm",
+        "receipt_sha256",
+        "campaign_spend_to_date_redacted",
+        "remaining_applicable_credit_redacted"
+      ],
+      "title": "ProtectedFinancialSnapshot",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "accelerator": {
+      "enum": [
+        "cpu",
+        "gpu"
+      ],
+      "title": "Accelerator",
+      "type": "string"
+    },
+    "artifact_type": {
+      "const": "training_cost_preflight",
+      "title": "Artifact Type",
+      "type": "string"
+    },
+    "campaign_and_credit_guard_passed": {
+      "const": true,
+      "title": "Campaign And Credit Guard Passed",
+      "type": "boolean"
+    },
+    "credit_balance_redacted_from_public_evidence": {
+      "const": true,
+      "title": "Credit Balance Redacted From Public Evidence",
+      "type": "boolean"
+    },
+    "financial_snapshot": {
+      "$ref": "#/$defs/ProtectedFinancialSnapshot"
+    },
+    "instance_type": {
+      "enum": [
+        "ml.m5.xlarge",
+        "ml.g4dn.xlarge"
+      ],
+      "title": "Instance Type",
+      "type": "string"
+    },
+    "maximum_job_estimate_usd": {
+      "anyOf": [
+        {
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Maximum Job Estimate Usd"
+    },
+    "maximum_out_of_pocket_usd": {
+      "anyOf": [
+        {
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Maximum Out Of Pocket Usd"
+    },
+    "maximum_runtime_seconds": {
+      "maximum": 18000,
+      "minimum": 1,
+      "title": "Maximum Runtime Seconds",
+      "type": "integer"
+    },
+    "on_demand_hourly_upper_bound_usd": {
+      "anyOf": [
+        {
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "On Demand Hourly Upper Bound Usd"
+    },
+    "pricing_basis": {
+      "const": "live AWS Price List response; highest matching hourly dimension",
+      "title": "Pricing Basis",
+      "type": "string"
+    },
+    "region": {
+      "const": "us-east-1",
+      "title": "Region",
+      "type": "string"
+    },
+    "required_credit_reserve_usd": {
+      "anyOf": [
+        {
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Required Credit Reserve Usd"
+    },
+    "schema_version": {
+      "const": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "region",
+    "instance_type",
+    "accelerator",
+    "maximum_runtime_seconds",
+    "on_demand_hourly_upper_bound_usd",
+    "maximum_job_estimate_usd",
+    "campaign_and_credit_guard_passed",
+    "credit_balance_redacted_from_public_evidence",
+    "required_credit_reserve_usd",
+    "maximum_out_of_pocket_usd",
+    "pricing_basis",
+    "financial_snapshot"
+  ],
+  "title": "TrainingCostPreflight",
+  "type": "object"
+}

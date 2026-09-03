@@ -142,6 +142,17 @@ resource "aws_s3_bucket_lifecycle_configuration" "artifacts" {
       noncurrent_days = 90
     }
   }
+
+  rule {
+    id     = "expire-noncurrent-active-root-versions"
+    status = "Enabled"
+
+    filter {}
+
+    noncurrent_version_expiration {
+      noncurrent_days = 30
+    }
+  }
 }
 
 resource "aws_s3_bucket" "site" {

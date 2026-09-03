@@ -87,3 +87,6 @@ def test_openapi_types_curated_queries_and_complete_public_evidence() -> None:
     run = schema["paths"]["/api/v1/runs/{run_id}"]["get"]
     assert _reference(run, "200") == "#/components/schemas/PublicEvidenceEnvelope"
     assert _reference(run, "404") == "#/components/schemas/ApiError"
+    components = schema["components"]["schemas"]
+    assert "split_manifest_hash" in components["PublicRunSummary"]["required"]
+    assert "split_manifest_hash" in components["PublicValidationRunSummary"]["required"]

@@ -1,0 +1,97 @@
+{
+  "additionalProperties": false,
+  "description": "Allowlisted provenance for the two clean held-out Processing executions.",
+  "properties": {
+    "candidate_model_id": {
+      "minLength": 1,
+      "title": "Candidate Model Id",
+      "type": "string"
+    },
+    "candidate_model_artifact_checksum": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Candidate Model Artifact Checksum",
+      "type": "string"
+    },
+    "evaluation_config_hash": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Evaluation Config Hash",
+      "type": "string"
+    },
+    "git_sha": {
+      "pattern": "^[0-9a-f]{40}$",
+      "title": "Git Sha",
+      "type": "string"
+    },
+    "image_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Image Digest",
+      "type": "string"
+    },
+    "hardware_class": {
+      "const": "ml.m5.xlarge",
+      "title": "Hardware Class",
+      "type": "string"
+    },
+    "region": {
+      "const": "us-east-1",
+      "title": "Region",
+      "type": "string"
+    },
+    "clean_execution_count": {
+      "const": 2,
+      "title": "Clean Execution Count",
+      "type": "integer"
+    },
+    "runtime_seconds": {
+      "minimum": 0,
+      "title": "Runtime Seconds",
+      "type": "number"
+    },
+    "runtime_basis": {
+      "const": "processing_job_wall_clock_sum",
+      "title": "Runtime Basis",
+      "type": "string"
+    },
+    "estimated_cost_usd": {
+      "minimum": 0,
+      "title": "Estimated Cost Usd",
+      "type": "number"
+    },
+    "actual_cost_usd": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Actual Cost Usd"
+    },
+    "cost_evidence": {
+      "minLength": 1,
+      "title": "Cost Evidence",
+      "type": "string"
+    }
+  },
+  "required": [
+    "candidate_model_id",
+    "candidate_model_artifact_checksum",
+    "evaluation_config_hash",
+    "git_sha",
+    "image_digest",
+    "hardware_class",
+    "region",
+    "clean_execution_count",
+    "runtime_seconds",
+    "runtime_basis",
+    "estimated_cost_usd",
+    "cost_evidence"
+  ],
+  "title": "PublicEvaluationProvenance",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.example.invalid/search-rank/public_evaluation_provenance.schema.json"
+}

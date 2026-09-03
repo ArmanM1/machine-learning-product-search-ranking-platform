@@ -1,0 +1,150 @@
+{
+  "$defs": {
+    "CommandRuntime": {
+      "additionalProperties": false,
+      "properties": {
+        "python": {
+          "minLength": 1,
+          "title": "Python",
+          "type": "string"
+        },
+        "platform": {
+          "minLength": 1,
+          "title": "Platform",
+          "type": "string"
+        }
+      },
+      "required": [
+        "python",
+        "platform"
+      ],
+      "title": "CommandRuntime",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "run_id": {
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    },
+    "command": {
+      "minLength": 1,
+      "title": "Command",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "succeeded",
+        "failed"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "config_path": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Config Path"
+    },
+    "started_at": {
+      "format": "date-time",
+      "title": "Started At",
+      "type": "string"
+    },
+    "ended_at": {
+      "format": "date-time",
+      "title": "Ended At",
+      "type": "string"
+    },
+    "duration_seconds": {
+      "minimum": 0,
+      "title": "Duration Seconds",
+      "type": "number"
+    },
+    "git_sha": {
+      "pattern": "^(?:unavailable|[0-9a-f]{7,64})$",
+      "title": "Git Sha",
+      "type": "string"
+    },
+    "repository_dirty": {
+      "title": "Repository Dirty",
+      "type": "boolean"
+    },
+    "runtime": {
+      "$ref": "#/$defs/CommandRuntime"
+    },
+    "artifact_paths": {
+      "additionalProperties": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "propertyNames": {
+        "minLength": 1
+      },
+      "title": "Artifact Paths",
+      "type": "object"
+    },
+    "artifact_hashes": {
+      "additionalProperties": {
+        "pattern": "^sha256:[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "propertyNames": {
+        "minLength": 1
+      },
+      "title": "Artifact Hashes",
+      "type": "object"
+    },
+    "result": {
+      "additionalProperties": true,
+      "title": "Result",
+      "type": "object"
+    },
+    "failure": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Failure"
+    }
+  },
+  "required": [
+    "schema_version",
+    "run_id",
+    "command",
+    "status",
+    "config_path",
+    "started_at",
+    "ended_at",
+    "duration_seconds",
+    "git_sha",
+    "repository_dirty",
+    "runtime",
+    "artifact_paths",
+    "artifact_hashes",
+    "result",
+    "failure"
+  ],
+  "title": "CommandSummary",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.example.invalid/search-rank/command_summary.schema.json"
+}

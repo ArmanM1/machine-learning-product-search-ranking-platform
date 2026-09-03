@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0.0",
+  "evidence_status": "pending_cloud_execution",
+  "artifact_type_expected": "validation_trial_selection",
+  "claim_scope": "Status marker only. This file contains no training, validation, held-out, SageMaker, or AWS execution result.",
+  "required_roles": [
+    "candidate_treatment",
+    "random_negative_control",
+    "title_only_control"
+  ],
+  "required_official_trial_count": 3,
+  "completed_official_trial_count": 0,
+  "heldout_accessed": false,
+  "next_action": "Run the three protected validation-only training configurations, then publish and retain the immutable freeze-trial-selection.yml artifact and receipt.",
+  "trial_selection_s3_key": null,
+  "trial_selection_sha256": null,
+  "workflow_run_url": null,
+  "reviewed_at": null,
+  "reviewer": null
+}

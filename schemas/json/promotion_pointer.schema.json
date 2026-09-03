@@ -1,0 +1,145 @@
+{
+  "$defs": {
+    "PreviousReleasePointer": {
+      "additionalProperties": false,
+      "description": "Rollback identity captured before the current pointer was advanced.",
+      "properties": {
+        "model_id": {
+          "maxLength": 100,
+          "minLength": 3,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{2,99}$",
+          "title": "Model Id",
+          "type": "string"
+        },
+        "pointer_version_id": {
+          "minLength": 1,
+          "title": "Pointer Version Id",
+          "type": "string"
+        },
+        "release_id": {
+          "maxLength": 100,
+          "minLength": 3,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,99}$",
+          "title": "Release Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "release_id",
+        "model_id",
+        "pointer_version_id"
+      ],
+      "title": "PreviousReleasePointer",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.example.invalid/search-rank/promotion_pointer.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Select one immutable public bundle while naming the actually active model.\n\nA held-out failure is a new public evidence release, not a model promotion. In\nthat case the pointer advances to a release-specific bundle but retains the\nexact prior baseline model ID.",
+  "properties": {
+    "bundle_s3_key": {
+      "minLength": 1,
+      "title": "Bundle S3 Key",
+      "type": "string"
+    },
+    "evaluated_candidate_model_id": {
+      "anyOf": [
+        {
+          "maxLength": 100,
+          "minLength": 3,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{2,99}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Evaluated Candidate Model Id"
+    },
+    "evaluation_report_id": {
+      "minLength": 1,
+      "title": "Evaluation Report Id",
+      "type": "string"
+    },
+    "evidence_mode": {
+      "enum": [
+        "validation_only",
+        "verified"
+      ],
+      "title": "Evidence Mode",
+      "type": "string"
+    },
+    "gate_passed": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Gate Passed"
+    },
+    "git_sha": {
+      "maxLength": 64,
+      "minLength": 7,
+      "pattern": "^[0-9a-f]{7,64}$",
+      "title": "Git Sha",
+      "type": "string"
+    },
+    "model_id": {
+      "maxLength": 100,
+      "minLength": 3,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{2,99}$",
+      "title": "Model Id",
+      "type": "string"
+    },
+    "previous": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PreviousReleasePointer"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "release_decision": {
+      "enum": [
+        "validation_baseline",
+        "promote_candidate",
+        "retain_baseline"
+      ],
+      "title": "Release Decision",
+      "type": "string"
+    },
+    "release_id": {
+      "maxLength": 100,
+      "minLength": 3,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,99}$",
+      "title": "Release Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "release_id",
+    "model_id",
+    "bundle_s3_key",
+    "evaluation_report_id",
+    "git_sha",
+    "evidence_mode",
+    "release_decision",
+    "gate_passed",
+    "evaluated_candidate_model_id",
+    "previous"
+  ],
+  "title": "PromotionPointer",
+  "type": "object"
+}

@@ -3,102 +3,9 @@ name: Guarded held-out evaluation and promotion
 on:
   workflow_dispatch:
     inputs:
-      candidate_run_id:
-        description: Immutable candidate training run ID
+      dispatch_config:
+        description: Exact JSON; copy docs/workflow-inputs/release.example.json and replace every frozen value
         required: true
-        type: string
-      candidate_model_id:
-        description: Candidate model ID recorded by the successful training summary
-        required: true
-        type: string
-      candidate_artifact_s3_key:
-        description: Immutable runs/.../model.tar.gz key in the private artifact bucket
-        required: true
-        type: string
-      candidate_artifact_sha256:
-        description: SHA-256 hex digest of the downloaded model.tar.gz transport object
-        required: true
-        type: string
-      candidate_checkpoint_sha256:
-        description: SHA-256 hex digest of the uncompressed checkpoint directory
-        required: true
-        type: string
-      candidate_training_config_sha256:
-        description: SHA-256 config hash recorded by the frozen candidate training summary
-        required: true
-        type: string
-      candidate_training_config_path:
-        description: Committed frozen candidate training YAML used by the SageMaker job
-        required: true
-        type: string
-      frozen_evaluation_config_path:
-        description: Frozen evaluation-method configuration committed before held-out access
-        required: true
-        default: configs/experiments/release-v1.yaml
-        type: string
-      frozen_evaluation_config_sha256:
-        description: SHA-256 hex digest of the committed evaluation-method configuration
-        required: true
-        type: string
-      dataset_manifest_hash:
-        description: Content identity from DatasetManifest.processed_checksum (sha256:...)
-        required: true
-        type: string
-      heldout_data_s3_prefix:
-        description: Immutable data/processed/... prefix containing one manifest.json and split files
-        required: true
-        type: string
-      baseline_ids:
-        description: Comma-separated declared unchanged baseline IDs
-        required: true
-        type: string
-      strongest_baseline_id:
-        description: Strongest unchanged baseline frozen on validation before test access
-        required: true
-        type: string
-      baseline_run_summary_s3_key:
-        description: Immutable runs/... successful baseline-run summary.json key
-        required: true
-        type: string
-      baseline_run_summary_sha256:
-        description: SHA-256 hex digest of the baseline run summary object
-        required: true
-        type: string
-      baseline_selection_s3_key:
-        description: Immutable runs/... validation baseline-summary.json key
-        required: true
-        type: string
-      baseline_selection_sha256:
-        description: SHA-256 hex digest of the validation baseline selection object
-        required: true
-        type: string
-      evaluation_image_digest:
-        description: Immutable evaluation image digest in sha256:... form
-        required: true
-        type: string
-      test_access_counter:
-        description: First clean-run access count; the second independent job reserves the next count
-        required: true
-        type: string
-      maximum_timeout_seconds:
-        description: Hard runtime limit per clean Processing job, at most two hours
-        required: true
-        default: "7200"
-        type: string
-      declared_job_cost_cap_usd:
-        description: Must cover the current on-demand upper-bound estimate
-        required: true
-        default: "2.00"
-        type: string
-      estimated_remaining_non_job_usd:
-        description: Conservative remaining storage, serving, logs, and transfer estimate
-        required: true
-        default: "8.00"
-        type: string
-      cpu_hours_used_to_date:
-        description: Paid CPU instance-hours already consumed by the campaign
-        required: true
-        default: "0"
         type: string
       allow_heldout_eval:
         description: Type 1 only after all hashes and the access count are frozen
@@ -114,7 +21,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: heldout-evaluation
+  group: aws-financial-operations
   cancel-in-progress: false
 
 env:
@@ -132,36 +39,23 @@ jobs:
     env:
       ALLOW_HELDOUT_EVAL: ${{ inputs.allow_heldout_eval }}
       AUTHORIZATION: ${{ inputs.authorization }}
-      CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
-      CANDIDATE_MODEL_ID: ${{ inputs.candidate_model_id }}
-      CANDIDATE_ARTIFACT_S3_KEY: ${{ inputs.candidate_artifact_s3_key }}
-      CANDIDATE_ARTIFACT_S3_URI: s3://${{ vars.AWS_ARTIFACT_BUCKET }}/${{ inputs.candidate_artifact_s3_key }}
-      CANDIDATE_ARTIFACT_SHA256: ${{ inputs.candidate_artifact_sha256 }}
-      CANDIDATE_CHECKPOINT_SHA256: ${{ inputs.candidate_checkpoint_sha256 }}
-      CANDIDATE_CONFIG_SHA256: ${{ inputs.candidate_training_config_sha256 }}
-      CANDIDATE_CONFIG_PATH: ${{ inputs.candidate_training_config_path }}
-      FROZEN_CONFIG_PATH: ${{ inputs.frozen_evaluation_config_path }}
-      FROZEN_CONFIG_SHA256: ${{ inputs.frozen_evaluation_config_sha256 }}
-      DATASET_MANIFEST_HASH: ${{ inputs.dataset_manifest_hash }}
-      HELDOUT_DATA_S3_PREFIX: ${{ inputs.heldout_data_s3_prefix }}
-      HELDOUT_DATA_S3_URI: s3://${{ vars.AWS_ARTIFACT_BUCKET }}/${{ inputs.heldout_data_s3_prefix }}
-      BASELINE_IDS: ${{ inputs.baseline_ids }}
-      STRONGEST_BASELINE_ID: ${{ inputs.strongest_baseline_id }}
-      BASELINE_RUN_SUMMARY_S3_KEY: ${{ inputs.baseline_run_summary_s3_key }}
-      BASELINE_RUN_SUMMARY_S3_URI: s3://${{ vars.AWS_ARTIFACT_BUCKET }}/${{ inputs.baseline_run_summary_s3_key }}
-      BASELINE_RUN_SUMMARY_SHA256: ${{ inputs.baseline_run_summary_sha256 }}
-      BASELINE_SELECTION_S3_KEY: ${{ inputs.baseline_selection_s3_key }}
-      BASELINE_SELECTION_S3_URI: s3://${{ vars.AWS_ARTIFACT_BUCKET }}/${{ inputs.baseline_selection_s3_key }}
-      BASELINE_SELECTION_SHA256: ${{ inputs.baseline_selection_sha256 }}
-      EVALUATION_IMAGE_DIGEST: ${{ inputs.evaluation_image_digest }}
-      EVALUATION_IMAGE_URI: ${{ vars.AWS_EVAL_ECR_REPOSITORY_URL }}@${{ inputs.evaluation_image_digest }}
-      TEST_ACCESS_COUNTER: ${{ inputs.test_access_counter }}
-      MAX_TIMEOUT_SECONDS: ${{ inputs.maximum_timeout_seconds }}
-      DECLARED_JOB_COST_CAP_USD: ${{ inputs.declared_job_cost_cap_usd }}
       CAMPAIGN_SPEND_TO_DATE_USD: ${{ secrets.AWS_CAMPAIGN_SPEND_TO_DATE_USD }}
       REMAINING_APPLICABLE_CREDIT_USD: ${{ secrets.AWS_REMAINING_APPLICABLE_CREDIT_USD }}
-      ESTIMATED_REMAINING_NON_JOB_USD: ${{ inputs.estimated_remaining_non_job_usd }}
-      CPU_HOURS_USED_TO_DATE: ${{ inputs.cpu_hours_used_to_date }}
+      FINANCIAL_SNAPSHOT_OBSERVED_AT: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_OBSERVED_AT }}
+      FINANCIAL_SNAPSHOT_RECEIPT_SHA256: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_RECEIPT_SHA256 }}
+      FINANCIAL_SNAPSHOT_HMAC_KEY: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_HMAC_KEY }}
+      FINANCIAL_RESERVATION_MAX_USD: ${{ secrets.AWS_FINANCIAL_RESERVATION_MAX_USD }}
+      FINANCIAL_RESERVATION_REMAINING_COMMITTED_USD: ${{ secrets.AWS_FINANCIAL_RESERVATION_REMAINING_COMMITTED_USD }}
+      FINANCIAL_RESERVATION_CPU_HOURS: ${{ secrets.AWS_FINANCIAL_RESERVATION_CPU_HOURS }}
+      FINANCIAL_RESERVATION_GPU_HOURS: ${{ secrets.AWS_FINANCIAL_RESERVATION_GPU_HOURS }}
+      FINANCIAL_CPU_HOURS_USED_TO_DATE: ${{ secrets.AWS_FINANCIAL_CPU_HOURS_USED_TO_DATE }}
+      FINANCIAL_GPU_HOURS_USED_TO_DATE: ${{ secrets.AWS_FINANCIAL_GPU_HOURS_USED_TO_DATE }}
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_WORKFLOW: release
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_INPUTS_JSON: ${{ toJSON(inputs) }}
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_COMMIT_SHA: ${{ github.sha }}
+      FINANCIAL_SNAPSHOT_SOURCE: "aws_billing_and_cost_management_console"
+      FINANCIAL_SNAPSHOT_MAX_AGE_SECONDS: "21600"
+      TF_STATE_BUCKET: ${{ vars.AWS_TERRAFORM_STATE_BUCKET }}
       ARTIFACT_BUCKET: ${{ vars.AWS_ARTIFACT_BUCKET }}
       PROCESSING_ROLE_ARN: ${{ vars.AWS_SAGEMAKER_PROCESSING_ROLE_ARN }}
       EVAL_REPOSITORY: ${{ vars.AWS_EVAL_ECR_REPOSITORY_URL }}
@@ -177,6 +71,13 @@ jobs:
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           enable-cache: true
+      - name: Validate and unpack the exact dispatch configuration
+        env:
+          DISPATCH_CONFIG_JSON: ${{ inputs.dispatch_config }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/validate_workflow_dispatch.py --workflow release
       - name: Validate frozen release inputs
         shell: bash
         run: |
@@ -184,6 +85,9 @@ jobs:
           test "${AUTHORIZATION}" = "RUN TWO CLEAN HELDOUT EVALUATIONS"
           test "${ALLOW_HELDOUT_EVAL}" = "1"
           test "${AWS_REGION}" = "us-east-1"
+          [[ "${GITHUB_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test -z "$(git status --porcelain --untracked-files=all)"
           [[ "${FROZEN_CONFIG_PATH}" =~ ^configs/experiments/[A-Za-z0-9._/-]+\.ya?ml$ ]]
           [[ "${FROZEN_CONFIG_PATH}" != *".."* ]]
           test -f "${FROZEN_CONFIG_PATH}"
@@ -195,10 +99,18 @@ jobs:
           [[ "${CANDIDATE_ARTIFACT_SHA256}" =~ ^[0-9a-f]{64}$ ]]
           [[ "${CANDIDATE_CHECKPOINT_SHA256}" =~ ^[0-9a-f]{64}$ ]]
           [[ "${CANDIDATE_CONFIG_SHA256}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "${TRIAL_SELECTION_S3_KEY}" =~ ^runs/trial-selection/trial-selection-[0-9a-f]{20}/trial-selection\.json$ ]]
+          [[ "${TRIAL_SELECTION_S3_KEY}" != *".."* ]]
+          [[ "${TRIAL_SELECTION_SHA256}" =~ ^[0-9a-f]{64}$ ]]
           [[ "${FROZEN_CONFIG_SHA256}" =~ ^[0-9a-f]{64}$ ]]
           [[ "${DATASET_MANIFEST_HASH}" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ "${BASELINE_RUN_SUMMARY_SHA256}" =~ ^[0-9a-f]{64}$ ]]
           [[ "${BASELINE_SELECTION_SHA256}" =~ ^[0-9a-f]{64}$ ]]
+          test "${BASELINE_CONFIG_PATH}" = "configs/experiments/baselines-v1.yaml"
+          [[ "${BASELINE_CONFIG_FILE_SHA256}" =~ ^[0-9a-f]{64}$ ]]
+          test -f "${BASELINE_CONFIG_PATH}"
+          test "$(sha256sum "${BASELINE_CONFIG_PATH}" | cut -d' ' -f1)" = \
+            "${BASELINE_CONFIG_FILE_SHA256}"
           [[ "${EVALUATION_IMAGE_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
           test "${EVALUATION_IMAGE_URI}" = "${EVAL_REPOSITORY}@${EVALUATION_IMAGE_DIGEST}"
           [[ "${CANDIDATE_ARTIFACT_S3_KEY}" == runs/* ]]
@@ -232,6 +144,77 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: gha-heldout-${{ github.run_id }}
           mask-aws-account-id: true
+      - name: Atomically reserve the signed campaign capacity
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${TF_STATE_BUCKET:?Missing AWS_TERRAFORM_STATE_BUCKET variable}"
+          python -m pip install --disable-pip-version-check pydantic==2.13.5
+          PYTHONPATH=src python scripts/reserve_financial_capacity.py reserve \
+            --bucket "${TF_STATE_BUCKET}" \
+            --output financial-capacity-reservation.json
+      - name: Prove one ml.m5.xlarge Processing instance is available
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${AWS_REGION}" = "us-east-1"
+          test "${INSTANCE_TYPE}" = "ml.m5.xlarge"
+          aws service-quotas get-service-quota \
+            --region "${AWS_REGION}" \
+            --service-code sagemaker \
+            --quota-code L-0307F515 \
+            --output json > processing-quota-response.private.json
+          uv sync --frozen --all-extras
+          uv run python - <<'PY'
+          import json
+          import math
+          import os
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          from search_rank.schemas.workflow import SageMakerProcessingQuotaPreflight
+
+          response = json.loads(
+              Path("processing-quota-response.private.json").read_text(encoding="utf-8")
+          )
+          quota = response.get("Quota")
+          if not isinstance(quota, dict):
+              raise SystemExit("Service Quotas returned no Processing quota; refusing held-out access")
+          expected = {
+              "ServiceCode": "sagemaker",
+              "QuotaCode": "L-0307F515",
+              "QuotaName": "ml.m5.xlarge for processing job usage",
+          }
+          if any(quota.get(field) != value for field, value in expected.items()):
+              raise SystemExit("Service Quotas returned a different Processing quota")
+          raw_value = quota.get("Value")
+          if isinstance(raw_value, bool) or not isinstance(raw_value, (int, float)):
+              raise SystemExit("Processing quota applied value is not numeric")
+          applied_value = float(raw_value)
+          if not math.isfinite(applied_value) or applied_value < 1:
+              raise SystemExit(
+                  "Applied ml.m5.xlarge Processing quota is below one; refusing held-out access"
+              )
+          evidence = SageMakerProcessingQuotaPreflight.model_validate(
+              {
+                  "schema_version": "1.0.0",
+                  "artifact_type": "sagemaker_processing_quota_preflight",
+                  "checked_at": datetime.now(timezone.utc),
+                  "region": os.environ["AWS_REGION"],
+                  "service_code": quota["ServiceCode"],
+                  "instance_type": os.environ["INSTANCE_TYPE"],
+                  "quota_code": quota["QuotaCode"],
+                  "quota_name": quota["QuotaName"],
+                  "applied_value": applied_value,
+                  "required_value": 1,
+                  "quota_guard_passed": True,
+              }
+          )
+          Path("processing-quota-preflight.json").write_text(
+              evidence.model_dump_json(indent=2) + "\n", encoding="utf-8"
+          )
+          PY
+          rm processing-quota-response.private.json
       - name: Bind the evaluation digest to the evaluated Git commit
         shell: bash
         run: |
@@ -254,18 +237,23 @@ jobs:
               "Type=TERM_MATCH,Field=regionCode,Value=${AWS_REGION}" \
               "Type=TERM_MATCH,Field=instanceType,Value=${INSTANCE_TYPE}" \
             --max-results 100 > pricing.json
+          PYTHONPATH=src uv run python scripts/validate_financial_snapshot.py emit \
+            --output financial-snapshot.json
           python - <<'PY'
           import json
           import os
           from decimal import Decimal, InvalidOperation, ROUND_UP
+
+          with open("financial-snapshot.json", encoding="utf-8") as handle:
+              financial_snapshot = json.load(handle)
 
           def amount(name: str) -> Decimal:
               try:
                   value = Decimal(os.environ[name])
               except (InvalidOperation, KeyError) as exc:
                   raise SystemExit(f"{name} must be a decimal number") from exc
-              if value < 0:
-                  raise SystemExit(f"{name} may not be negative")
+              if not value.is_finite() or value < 0:
+                  raise SystemExit(f"{name} must be finite and non-negative")
               return value
 
           with open("pricing.json", encoding="utf-8") as handle:
@@ -303,6 +291,8 @@ jobs:
           if amount("CPU_HOURS_USED_TO_DATE") + total_hours > 10:
               raise SystemExit("Two clean Processing jobs would breach the 10 paid CPU-instance-hour campaign cap")
           evidence = {
+              "schema_version": "1.0.0",
+              "artifact_type": "evaluation_cost_preflight",
               "guard_passed": True,
               "region": os.environ["AWS_REGION"],
               "instance_type": os.environ["INSTANCE_TYPE"],
@@ -313,11 +303,13 @@ jobs:
               "maximum_job_estimate_usd": str(estimate),
               "required_credit_reserve_usd": str(reserve),
               "maximum_out_of_pocket_usd": "0",
+              "financial_snapshot": financial_snapshot,
           }
           with open("cost-preflight.json", "w", encoding="utf-8") as handle:
               json.dump(evidence, handle, indent=2, sort_keys=True)
           print(f"Guard passed; the two-job upper-bound processing estimate is ${estimate}.")
           PY
+          rm financial-snapshot.json
       - name: Download and verify the frozen candidate and baseline artifacts
         shell: bash
         run: |
@@ -400,41 +392,113 @@ jobs:
           aws s3 cp "${BASELINE_SELECTION_S3_URI}" baseline-selection.json --no-progress
           test "$(sha256sum baseline-run-summary.json | cut -d' ' -f1)" = "${BASELINE_RUN_SUMMARY_SHA256}"
           test "$(sha256sum baseline-selection.json | cut -d' ' -f1)" = "${BASELINE_SELECTION_SHA256}"
-          declared_baselines="$(jq -cn --arg value "${BASELINE_IDS}" '$value | split(",") | sort')"
-          jq -e \
-            --arg strongest "${STRONGEST_BASELINE_ID}" \
-            --arg selection_hash "sha256:${BASELINE_SELECTION_SHA256}" \
-            '.command == "baseline-run" and .status == "succeeded" and
-             .result.strongest_baseline_id == $strongest and
-             .artifact_hashes.baseline_summary == $selection_hash' \
-            baseline-run-summary.json >/dev/null
-          jq -e \
-            --arg strongest "${STRONGEST_BASELINE_ID}" \
-            --arg dataset_hash "${DATASET_MANIFEST_HASH}" \
-            --argjson declared "${declared_baselines}" \
-            '.split == "validation" and .strongest_baseline_id == $strongest and
-             .dataset_manifest_hash == $dataset_hash and (.metrics | keys | sort) == $declared' \
-            baseline-selection.json >/dev/null
+          baseline_config_hash="$(uv run python scripts/validate_release_artifacts.py \
+            baseline-evidence \
+            --command-summary baseline-run-summary.json \
+            --baseline-summary baseline-selection.json \
+            --baseline-config "${BASELINE_CONFIG_PATH}" \
+            --baseline-config-file-sha256 "${BASELINE_CONFIG_FILE_SHA256}" \
+            --baseline-summary-sha256 "${BASELINE_SELECTION_SHA256}" \
+            --expected-git-sha "${GITHUB_SHA}" \
+            --dataset-manifest-hash "${DATASET_MANIFEST_HASH}" \
+            --strongest-baseline-id "${STRONGEST_BASELINE_ID}" \
+            --baseline-ids "${BASELINE_IDS}")"
+          [[ "${baseline_config_hash}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          printf 'BASELINE_CONFIG_HASH=%s\n' "${baseline_config_hash}" >> "${GITHUB_ENV}"
           aws s3 cp "${HELDOUT_DATA_S3_URI%/}/manifest.json" heldout-manifest.json --no-progress
+          split_manifest_hash="$(jq -er '.split_manifest_hash | select(test("^sha256:[0-9a-f]{64}$"))' heldout-manifest.json)"
+          printf 'SPLIT_MANIFEST_HASH=%s\n' "${split_manifest_hash}" >> "${GITHUB_ENV}"
           jq -e --arg dataset_hash "${DATASET_MANIFEST_HASH}" \
-            '.processed_checksum == $dataset_hash and
+            --arg split_hash "${split_manifest_hash}" \
+            '.processed_checksum == $dataset_hash and .split_manifest_hash == $split_hash and
              (.split_counts.test.query_count | type == "number") and
              (.split_query_id_hashes.test | startswith("sha256:"))' \
             heldout-manifest.json >/dev/null
-      - name: Capture the required rollback-safe baseline promotion
+      - name: Require the immutable treatment and both validation-only controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .trial-selection-sources .trial-selection-manifests
+          aws s3 cp "s3://${ARTIFACT_BUCKET}/${TRIAL_SELECTION_S3_KEY}" \
+            trial-selection.json --no-progress
+          test "$(sha256sum trial-selection.json | cut -d' ' -f1)" = "${TRIAL_SELECTION_SHA256}"
+          for role in candidate_treatment random_negative_control title_only_control; do
+            source_key="$(jq -er --arg role "${role}" \
+              '.trials[] | select(.role == $role) | .candidate_release_inputs_s3_key' \
+              trial-selection.json)"
+            source_hash="$(jq -er --arg role "${role}" \
+              '.trials[] | select(.role == $role) | .candidate_release_inputs_sha256' \
+              trial-selection.json)"
+            manifest_key="$(jq -er --arg role "${role}" \
+              '.trials[] | select(.role == $role) | .training_run_manifest_s3_key' \
+              trial-selection.json)"
+            manifest_hash="$(jq -er --arg role "${role}" \
+              '.trials[] | select(.role == $role) | .training_run_manifest_sha256' \
+              trial-selection.json)"
+            [[ "${source_key}" =~ ^runs/[A-Za-z0-9._/-]+/reports/candidate-release-inputs\.json$ ]]
+            [[ "${manifest_key}" =~ ^runs/[A-Za-z0-9._/-]+/reports/run-manifest\.json$ ]]
+            [[ "${source_key}" != *".."* && "${manifest_key}" != *".."* ]]
+            [[ "${source_hash}" =~ ^sha256:[0-9a-f]{64}$ ]]
+            [[ "${manifest_hash}" =~ ^sha256:[0-9a-f]{64}$ ]]
+            aws s3 cp "s3://${ARTIFACT_BUCKET}/${source_key}" \
+              ".trial-selection-sources/${role}.json" --no-progress
+            aws s3 cp "s3://${ARTIFACT_BUCKET}/${manifest_key}" \
+              ".trial-selection-manifests/${role}.json" --no-progress
+            source_actual="sha256:$(sha256sum ".trial-selection-sources/${role}.json" | cut -d' ' -f1)"
+            manifest_actual="sha256:$(sha256sum ".trial-selection-manifests/${role}.json" | cut -d' ' -f1)"
+            test "${source_actual}" = "${source_hash}"
+            test "${manifest_actual}" = "${manifest_hash}"
+          done
+          uv sync --frozen --all-extras
+          uv run python scripts/trial_selection.py verify \
+            --selection trial-selection.json \
+            --repository-root . \
+            --git-sha "${GITHUB_SHA}" \
+            --dataset-manifest-hash "${DATASET_MANIFEST_HASH}" \
+            --candidate-run-id "${CANDIDATE_RUN_ID}" \
+            --candidate-model-id "${CANDIDATE_MODEL_ID}" \
+            --candidate-config-sha256 "${CANDIDATE_CONFIG_SHA256}" \
+            --candidate-artifact-s3-key "${CANDIDATE_ARTIFACT_S3_KEY}" \
+            --candidate-artifact-sha256 "${CANDIDATE_ARTIFACT_SHA256}" \
+            --source-dir .trial-selection-sources \
+            --run-manifest-dir .trial-selection-manifests \
+            > trial-selection-verification.json
+          jq -e \
+            '.status == "verified" and (.selection_id | test("^trial-selection-[0-9a-f]{20}$"))' \
+            trial-selection-verification.json >/dev/null
+          jq -n \
+            --arg schema_version "1.0.0" \
+            --arg key "${TRIAL_SELECTION_S3_KEY}" \
+            --arg sha256 "sha256:${TRIAL_SELECTION_SHA256}" \
+            --arg selection_id "$(jq -r '.selection_id' trial-selection.json)" \
+            '{schema_version: $schema_version, artifact_type: "trial_selection_binding",
+              selection_id: $selection_id, s3_key: $key, sha256: $sha256,
+              split: "validation", trial_count: 3, test_access_count: 0}' \
+            > trial-selection-binding.json
+          uv run python scripts/validate_release_artifacts.py file \
+            --kind trial-selection-verification trial-selection-verification.json
+          uv run python scripts/validate_release_artifacts.py file \
+            --kind trial-selection-binding trial-selection-binding.json
+      - name: Capture the required rollback-safe baseline pointer
         shell: bash
         run: |
           set -euo pipefail
           pointer_key="promoted/current.json"
           aws s3api head-object --bucket "${ARTIFACT_BUCKET}" --key "${pointer_key}" > previous-pointer-head.json
-          aws s3api get-object --bucket "${ARTIFACT_BUCKET}" --key "${pointer_key}" previous-pointer.json >/dev/null
+          previous_version_id="$(jq -er '.VersionId | select(type == "string" and length > 0)' previous-pointer-head.json)"
+          printf '%s\n' "${previous_version_id}" > previous-pointer-version.txt
+          aws s3api get-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key "${pointer_key}" \
+            --version-id "${previous_version_id}" \
+            previous-pointer.json >/dev/null
           jq -e --arg baseline "${STRONGEST_BASELINE_ID}" \
             '.model_id == $baseline and
              (.release_id | type == "string" and length > 0) and
              (.bundle_s3_key | startswith("promoted/"))' \
             previous-pointer.json >/dev/null
-          jq -r '.ETag' previous-pointer-head.json > previous-pointer-etag.txt
-          jq -r '.VersionId // ""' previous-pointer-head.json > previous-pointer-version.txt
+          uv run python scripts/validate_release_artifacts.py file \
+            --kind promotion-pointer previous-pointer.json
       - name: Run two separately counted clean held-out Processing jobs
         shell: bash
         run: |
@@ -445,44 +509,173 @@ jobs:
           config_prefix="${shared_prefix}evaluation/"
           candidate_config_prefix="${shared_prefix}candidate-config/"
           baseline_prefix="${shared_prefix}baseline/"
-          aws s3 cp "${FROZEN_CONFIG_PATH}" "${config_prefix}release.yaml" --checksum-algorithm SHA256 --no-progress
-          aws s3 cp "${CANDIDATE_CONFIG_PATH}" "${candidate_config_prefix}frozen-candidate.yaml" --checksum-algorithm SHA256 --no-progress
-          aws s3 cp baseline-run-summary.json "${baseline_prefix}summary.json" --checksum-algorithm SHA256 --no-progress
-          aws s3 cp baseline-selection.json "${baseline_prefix}baseline-summary.json" --checksum-algorithm SHA256 --no-progress
+          immutable_readback="$(mktemp -d)"
+          trap 'rm -rf -- "${immutable_readback}"' EXIT
+          put_immutable_or_verify_identical() {
+            local source_file="$1"
+            local object_key="$2"
+            local content_type="$3"
+            local retention_class="$4"
+            local local_sha stem existing head put_error
+            local_sha="sha256:$(sha256sum "${source_file}" | cut -d' ' -f1)"
+            stem="$(printf '%s' "${object_key}" | sha256sum | cut -d' ' -f1)"
+            existing="${immutable_readback}/${stem}.object"
+            head="${immutable_readback}/${stem}.head.json"
+            put_error="${immutable_readback}/${stem}.put-error.txt"
+            PYTHONPATH=src uv run python scripts/validate_financial_snapshot.py verify \
+              --cost-preflight cost-preflight.json
+            if ! aws s3api put-object \
+              --bucket "${ARTIFACT_BUCKET}" \
+              --key "${object_key}" \
+              --body "${source_file}" \
+              --content-type "${content_type}" \
+              --checksum-algorithm SHA256 \
+              --metadata "sha256=${local_sha},retention-class=${retention_class}" \
+              --tagging "RetentionClass=${retention_class}" \
+              --if-none-match '*' >/dev/null 2>"${put_error}"; then
+              : # Retry-safe verification below distinguishes identical from divergent objects.
+            fi
+            if ! aws s3api get-object \
+              --bucket "${ARTIFACT_BUCKET}" \
+              --key "${object_key}" \
+              --checksum-mode ENABLED \
+              "${existing}" >/dev/null 2>&1 \
+              || ! cmp -s "${source_file}" "${existing}"; then
+              cat "${put_error}" >&2
+              echo "Immutable release object differs or cannot be read: ${object_key}" >&2
+              return 1
+            fi
+            aws s3api head-object \
+              --bucket "${ARTIFACT_BUCKET}" \
+              --key "${object_key}" \
+              --checksum-mode ENABLED > "${head}"
+            jq -e \
+              --arg content_type "${content_type}" \
+              --arg sha "${local_sha}" \
+              --arg retention "${retention_class}" \
+              '.ContentType == $content_type and
+               (.ChecksumSHA256 | type == "string" and length > 0) and
+               .TagCount == 1 and
+               .Metadata == {"retention-class": $retention, sha256: $sha}' \
+              "${head}" >/dev/null
+          }
+          uv run python scripts/validate_release_artifacts.py file \
+            --kind command-summary baseline-run-summary.json
+          uv run python scripts/validate_release_artifacts.py file \
+            --kind baseline-summary baseline-selection.json
+          put_immutable_or_verify_identical "${FROZEN_CONFIG_PATH}" \
+            "runs/${base_name}/shared/evaluation/release.yaml" application/yaml candidate
+          put_immutable_or_verify_identical "${CANDIDATE_CONFIG_PATH}" \
+            "runs/${base_name}/shared/candidate-config/frozen-candidate.yaml" \
+            application/yaml candidate
+          put_immutable_or_verify_identical baseline-run-summary.json \
+            "runs/${base_name}/shared/baseline/summary.json" application/json candidate
+          put_immutable_or_verify_identical baseline-selection.json \
+            "runs/${base_name}/shared/baseline/baseline-summary.json" \
+            application/json candidate
+          aws s3api list-objects-v2 \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --prefix "runs/${base_name}/shared/" \
+            --no-paginate > shared-input-objects.json
+          jq -e --arg prefix "runs/${base_name}/shared/" '
+            .IsTruncated != true and
+            ([.Contents[].Key] | sort) == ([
+              "baseline/baseline-summary.json",
+              "baseline/summary.json",
+              "candidate-config/frozen-candidate.yaml",
+              "evaluation/release.yaml"
+            ] | map($prefix + .) | sort)' shared-input-objects.json >/dev/null
 
-          increment_counter() {
+          reserve_counter() {
             local expected="$1"
             local clean_run="$2"
             local counter_key="heldout/access-counter.json"
+            local reservation_key="runs/${base_name}/reservations/access-counter-clean-${clean_run}.json"
             local previous current_etag
             local write_condition=()
-            if aws s3api head-object --bucket "${ARTIFACT_BUCKET}" --key "${counter_key}" > "counter-head-${clean_run}.json" 2>/dev/null; then
-              aws s3api get-object --bucket "${ARTIFACT_BUCKET}" --key "${counter_key}" "previous-counter-${clean_run}.json" >/dev/null
-              previous="$(jq -r '.count' "previous-counter-${clean_run}.json")"
-              current_etag="$(jq -r '.ETag' "counter-head-${clean_run}.json")"
-              write_condition=(--if-match "${current_etag}")
-            else
-              previous=0
-              write_condition=(--if-none-match '*')
-            fi
-            [[ "${previous}" =~ ^[0-9]+$ ]]
-            test "${expected}" -eq "$((previous + 1))"
             jq -n \
               --argjson count "${expected}" \
               --argjson clean_run "${clean_run}" \
               --arg run "${CANDIDATE_RUN_ID}" \
               --arg commit "${GITHUB_SHA}" \
               --arg workflow_run "${GITHUB_RUN_ID}" \
-              '{count: $count, clean_run: $clean_run, candidate_run_id: $run,
+              '{schema_version: "1.0.0", artifact_type: "heldout_access_counter",
+                count: $count, clean_run: $clean_run, candidate_run_id: $run,
                 code_commit: $commit, workflow_run_id: $workflow_run}' \
               > "access-counter-clean-${clean_run}.json"
-            aws s3api put-object \
+            uv run python scripts/validate_release_artifacts.py file \
+              --kind access-counter "access-counter-clean-${clean_run}.json"
+
+            if aws s3api head-object \
+              --bucket "${ARTIFACT_BUCKET}" \
+              --key "${reservation_key}" > "reservation-head-${clean_run}.json" \
+              2> "reservation-head-${clean_run}.error"; then
+              put_immutable_or_verify_identical \
+                "access-counter-clean-${clean_run}.json" "${reservation_key}" \
+                application/json candidate
+              return 0
+            elif ! grep -Eq '(404|Not Found|NoSuchKey)' \
+              "reservation-head-${clean_run}.error"; then
+              cat "reservation-head-${clean_run}.error" >&2
+              return 1
+            fi
+
+            if aws s3api head-object \
+              --bucket "${ARTIFACT_BUCKET}" \
+              --key "${counter_key}" > "counter-head-${clean_run}.json" \
+              2> "counter-head-${clean_run}.error"; then
+              aws s3api get-object \
+                --bucket "${ARTIFACT_BUCKET}" \
+                --key "${counter_key}" \
+                "previous-counter-${clean_run}.json" >/dev/null
+              previous="$(jq -er '.count' "previous-counter-${clean_run}.json")"
+              current_etag="$(jq -er '.ETag' "counter-head-${clean_run}.json")"
+              [[ "${previous}" =~ ^[0-9]+$ ]]
+              if [[ "${previous}" -eq "${expected}" ]]; then
+                cmp -s "previous-counter-${clean_run}.json" \
+                  "access-counter-clean-${clean_run}.json"
+                put_immutable_or_verify_identical \
+                  "access-counter-clean-${clean_run}.json" "${reservation_key}" \
+                  application/json candidate
+                return 0
+              fi
+              test "${expected}" -eq "$((previous + 1))"
+              write_condition=(--if-match "${current_etag}")
+            elif grep -Eq '(404|Not Found|NoSuchKey)' "counter-head-${clean_run}.error"; then
+              test "${expected}" -eq 1
+              write_condition=(--if-none-match '*')
+            else
+              cat "counter-head-${clean_run}.error" >&2
+              return 1
+            fi
+
+            PYTHONPATH=src uv run python scripts/validate_financial_snapshot.py verify \
+              --cost-preflight cost-preflight.json
+            if ! aws s3api put-object \
               --bucket "${ARTIFACT_BUCKET}" \
               --key "${counter_key}" \
               --body "access-counter-clean-${clean_run}.json" \
               --content-type application/json \
               --checksum-algorithm SHA256 \
-              "${write_condition[@]}" >/dev/null
+              --metadata "workflow-run-id=${GITHUB_RUN_ID},clean-run=${clean_run}" \
+              "${write_condition[@]}" >/dev/null 2> "counter-put-${clean_run}.error"; then
+              aws s3api get-object \
+                --bucket "${ARTIFACT_BUCKET}" \
+                --key "${counter_key}" \
+                "counter-after-put-${clean_run}.json" >/dev/null 2>&1 || {
+                  cat "counter-put-${clean_run}.error" >&2
+                  return 1
+                }
+              cmp -s "counter-after-put-${clean_run}.json" \
+                "access-counter-clean-${clean_run}.json" || {
+                  cat "counter-put-${clean_run}.error" >&2
+                  echo "Held-out counter advanced to a different reservation." >&2
+                  return 1
+                }
+            fi
+            put_immutable_or_verify_identical \
+              "access-counter-clean-${clean_run}.json" "${reservation_key}" \
+              application/json candidate
           }
 
           submit_and_wait() {
@@ -511,6 +704,7 @@ jobs:
               --arg dataset_hash "${DATASET_MANIFEST_HASH}" \
               --arg baselines "${BASELINE_IDS}" \
               --arg strongest_baseline "${STRONGEST_BASELINE_ID}" \
+              --arg baseline_config_hash "${BASELINE_CONFIG_HASH}" \
               --arg counter "${counter}" \
               --arg clean_run "${clean_run}" \
               --arg commit "${GITHUB_SHA}" \
@@ -559,6 +753,7 @@ jobs:
                   DATASET_MANIFEST_HASH: $dataset_hash,
                   BASELINE_IDS: $baselines,
                   STRONGEST_BASELINE_ID: $strongest_baseline,
+                  VALIDATION_BASELINE_CONFIG_HASH: $baseline_config_hash,
                   TEST_ACCESS_COUNTER: $counter,
                   CLEAN_RUN_ORDINAL: $clean_run,
                   CODE_COMMIT: $commit,
@@ -576,7 +771,52 @@ jobs:
                   {Key: "HeldoutAccessCounter", Value: $counter}
                 ]
               }' > "processing-job-clean-${clean_run}.json"
-            aws sagemaker create-processing-job --cli-input-json "file://processing-job-clean-${clean_run}.json" >/dev/null
+            if aws sagemaker describe-processing-job \
+              --processing-job-name "${job_name}" \
+              > "existing-processing-job-clean-${clean_run}.json" \
+              2> "existing-processing-job-clean-${clean_run}.error"; then
+              jq -e --slurpfile expected "processing-job-clean-${clean_run}.json" '
+                .ProcessingJobName == $expected[0].ProcessingJobName and
+                .RoleArn == $expected[0].RoleArn and
+                .AppSpecification == $expected[0].AppSpecification and
+                .ProcessingResources == $expected[0].ProcessingResources and
+                .StoppingCondition == $expected[0].StoppingCondition and
+                .ProcessingInputs == $expected[0].ProcessingInputs and
+                .ProcessingOutputConfig == $expected[0].ProcessingOutputConfig and
+                .Environment == $expected[0].Environment' \
+                "existing-processing-job-clean-${clean_run}.json" >/dev/null
+              local existing_arn existing_status
+              existing_arn="$(jq -er '.ProcessingJobArn' \
+                "existing-processing-job-clean-${clean_run}.json")"
+              aws sagemaker list-tags --resource-arn "${existing_arn}" \
+                > "existing-processing-tags-clean-${clean_run}.json"
+              jq -e --slurpfile expected "processing-job-clean-${clean_run}.json" '
+                (.Tags | sort_by(.Key, .Value)) ==
+                ($expected[0].Tags | sort_by(.Key, .Value))' \
+                "existing-processing-tags-clean-${clean_run}.json" >/dev/null
+              existing_status="$(jq -er '.ProcessingJobStatus' \
+                "existing-processing-job-clean-${clean_run}.json")"
+              case "${existing_status}" in
+                InProgress|Stopping|Completed) ;;
+                Failed|Stopped)
+                  echo "Existing held-out job ${clean_run} is terminal and unsuccessful: ${existing_status}" >&2
+                  return 1
+                  ;;
+                *) echo "Unexpected Processing status: ${existing_status}" >&2; return 1 ;;
+              esac
+              PYTHONPATH=src uv run python scripts/validate_financial_snapshot.py verify \
+                --cost-preflight cost-preflight.json
+              echo "Reusing exact existing held-out Processing job ${job_name}."
+            elif grep -Eq 'ValidationException.*(Requested resource not found|Could not find)' \
+              "existing-processing-job-clean-${clean_run}.error"; then
+              PYTHONPATH=src uv run python scripts/validate_financial_snapshot.py verify \
+                --cost-preflight cost-preflight.json
+              aws sagemaker create-processing-job \
+                --cli-input-json "file://processing-job-clean-${clean_run}.json" >/dev/null
+            else
+              cat "existing-processing-job-clean-${clean_run}.error" >&2
+              return 1
+            fi
             printf '%s' "${job_name}" > "job-name-clean-${clean_run}.txt"
             printf '%s' "${output_uri}" > "output-uri-clean-${clean_run}.txt"
             set +e
@@ -584,7 +824,9 @@ jobs:
             local waiter_status=$?
             set -e
             aws sagemaker describe-processing-job --processing-job-name "${job_name}" > "processing-job-description-clean-${clean_run}-private.json"
-            jq '{
+            jq --arg region "${AWS_REGION}" --argjson clean_run "${clean_run}" '{
+              schema_version: "1.0.0",
+              artifact_type: "heldout_processing_job_evidence",
               processing_job_name: .ProcessingJobName,
               status: .ProcessingJobStatus,
               instance_type: .ProcessingResources.ClusterConfig.InstanceType,
@@ -592,6 +834,8 @@ jobs:
               creation_time: .CreationTime,
               end_time: .ProcessingEndTime,
               image_digest: (.AppSpecification.ImageUri | split("@") | .[-1]),
+              region: $region,
+              clean_run: $clean_run,
               exit_message_present: (.ExitMessage != null)
             }' "processing-job-description-clean-${clean_run}-private.json" > "processing-job-evidence-clean-${clean_run}.json"
             local status
@@ -604,9 +848,9 @@ jobs:
 
           first_counter="${TEST_ACCESS_COUNTER}"
           second_counter="$((TEST_ACCESS_COUNTER + 1))"
-          increment_counter "${first_counter}" 1
+          reserve_counter "${first_counter}" 1
           submit_and_wait 1 "${first_counter}"
-          increment_counter "${second_counter}" 2
+          reserve_counter "${second_counter}" 2
           submit_and_wait 2 "${second_counter}"
       - name: Verify both clean outputs, bind them, and apply the promotion decision
         id: release_gate
@@ -638,18 +882,31 @@ jobs:
               --arg checkpoint "sha256:${CANDIDATE_CHECKPOINT_SHA256}" \
               --arg config "${CANDIDATE_CONFIG_SHA256}" \
               --arg dataset "${DATASET_MANIFEST_HASH}" \
+              --arg split "${SPLIT_MANIFEST_HASH}" \
+              --arg evaluation_config "sha256:${FROZEN_CONFIG_SHA256}" \
+              --arg image "${EVALUATION_IMAGE_URI##*@}" \
+              --arg git "${GITHUB_SHA}" \
+              --arg hardware "${INSTANCE_TYPE}" \
               '.command == "evaluate" and .status == "succeeded" and
+               .git_sha == $git and .repository_dirty == false and
                .result.candidate_model_id == $candidate and
                .result.checkpoint_checksum == $checkpoint and
                .result.config_hash == $config and
-               .result.dataset_manifest_hash == $dataset' \
+               .result.dataset_manifest_hash == $dataset and
+               .result.split_manifest_hash == $split and
+               .result.evaluation_config_checksum == $evaluation_config and
+               .result.evaluation_image_digest == $image and
+               .result.evaluation_git_sha == $git and
+               .result.hardware_class == $hardware' \
               "clean-${clean_run}/command-summary.json" >/dev/null
             jq -e \
               --arg candidate_config "${CANDIDATE_CONFIG_SHA256}" \
               --arg evaluation_config "sha256:${FROZEN_CONFIG_SHA256}" \
               --arg checkpoint "sha256:${CANDIDATE_CHECKPOINT_SHA256}" \
               --arg dataset "${DATASET_MANIFEST_HASH}" \
+              --arg split "${SPLIT_MANIFEST_HASH}" \
               --arg strongest "${STRONGEST_BASELINE_ID}" \
+               --arg baseline_summary "sha256:${BASELINE_SELECTION_SHA256}" \
                --arg image "${EVALUATION_IMAGE_URI##*@}" \
                --arg git "${GITHUB_SHA}" \
                --arg hardware "${INSTANCE_TYPE}" \
@@ -659,8 +916,10 @@ jobs:
                .config_hash == $candidate_config and
                .evaluation_config_checksum == $evaluation_config and
                .checkpoint_checksum == $checkpoint and
-               .dataset_manifest_hash == $dataset and
+                .dataset_manifest_hash == $dataset and
+                .split_manifest_hash == $split and
                 .strongest_baseline_id == $strongest and
+                .validation_baseline_summary_checksum == $baseline_summary and
                 .evaluation_image_digest == $image and
                 .evaluation_git_sha == $git and .hardware_class == $hardware and
                 .region == $region and
@@ -740,17 +999,21 @@ jobs:
              --arg git "${GITHUB_SHA}" \
              --arg hardware "${INSTANCE_TYPE}" \
              --arg region "${AWS_REGION}" \
+             --arg split "${SPLIT_MANIFEST_HASH}" \
             --argjson first "${TEST_ACCESS_COUNTER}" \
             --argjson second "${second_counter}" \
              '.independent_evaluation_count == 2 and
               .evaluation_image_digest == $image and .evaluation_git_sha == $git and
               .hardware_class == $hardware and .region == $region and
+              .split_manifest_hash == $split and
               .test_access_count == $second and
              (.clean_run_metric_values | length == 2) and
              ([.source_evaluations[].test_access_count] == [$first, $second])' \
             evaluation-provenance.json >/dev/null
-          jq -e '.command == "bind-clean-evaluations" and .status == "succeeded" and
-            .result.clean_evaluation_count == 2' command-summary.json >/dev/null
+          jq -e --arg split "${SPLIT_MANIFEST_HASH}" \
+            '.command == "bind-clean-evaluations" and .status == "succeeded" and
+             .result.split_manifest_hash == $split and
+             .result.clean_evaluation_count == 2' command-summary.json >/dev/null
           for artifact in evaluation_report curated_queries evaluation_provenance; do
             case "${artifact}" in
               evaluation_report) file=evaluation-report.json ;;
@@ -769,9 +1032,12 @@ jobs:
             --arg code_commit "${GITHUB_SHA}" \
             --arg evaluation_image_digest "${evaluation_image_digest}" \
             --arg evaluation_config_hash "sha256:${FROZEN_CONFIG_SHA256}" \
+            --arg trial_selection_id "$(jq -r '.selection_id' trial-selection.json)" \
+            --arg trial_selection_sha256 "sha256:${TRIAL_SELECTION_SHA256}" \
             --argjson clean_sources "${clean_sources}" \
             '{
               schema_version,
+              artifact_type: "heldout_release_summary",
               report_id,
               run_id,
               candidate_model_id,
@@ -786,50 +1052,127 @@ jobs:
               paired_differences,
               code_commit: $code_commit,
               evaluation_image_digest: $evaluation_image_digest,
-              evaluation_config_hash: $evaluation_config_hash
+              evaluation_config_hash: $evaluation_config_hash,
+              trial_selection_id: $trial_selection_id,
+              trial_selection_sha256: $trial_selection_sha256
             }' evaluation-report.json > release-summary.json
           publish_public_json() {
             local source_file="$1"
             local relative_key="$2"
+            local artifact_kind="$3"
+            local object_key="public/${report_id}/${relative_key}"
+            local local_sha stem existing head put_error
             test -s "${source_file}"
-            aws s3api put-object \
+            uv run python scripts/validate_release_artifacts.py file \
+              --kind "${artifact_kind}" "${source_file}"
+            local_sha="sha256:$(sha256sum "${source_file}" | cut -d' ' -f1)"
+            stem="$(printf '%s' "${relative_key}" | sha256sum | cut -d' ' -f1)"
+            existing="${public_readback}/${stem}.object"
+            head="${public_readback}/${stem}.head.json"
+            put_error="${public_readback}/${stem}.put-error.txt"
+            PYTHONPATH=src uv run python scripts/validate_financial_snapshot.py verify \
+              --cost-preflight cost-preflight.json
+            if ! aws s3api put-object \
               --bucket "${ARTIFACT_BUCKET}" \
-              --key "public/${report_id}/${relative_key}" \
+              --key "${object_key}" \
               --body "${source_file}" \
               --content-type application/json \
               --checksum-algorithm SHA256 \
+              --metadata "sha256=${local_sha},retention-class=public" \
               --tagging "RetentionClass=public" \
-              --if-none-match '*' >/dev/null
+              --if-none-match '*' >/dev/null 2>"${put_error}"; then
+              : # Retry-safe verification follows.
+            fi
+            if ! aws s3api get-object \
+              --bucket "${ARTIFACT_BUCKET}" \
+              --key "${object_key}" \
+              --checksum-mode ENABLED \
+              "${existing}" >/dev/null 2>&1 \
+              || ! cmp -s "${source_file}" "${existing}"; then
+              cat "${put_error}" >&2
+              echo "Immutable public release artifact differs: ${object_key}" >&2
+              return 1
+            fi
+            aws s3api head-object \
+              --bucket "${ARTIFACT_BUCKET}" \
+              --key "${object_key}" \
+              --checksum-mode ENABLED > "${head}"
+            jq -e --arg sha "${local_sha}" '
+              .ContentType == "application/json" and
+              (.ChecksumSHA256 | type == "string" and length > 0) and
+              .TagCount == 1 and
+              .Metadata == {"retention-class": "public", sha256: $sha}' \
+              "${head}" >/dev/null
           }
 
-          publish_public_json evaluation-report.json evaluation-report.json
-          publish_public_json evaluation-provenance.json evaluation-provenance.json
-          publish_public_json command-summary.json command-summary.json
-          publish_public_json curated-queries.json curated-queries.json
-          publish_public_json release-summary.json release-summary.json
-          publish_public_json access-counter-clean-1.json access-counter-1.json
-          publish_public_json access-counter-clean-2.json access-counter-2.json
+          public_readback="$(mktemp -d)"
+          trap 'rm -rf -- "${public_readback}"' EXIT
+          publish_public_json evaluation-report.json evaluation-report.json evaluation-report
+          publish_public_json evaluation-provenance.json evaluation-provenance.json evaluation-provenance
+          publish_public_json command-summary.json command-summary.json command-summary
+          publish_public_json curated-queries.json curated-queries.json curated-queries
+          publish_public_json release-summary.json release-summary.json release-summary
+          publish_public_json access-counter-clean-1.json access-counter-1.json access-counter
+          publish_public_json access-counter-clean-2.json access-counter-2.json access-counter
+          uv run python - <<'PY'
+          from pathlib import Path
+
+          from search_rank.schemas.workflow import SageMakerProcessingQuotaPreflight
+
+          SageMakerProcessingQuotaPreflight.model_validate_json(
+              Path("processing-quota-preflight.json").read_text(encoding="utf-8")
+          )
+          PY
+          publish_public_json processing-quota-preflight.json \
+            processing-quota-preflight.json processing-quota-preflight
           for clean_run in 1 2; do
             publish_public_json \
               "clean-${clean_run}/command-summary.json" \
-              "clean-${clean_run}/command-summary.json"
+              "clean-${clean_run}/command-summary.json" \
+              command-summary
             publish_public_json \
               "clean-${clean_run}/evaluation-report.json" \
-              "clean-${clean_run}/evaluation-report.json"
+              "clean-${clean_run}/evaluation-report.json" \
+              evaluation-report
             publish_public_json \
               "clean-${clean_run}/evaluation-provenance.json" \
-              "clean-${clean_run}/evaluation-provenance.json"
+              "clean-${clean_run}/evaluation-provenance.json" \
+              evaluation-provenance
             publish_public_json \
               "processing-job-evidence-clean-${clean_run}.json" \
-              "clean-${clean_run}/processing-job-evidence.json"
+              "clean-${clean_run}/processing-job-evidence.json" \
+              processing-job-evidence
           done
+          aws s3api list-objects-v2 \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --prefix "public/${report_id}/" \
+            --no-paginate > published-public-release-objects.json
+          jq -e --arg prefix "public/${report_id}/" '
+            .IsTruncated != true and
+            ([.Contents[].Key] | sort) == ([
+              "access-counter-1.json",
+              "access-counter-2.json",
+              "command-summary.json",
+              "curated-queries.json",
+              "evaluation-provenance.json",
+              "evaluation-report.json",
+              "processing-quota-preflight.json",
+              "release-summary.json",
+              "clean-1/command-summary.json",
+              "clean-1/evaluation-provenance.json",
+              "clean-1/evaluation-report.json",
+              "clean-1/processing-job-evidence.json",
+              "clean-2/command-summary.json",
+              "clean-2/evaluation-provenance.json",
+              "clean-2/evaluation-report.json",
+              "clean-2/processing-job-evidence.json"
+            ] | map($prefix + .) | sort)' published-public-release-objects.json >/dev/null
           echo "decision=${decision}" >> "${GITHUB_OUTPUT}"
           echo "report_id=${report_id}" >> "${GITHUB_OUTPUT}"
           if [[ "${decision}" == "retain_baseline" ]]; then
-            echo "Promotion gate retained the frozen baseline; the prior pointer was not changed." >> "${GITHUB_STEP_SUMMARY}"
+            echo "Promotion gate retained the frozen baseline; the negative evaluation will be published without activating the candidate." >> "${GITHUB_STEP_SUMMARY}"
           fi
-      - name: Build and publish the checksummed candidate release bundle
-        if: steps.release_gate.outputs.decision == 'promote_candidate'
+      - name: Build and publish the checksummed held-out outcome bundle
         env:
           REPORT_ID: ${{ steps.release_gate.outputs.report_id }}
         shell: bash
@@ -848,6 +1191,7 @@ jobs:
 
           from scripts.container_eval import _candidate_root, _checkpoint, _training_summary
           from search_rank.artifacts.checksums import sha256_file
+          from search_rank.schemas.model import ModelArtifact
 
           root = _candidate_root(Path("candidate-model.tar.gz"), Path(".release/candidate"))
           training, _ = _training_summary(root)
@@ -855,6 +1199,23 @@ jobs:
           checkpoint = _checkpoint(root, str(result["checkpoint_checksum"]))
           if str(result["candidate_model_id"]) != os.environ["CANDIDATE_MODEL_ID"]:
               raise SystemExit("candidate model ID differs from the frozen release input")
+          model_artifact_paths = list(root.rglob("model-manifest.json"))
+          if len(model_artifact_paths) != 1:
+              raise SystemExit("candidate archive must contain exactly one ModelArtifact")
+          source_model_artifact_path = model_artifact_paths[0]
+          source_model_artifact = ModelArtifact.model_validate_json(
+              source_model_artifact_path.read_text(encoding="utf-8")
+          )
+          if not (
+              source_model_artifact.model_id == os.environ["CANDIDATE_MODEL_ID"]
+              and source_model_artifact.artifact_checksum == result["checkpoint_checksum"]
+              and source_model_artifact.evaluation_report_id == "not_evaluated"
+              and source_model_artifact.promoted is False
+          ):
+              raise SystemExit("candidate ModelArtifact differs from the training summary")
+          Path(".release/training-model-artifact.json").write_bytes(
+              source_model_artifact_path.read_bytes()
+          )
 
           work = Path(".release/evaluation").resolve()
           summary_path = work / "summary.json"
@@ -879,14 +1240,50 @@ jobs:
               json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
           )
           PY
+          evaluation_runtime_seconds="$(uv run python - <<'PY'
+          import json
+          from datetime import datetime
+          from pathlib import Path
+
+          total = 0.0
+          for ordinal in (1, 2):
+              payload = json.loads(
+                  Path(f"processing-job-evidence-clean-{ordinal}.json").read_text(
+                      encoding="utf-8"
+                  )
+              )
+              started = datetime.fromisoformat(
+                  str(payload["creation_time"]).replace("Z", "+00:00")
+              )
+              ended = datetime.fromisoformat(
+                  str(payload["end_time"]).replace("Z", "+00:00")
+              )
+              duration = (ended - started).total_seconds()
+              if duration < 0:
+                  raise SystemExit("Processing job ended before it was created")
+              total += duration
+          print(total)
+          PY
+          )"
+          evaluation_estimated_cost_usd="$(jq -er '.maximum_job_estimate_usd' cost-preflight.json)"
           uv run python -m search_rank.cli promote \
-            --report-id "$(pwd)/.release/evaluation/evaluation-report.json"
+            --report-id "$(pwd)/.release/evaluation/evaluation-report.json" \
+            --trial-selection "$(pwd)/trial-selection.json" \
+            --selected-training-run-manifest \
+              "$(pwd)/.trial-selection-manifests/candidate_treatment.json" \
+            --selected-training-model-artifact \
+              "$(pwd)/.release/training-model-artifact.json" \
+            --evaluation-runtime-seconds "${evaluation_runtime_seconds}" \
+            --evaluation-estimated-cost-usd "${evaluation_estimated_cost_usd}"
           bundle="artifacts/releases/${REPORT_ID}"
           test -f "${bundle}/release-manifest.json"
           test -f "${bundle}/curated-queries.json"
           test -f "${bundle}/evaluation-report.json"
+          test -f "${bundle}/candidate-model-artifact.json"
           test -f "${bundle}/public-evidence.json"
           test -f "${bundle}/bundle-checksums.json"
+          test -f "${bundle}/LICENSE"
+          test -f "${bundle}/NOTICE"
           test ! -e "${bundle}/public-run-summary.json"
           uv run python - "${bundle}" <<'PY'
           import json
@@ -896,89 +1293,295 @@ jobs:
 
           from search_rank.artifacts.checksums import sha256_file
           from search_rank.schemas.api import PublicEvidenceEnvelope
+          from search_rank.schemas.evidence import BundleChecksums, ReleaseManifest
+          from search_rank.schemas.model import ModelArtifact
+          from search_rank.schemas.run import RunManifest
+          from search_rank.schemas.trial import TrialSelection
 
           root = Path(sys.argv[1]).resolve()
-          release = json.loads((root / "release-manifest.json").read_text(encoding="utf-8"))
+          release = ReleaseManifest.model_validate_json(
+              (root / "release-manifest.json").read_text(encoding="utf-8")
+          ).model_dump(mode="json", exclude_none=True)
           evidence = PublicEvidenceEnvelope.model_validate_json(
               (root / "public-evidence.json").read_text(encoding="utf-8")
           )
           if release.get("release_id") != os.environ["REPORT_ID"]:
               raise SystemExit("release manifest ID differs from the bound report")
-          if release.get("promoted_model_id") != os.environ["CANDIDATE_MODEL_ID"]:
-              raise SystemExit("release manifest did not promote the gated candidate")
+          decision = evidence.evaluation.release_status
+          expected_model = (
+              os.environ["CANDIDATE_MODEL_ID"]
+              if decision == "passed"
+              else evidence.evaluation.strongest_baseline_model_id
+          )
+          if release.get("promoted_model_id") != expected_model:
+              raise SystemExit("release manifest does not name the gate-selected active model")
           if release.get("dataset_manifest_hash") != os.environ["DATASET_MANIFEST_HASH"]:
               raise SystemExit("release manifest dataset identity differs from the frozen input")
+          source_manifest = json.loads(Path("heldout-manifest.json").read_text(encoding="utf-8"))
+          internal_provenance = json.loads(
+              (root / "evaluation-provenance.json").read_text(encoding="utf-8")
+          )
+          split_hashes = {
+              source_manifest.get("split_manifest_hash"),
+              internal_provenance.get("split_manifest_hash"),
+              release.get("split_manifest_hash"),
+              evidence.run.split_manifest_hash,
+              os.environ["SPLIT_MANIFEST_HASH"],
+          }
+          if len(split_hashes) != 1:
+              raise SystemExit("source, evaluation, release, and public split identities differ")
           if evidence.evidence_mode != "verified":
               raise SystemExit("candidate release requires verified public evidence")
           if release.get("evidence_mode") != "verified":
               raise SystemExit("candidate release manifest must be explicitly verified")
           if evidence.evaluation.report_id != os.environ["REPORT_ID"]:
               raise SystemExit("public evidence is not bound to the evaluation report")
-          if evidence.evaluation.release_status != "passed":
-              raise SystemExit("candidate release evidence does not record a passed gate")
+          if evidence.evaluation.release_status not in {"passed", "failed"}:
+              raise SystemExit("release evidence has no terminal held-out decision")
           if evidence.evaluation.candidate_model_id != os.environ["CANDIDATE_MODEL_ID"]:
               raise SystemExit("public evidence candidate differs from the frozen input")
+          if evidence.evaluation.release_status == "failed" and expected_model == os.environ["CANDIDATE_MODEL_ID"]:
+              raise SystemExit("failed candidate must never be named as the active model")
+
+          selection_path = Path("trial-selection.json")
+          selection = TrialSelection.model_validate_json(
+              selection_path.read_text(encoding="utf-8")
+          )
+          training_manifest_path = Path(
+              ".trial-selection-manifests/candidate_treatment.json"
+          )
+          training_manifest = RunManifest.model_validate_json(
+              training_manifest_path.read_text(encoding="utf-8")
+          )
+          source_model_artifact_path = Path(".release/training-model-artifact.json")
+          source_model_artifact = ModelArtifact.model_validate_json(
+              source_model_artifact_path.read_text(encoding="utf-8")
+          )
+          final_model_artifact_path = root / "candidate-model-artifact.json"
+          final_model_artifact = ModelArtifact.model_validate_json(
+              final_model_artifact_path.read_text(encoding="utf-8")
+          )
+          treatment = next(
+              trial for trial in selection.trials if trial.role == "candidate_treatment"
+          )
+          training = evidence.run.training_provenance
+          evaluation = evidence.run.evaluation_provenance
+          if (
+              training.trial_selection_id != selection.selection_id
+              or training.trial_selection_sha256
+              != "sha256:" + sha256_file(selection_path)
+              or training.run_id != training_manifest.run_id
+              or training.run_manifest_sha256
+              != "sha256:" + sha256_file(training_manifest_path)
+              or training.selected_model_artifact_checksum
+              != treatment.candidate_checkpoint_sha256
+              or evaluation.candidate_model_artifact_checksum
+              != treatment.candidate_checkpoint_sha256
+              or evaluation.clean_execution_count != 2
+              or final_model_artifact.model_id != source_model_artifact.model_id
+              or final_model_artifact.run_id != training_manifest.run_id
+              or final_model_artifact.artifact_checksum
+              != source_model_artifact.artifact_checksum
+              or final_model_artifact.source_model_artifact_sha256
+              != "sha256:" + sha256_file(source_model_artifact_path)
+              or final_model_artifact.selected_training_run_manifest_sha256
+              != "sha256:" + sha256_file(training_manifest_path)
+              or final_model_artifact.evaluation_report_sha256
+              != "sha256:" + sha256_file(root / "evaluation-report.json")
+              or final_model_artifact.evaluation_report_id != os.environ["REPORT_ID"]
+              or final_model_artifact.promoted
+              != (expected_model == os.environ["CANDIDATE_MODEL_ID"])
+              or release.get("provenance")
+              != {
+                  "training": training.model_dump(mode="json", exclude_none=True),
+                  "evaluation": evaluation.model_dump(mode="json", exclude_none=True),
+              }
+          ):
+              raise SystemExit(
+                  "release does not bind the frozen selection, selected training run, and "
+                  "separate evaluation execution"
+              )
 
           actual_files = {
               path.relative_to(root).as_posix(): "sha256:" + sha256_file(path)
               for path in sorted(root.rglob("*"))
               if path.is_file() and path.name != "bundle-checksums.json"
           }
-          bundle_checksums = json.loads(
+          bundle_checksums = BundleChecksums.model_validate_json(
               (root / "bundle-checksums.json").read_text(encoding="utf-8")
           )
-          if bundle_checksums.get("schema_version") != "1.0.0":
-              raise SystemExit("bundle checksum manifest has an unsupported schema")
-          if bundle_checksums.get("files") != actual_files:
+          if bundle_checksums.files != actual_files:
               raise SystemExit("bundle checksum inventory does not exactly cover the release")
           artifact_checksums = release.get("artifact_checksums")
           required = {
               "public-evidence.json",
+              "candidate-model-artifact.json",
               "curated-queries.json",
               "evaluation-report.json",
+              "evaluation-provenance.json",
+              "LICENSE",
+              "NOTICE",
           }
-          if not isinstance(artifact_checksums, dict) or not required <= artifact_checksums.keys():
+          if not isinstance(artifact_checksums, dict) or set(artifact_checksums) != required:
               raise SystemExit("release manifest does not bind every public evidence artifact")
           for name in required:
               if artifact_checksums[name] != actual_files[name]:
                   raise SystemExit(f"release manifest checksum differs for {name}")
           PY
-          prefix="promoted/${CANDIDATE_MODEL_ID}/"
-          existing="$(aws s3api list-objects-v2 --bucket "${ARTIFACT_BUCKET}" --prefix "${prefix}" --max-items 1 --query 'KeyCount' --output text)"
-          test "${existing}" = "0"
-          while IFS= read -r -d '' file; do
-            relative="${file#${bundle}/}"
-            aws s3api put-object \
+          prefix="promoted/releases/${REPORT_ID}/"
+          uv run python scripts/validate_release_artifacts.py bundle "${bundle}"
+          promoted_readback="$(mktemp -d)"
+          trap 'rm -rf -- "${promoted_readback}"' EXIT
+          put_promoted_immutable_or_verify_identical() {
+            local source_file="$1"
+            local object_key="$2"
+            local content_type="$3"
+            local local_sha stem existing head put_error
+            local_sha="sha256:$(sha256sum "${source_file}" | cut -d' ' -f1)"
+            stem="$(printf '%s' "${object_key}" | sha256sum | cut -d' ' -f1)"
+            existing="${promoted_readback}/${stem}.object"
+            head="${promoted_readback}/${stem}.head.json"
+            put_error="${promoted_readback}/${stem}.put-error.txt"
+            PYTHONPATH=src uv run python scripts/validate_financial_snapshot.py verify \
+              --cost-preflight cost-preflight.json
+            if ! aws s3api put-object \
               --bucket "${ARTIFACT_BUCKET}" \
-              --key "${prefix}${relative}" \
-              --body "${file}" \
+              --key "${object_key}" \
+              --body "${source_file}" \
+              --content-type "${content_type}" \
               --checksum-algorithm SHA256 \
+              --metadata "sha256=${local_sha},retention-class=promoted" \
               --tagging "RetentionClass=promoted" \
-              --if-none-match '*' >/dev/null
+              --if-none-match '*' >/dev/null 2>"${put_error}"; then
+              : # An exact partial publication is recoverable.
+            fi
+            if ! aws s3api get-object \
+              --bucket "${ARTIFACT_BUCKET}" \
+              --key "${object_key}" \
+              --checksum-mode ENABLED \
+              "${existing}" >/dev/null 2>&1 \
+              || ! cmp -s "${source_file}" "${existing}"; then
+              cat "${put_error}" >&2
+              echo "Immutable promoted object differs: ${object_key}" >&2
+              return 1
+            fi
+            aws s3api head-object \
+              --bucket "${ARTIFACT_BUCKET}" \
+              --key "${object_key}" \
+              --checksum-mode ENABLED > "${head}"
+            jq -e --arg content_type "${content_type}" --arg sha "${local_sha}" '
+              .ContentType == $content_type and
+              (.ChecksumSHA256 | type == "string" and length > 0) and
+              .TagCount == 1 and
+              .Metadata == {"retention-class": "promoted", sha256: $sha}' \
+              "${head}" >/dev/null
+          }
+          while IFS= read -r -d '' file; do
+            relative="${file#"${bundle}/"}"
+            case "${relative}" in
+              *.json) content_type=application/json ;;
+              *.txt|LICENSE|NOTICE) content_type=text/plain ;;
+              *) content_type=application/octet-stream ;;
+            esac
+            put_promoted_immutable_or_verify_identical \
+              "${file}" "${prefix}${relative}" "${content_type}"
           done < <(find "${bundle}" -type f -print0)
+          aws s3api list-objects-v2 \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --prefix "${prefix}" \
+            --no-paginate > published-promoted-bundle.json
+          export RELEASE_BUNDLE_ROOT="${bundle}"
+          export RELEASE_PUBLICATION_PREFIX="${prefix}"
+          uv run python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RELEASE_BUNDLE_ROOT"])
+          prefix = os.environ["RELEASE_PUBLICATION_PREFIX"]
+          expected = {
+              prefix + path.relative_to(root).as_posix()
+              for path in root.rglob("*")
+              if path.is_file()
+          }
+          payload = json.loads(Path("published-promoted-bundle.json").read_text(encoding="utf-8"))
+          if payload.get("IsTruncated") is True:
+              raise SystemExit("promoted bundle object listing is truncated")
+          observed = {
+              item.get("Key")
+              for item in payload.get("Contents", [])
+              if isinstance(item, dict) and isinstance(item.get("Key"), str)
+          }
+          if observed != expected:
+              raise SystemExit("promoted bundle S3 inventory is not exact")
+          PY
+          active_model_id="$(jq -r '.promoted_model_id' "${bundle}/release-manifest.json")"
+          release_decision="$(jq -r '.release_gate_results.decision' evaluation-report.json)"
+          gate_passed="$(jq -r '.release_gate_results.passed' evaluation-report.json)"
+          test "${release_decision}" = "${{ steps.release_gate.outputs.decision }}"
+          if [[ "${release_decision}" == "promote_candidate" ]]; then
+            test "${active_model_id}" = "${CANDIDATE_MODEL_ID}"
+            test "${gate_passed}" = "true"
+          else
+            test "${release_decision}" = "retain_baseline"
+            test "${active_model_id}" = "${STRONGEST_BASELINE_ID}"
+            test "${active_model_id}" = "$(jq -r '.model_id' previous-pointer.json)"
+            test "${gate_passed}" = "false"
+          fi
           jq -n \
             --arg release "${REPORT_ID}" \
-            --arg model "${CANDIDATE_MODEL_ID}" \
+            --arg model "${active_model_id}" \
             --arg bundle_key "${prefix}" \
             --arg report "${REPORT_ID}" \
             --arg commit "${GITHUB_SHA}" \
+            --arg decision "${release_decision}" \
+            --argjson gate_passed "${gate_passed}" \
+            --arg candidate "${CANDIDATE_MODEL_ID}" \
             --arg previous_release "$(jq -r '.release_id' previous-pointer.json)" \
             --arg previous_model "$(jq -r '.model_id' previous-pointer.json)" \
             --arg previous_version "$(cat previous-pointer-version.txt)" \
             '{schema_version: "1.0.0", release_id: $release, model_id: $model,
               bundle_s3_key: $bundle_key, evaluation_report_id: $report, git_sha: $commit,
-              evidence_mode: "verified",
+              evidence_mode: "verified", release_decision: $decision,
+              gate_passed: $gate_passed, evaluated_candidate_model_id: $candidate,
               previous: {release_id: $previous_release, model_id: $previous_model,
                 pointer_version_id: $previous_version}}' > promotion-pointer.json
-          aws s3api put-object \
+          uv run python - <<'PY'
+          from pathlib import Path
+
+          from search_rank.schemas.release import PromotionPointer
+
+          PromotionPointer.model_validate_json(
+              Path("promotion-pointer.json").read_text(encoding="utf-8")
+          )
+          PY
+          decision_key="promoted/decisions/${REPORT_ID}.json"
+          put_promoted_immutable_or_verify_identical \
+            promotion-pointer.json "${decision_key}" application/json
+          aws s3api head-object \
             --bucket "${ARTIFACT_BUCKET}" \
-            --key promoted/current.json \
-            --body promotion-pointer.json \
-            --content-type application/json \
-            --checksum-algorithm SHA256 \
-            --tagging "RetentionClass=promoted" \
-            --if-match "$(cat previous-pointer-etag.txt)" > promotion-put-result.json
-          echo "Promotion gate passed; immutable bundle and versioned pointer were published." >> "${GITHUB_STEP_SUMMARY}"
+            --key "${decision_key}" \
+            --checksum-mode ENABLED > promotion-put-result.private.json
+          aws s3api list-objects-v2 \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --prefix "${decision_key}" \
+            --no-paginate > published-decision-objects.json
+          jq -e --arg key "${decision_key}" '
+            .IsTruncated != true and ([.Contents[].Key] | sort) == [$key]' \
+            published-decision-objects.json >/dev/null
+          jq '{schema_version: "1.0.0", artifact_type: "object_publication_evidence",
+            status: "published", version_id_present: (.VersionId != null),
+            etag_present: (.ETag != null)}' \
+            promotion-put-result.private.json > promotion-publication-evidence.json
+          uv run python scripts/validate_release_artifacts.py file \
+            --kind publication-evidence promotion-publication-evidence.json
+          uv run python scripts/validate_release_artifacts.py file \
+            --kind evaluation-cost-preflight cost-preflight.json
+          if [[ "${release_decision}" == "promote_candidate" ]]; then
+            echo "Promotion gate passed; the immutable candidate bundle and deployment decision were staged. The live pointer remains unchanged until verified production activation." >> "${GITHUB_STEP_SUMMARY}"
+          else
+            echo "Promotion gate failed; the immutable negative decision was staged while the prior live pointer remained unchanged." >> "${GITHUB_STEP_SUMMARY}"
+          fi
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
@@ -999,9 +1602,13 @@ jobs:
             evaluation-provenance.json
             previous-pointer.json
             promotion-pointer.json
-            promotion-put-result.json
+            promotion-publication-evidence.json
+            processing-quota-preflight.json
             processing-job-evidence-clean-1.json
             processing-job-evidence-clean-2.json
             release-summary.json
+            trial-selection-binding.json
+            trial-selection-verification.json
+            artifacts/releases/${{ steps.release_gate.outputs.report_id }}/candidate-model-artifact.json
           if-no-files-found: warn
           retention-days: 90

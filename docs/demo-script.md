@@ -38,7 +38,7 @@ If the gate failed, say:
 
 ## 1:55–2:00 — Engineering boundary
 
-Show the public provenance fields linking data hash, code commit, container digest, cloud job, checkpoint, report, and release. End with: “It reranks supplied candidates; it does not retrieve an entire catalog or measure customer conversion.”
+Show the public provenance fields linking the semantic data hash, canonical split-manifest hash, code commit, container digest, cloud job, checkpoint, report, and release. End with: “It reranks supplied candidates; it does not retrieve an entire catalog or measure customer conversion.”
 
 ## Presenter checklist
 

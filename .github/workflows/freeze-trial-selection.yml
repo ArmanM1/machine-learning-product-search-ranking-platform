@@ -1,0 +1,302 @@
+name: Freeze mandatory validation trial selection
+
+on:
+  workflow_dispatch:
+    inputs:
+      treatment_release_inputs_s3_key:
+        description: Candidate treatment runs/.../reports/candidate-release-inputs.json key
+        required: true
+        type: string
+      treatment_release_inputs_sha256:
+        description: Candidate treatment release-input SHA-256 hex digest
+        required: true
+        type: string
+      random_negative_release_inputs_s3_key:
+        description: Random-negative control runs/.../reports/candidate-release-inputs.json key
+        required: true
+        type: string
+      random_negative_release_inputs_sha256:
+        description: Random-negative control release-input SHA-256 hex digest
+        required: true
+        type: string
+      title_only_release_inputs_s3_key:
+        description: Title-only control runs/.../reports/candidate-release-inputs.json key
+        required: true
+        type: string
+      title_only_release_inputs_sha256:
+        description: Title-only control release-input SHA-256 hex digest
+        required: true
+        type: string
+      authorization:
+        description: Type FREEZE THREE VALIDATION TRIALS after reviewing all source hashes
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: aws-financial-operations
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  ALLOW_HELDOUT_EVAL: "0"
+  CAMPAIGN_BUDGET_USD: "40"
+  REQUIRED_CREDIT_RESERVE_USD: "40"
+  MAXIMUM_OUT_OF_POCKET_USD: "0"
+  VALIDATION_BINDING_ALLOWANCE_USD: "0.25"
+
+jobs:
+  freeze:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: aws-trial-selection
+    env:
+      AUTHORIZATION: ${{ inputs.authorization }}
+      ARTIFACT_BUCKET: ${{ vars.AWS_ARTIFACT_BUCKET }}
+      CAMPAIGN_SPEND_TO_DATE_USD: ${{ secrets.AWS_CAMPAIGN_SPEND_TO_DATE_USD }}
+      REMAINING_APPLICABLE_CREDIT_USD: ${{ secrets.AWS_REMAINING_APPLICABLE_CREDIT_USD }}
+      FINANCIAL_SNAPSHOT_OBSERVED_AT: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_OBSERVED_AT }}
+      FINANCIAL_SNAPSHOT_RECEIPT_SHA256: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_RECEIPT_SHA256 }}
+      FINANCIAL_SNAPSHOT_HMAC_KEY: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_HMAC_KEY }}
+      FINANCIAL_RESERVATION_MAX_USD: ${{ secrets.AWS_FINANCIAL_RESERVATION_MAX_USD }}
+      FINANCIAL_RESERVATION_REMAINING_COMMITTED_USD: ${{ secrets.AWS_FINANCIAL_RESERVATION_REMAINING_COMMITTED_USD }}
+      FINANCIAL_RESERVATION_CPU_HOURS: ${{ secrets.AWS_FINANCIAL_RESERVATION_CPU_HOURS }}
+      FINANCIAL_RESERVATION_GPU_HOURS: ${{ secrets.AWS_FINANCIAL_RESERVATION_GPU_HOURS }}
+      FINANCIAL_CPU_HOURS_USED_TO_DATE: ${{ secrets.AWS_FINANCIAL_CPU_HOURS_USED_TO_DATE }}
+      FINANCIAL_GPU_HOURS_USED_TO_DATE: ${{ secrets.AWS_FINANCIAL_GPU_HOURS_USED_TO_DATE }}
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_WORKFLOW: freeze-trial-selection
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_INPUTS_JSON: ${{ toJSON(inputs) }}
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_COMMIT_SHA: ${{ github.sha }}
+      FINANCIAL_SNAPSHOT_SOURCE: "aws_billing_and_cost_management_console"
+      FINANCIAL_SNAPSHOT_MAX_AGE_SECONDS: "21600"
+      TF_STATE_BUCKET: ${{ vars.AWS_TERRAFORM_STATE_BUCKET }}
+      TREATMENT_RELEASE_INPUTS_S3_KEY: ${{ inputs.treatment_release_inputs_s3_key }}
+      TREATMENT_RELEASE_INPUTS_SHA256: ${{ inputs.treatment_release_inputs_sha256 }}
+      RANDOM_NEGATIVE_RELEASE_INPUTS_S3_KEY: ${{ inputs.random_negative_release_inputs_s3_key }}
+      RANDOM_NEGATIVE_RELEASE_INPUTS_SHA256: ${{ inputs.random_negative_release_inputs_sha256 }}
+      TITLE_ONLY_RELEASE_INPUTS_S3_KEY: ${{ inputs.title_only_release_inputs_s3_key }}
+      TITLE_ONLY_RELEASE_INPUTS_SHA256: ${{ inputs.title_only_release_inputs_sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+      - name: Validate the three immutable source declarations and zero-test boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${AUTHORIZATION}" = "FREEZE THREE VALIDATION TRIALS"
+          test "${ALLOW_HELDOUT_EVAL}" = "0"
+          test "${AWS_REGION}" = "us-east-1"
+          [[ "${GITHUB_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          : "${ARTIFACT_BUCKET:?Missing AWS_ARTIFACT_BUCKET variable}"
+          for prefix in TREATMENT RANDOM_NEGATIVE TITLE_ONLY; do
+            key_name="${prefix}_RELEASE_INPUTS_S3_KEY"
+            hash_name="${prefix}_RELEASE_INPUTS_SHA256"
+            key="${!key_name}"
+            digest="${!hash_name}"
+            [[ "${key}" =~ ^runs/[A-Za-z0-9._/-]+/reports/candidate-release-inputs\.json$ ]]
+            [[ "${key}" != *".."* ]]
+            [[ "${digest}" =~ ^[0-9a-f]{64}$ ]]
+          done
+          python - <<'PY'
+          import os
+          from decimal import Decimal, InvalidOperation
+
+          def amount(name: str) -> Decimal:
+              try:
+                  value = Decimal(os.environ[name])
+              except (InvalidOperation, KeyError) as exc:
+                  raise SystemExit(f"{name} must be a decimal number") from exc
+              if not value.is_finite() or value < 0:
+                  raise SystemExit(f"{name} must be finite and non-negative")
+              return value
+
+          allowance = amount("VALIDATION_BINDING_ALLOWANCE_USD")
+          spent = amount("CAMPAIGN_SPEND_TO_DATE_USD")
+          credit = amount("REMAINING_APPLICABLE_CREDIT_USD")
+          campaign = amount("CAMPAIGN_BUDGET_USD")
+          reserve = amount("REQUIRED_CREDIT_RESERVE_USD")
+          if amount("MAXIMUM_OUT_OF_POCKET_USD") != 0:
+              raise SystemExit("Owner-approved out-of-pocket limit must remain zero")
+          if spent + allowance > campaign:
+              raise SystemExit("validation binding would breach the campaign envelope")
+          if credit < allowance + reserve:
+              raise SystemExit("applicable credit cannot cover S3 transfer and the reserve")
+          print("Validation-only binding guard passed with a conservative USD 0.25 allowance.")
+          PY
+      - name: Install the frozen artifact-contract environment
+        shell: bash
+        run: uv sync --frozen --all-extras
+      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ vars.AWS_TRIAL_SELECTION_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-trial-selection-${{ github.run_id }}
+          mask-aws-account-id: true
+      - name: Atomically reserve the signed campaign capacity
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${TF_STATE_BUCKET:?Missing AWS_TERRAFORM_STATE_BUCKET variable}"
+          python -m pip install --disable-pip-version-check pydantic==2.13.5
+          PYTHONPATH=src python scripts/reserve_financial_capacity.py reserve \
+            --bucket "${TF_STATE_BUCKET}" \
+            --output financial-capacity-reservation.json
+      - name: Download and checksum the exact three training declarations
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .trial-selection/sources .trial-selection/manifests .trial-selection/models
+          for prefix in TREATMENT RANDOM_NEGATIVE TITLE_ONLY; do
+            key_name="${prefix}_RELEASE_INPUTS_S3_KEY"
+            hash_name="${prefix}_RELEASE_INPUTS_SHA256"
+            key="${!key_name}"
+            expected="${!hash_name}"
+            role="$(tr '[:upper:]' '[:lower:]' <<<"${prefix}")"
+            case "${role}" in
+              treatment) artifact_role=candidate_treatment ;;
+              random_negative) artifact_role=random_negative_control ;;
+              title_only) artifact_role=title_only_control ;;
+              *) exit 1 ;;
+            esac
+            source=".trial-selection/sources/${artifact_role}.json"
+            aws s3 cp "s3://${ARTIFACT_BUCKET}/${key}" "${source}" --no-progress
+            test "$(sha256sum "${source}" | cut -d' ' -f1)" = "${expected}"
+            uv run python scripts/trial_selection.py discover \
+              --release-inputs "${source}" > ".trial-selection/${role}-discovery.json"
+            model_key="$(jq -r '.candidate_artifact_s3_key' ".trial-selection/${role}-discovery.json")"
+            manifest_key="$(jq -r '.training_run_manifest_s3_key' ".trial-selection/${role}-discovery.json")"
+            [[ "${model_key}" =~ ^runs/[A-Za-z0-9._/-]+\.tar\.gz$ ]]
+            [[ "${manifest_key}" =~ ^runs/[A-Za-z0-9._/-]+/reports/run-manifest\.json$ ]]
+            [[ "${model_key}" != *".."* && "${manifest_key}" != *".."* ]]
+            aws s3 cp "s3://${ARTIFACT_BUCKET}/${model_key}" \
+              ".trial-selection/models/${artifact_role}.tar.gz" --no-progress
+            aws s3 cp "s3://${ARTIFACT_BUCKET}/${manifest_key}" \
+              ".trial-selection/manifests/${artifact_role}.json" --no-progress
+          done
+      - name: Build and independently revalidate the mandatory comparison
+        shell: bash
+        run: |
+          set -euo pipefail
+          treatment_manifest_key="$(jq -r '.training_run_manifest_s3_key' .trial-selection/treatment-discovery.json)"
+          random_manifest_key="$(jq -r '.training_run_manifest_s3_key' .trial-selection/random_negative-discovery.json)"
+          title_manifest_key="$(jq -r '.training_run_manifest_s3_key' .trial-selection/title_only-discovery.json)"
+          uv run python scripts/trial_selection.py build \
+            --repository-root . \
+            --git-sha "${GITHUB_SHA}" \
+            --output .trial-selection/trial-selection.json \
+            --treatment-release-inputs .trial-selection/sources/candidate_treatment.json \
+            --treatment-release-inputs-s3-key "${TREATMENT_RELEASE_INPUTS_S3_KEY}" \
+            --treatment-model-archive .trial-selection/models/candidate_treatment.tar.gz \
+            --treatment-run-manifest .trial-selection/manifests/candidate_treatment.json \
+            --treatment-run-manifest-s3-key "${treatment_manifest_key}" \
+            --random-negative-release-inputs .trial-selection/sources/random_negative_control.json \
+            --random-negative-release-inputs-s3-key "${RANDOM_NEGATIVE_RELEASE_INPUTS_S3_KEY}" \
+            --random-negative-model-archive .trial-selection/models/random_negative_control.tar.gz \
+            --random-negative-run-manifest .trial-selection/manifests/random_negative_control.json \
+            --random-negative-run-manifest-s3-key "${random_manifest_key}" \
+            --title-only-release-inputs .trial-selection/sources/title_only_control.json \
+            --title-only-release-inputs-s3-key "${TITLE_ONLY_RELEASE_INPUTS_S3_KEY}" \
+            --title-only-model-archive .trial-selection/models/title_only_control.tar.gz \
+            --title-only-run-manifest .trial-selection/manifests/title_only_control.json \
+            --title-only-run-manifest-s3-key "${title_manifest_key}"
+          uv run python scripts/trial_selection.py verify \
+            --selection .trial-selection/trial-selection.json \
+            --repository-root . \
+            --git-sha "${GITHUB_SHA}" \
+            --source-dir .trial-selection/sources \
+            --run-manifest-dir .trial-selection/manifests
+      - name: Publish one immutable zero-test-access selection artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          selection_id="$(jq -r '.selection_id' .trial-selection/trial-selection.json)"
+          [[ "${selection_id}" =~ ^trial-selection-[0-9a-f]{20}$ ]]
+          selection_hash="$(sha256sum .trial-selection/trial-selection.json | cut -d' ' -f1)"
+          selection_key="runs/trial-selection/${selection_id}/trial-selection.json"
+          readback_dir="$(mktemp -d)"
+          trap 'rm -rf -- "${readback_dir}"' EXIT
+          put_error="${readback_dir}/put-error.txt"
+          PYTHONPATH=src uv run python scripts/validate_financial_snapshot.py emit \
+            --output /dev/null
+          if ! aws s3api put-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key "${selection_key}" \
+            --body .trial-selection/trial-selection.json \
+            --content-type application/json \
+            --checksum-algorithm SHA256 \
+            --metadata "sha256=sha256:${selection_hash},retention-class=candidate" \
+            --tagging "RetentionClass=candidate" \
+            --if-none-match '*' > .trial-selection/publish-result-private.json \
+            2>"${put_error}"; then
+            : # An identical selection from this deterministic build may already exist.
+          fi
+          aws s3api get-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key "${selection_key}" \
+            --checksum-mode ENABLED \
+            "${readback_dir}/trial-selection.json" >/dev/null 2>&1 || {
+              cat "${put_error}" >&2
+              exit 1
+            }
+          cmp -s .trial-selection/trial-selection.json \
+            "${readback_dir}/trial-selection.json" || {
+              cat "${put_error}" >&2
+              echo "Immutable trial selection exists with different bytes." >&2
+              exit 1
+            }
+          aws s3api head-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key "${selection_key}" \
+            --checksum-mode ENABLED > "${readback_dir}/head.json"
+          jq -e --arg sha "sha256:${selection_hash}" '
+            .ContentType == "application/json" and
+            (.ChecksumSHA256 | type == "string" and length > 0) and
+            .TagCount == 1 and
+            .Metadata == {"retention-class": "candidate", sha256: $sha}' \
+            "${readback_dir}/head.json" >/dev/null
+          aws s3api list-objects-v2 \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --prefix "runs/trial-selection/${selection_id}/" \
+            --no-paginate > "${readback_dir}/objects.json"
+          jq -e --arg key "${selection_key}" '
+            .IsTruncated != true and ([.Contents[].Key] | sort) == [$key]' \
+            "${readback_dir}/objects.json" >/dev/null
+          jq -n \
+            --arg selection_id "${selection_id}" \
+            --arg key "${selection_key}" \
+            --arg sha256 "${selection_hash}" \
+            --arg git_sha "${GITHUB_SHA}" \
+            --arg workflow_run_id "${GITHUB_RUN_ID}" \
+            '{schema_version: "1.0.0", selection_id: $selection_id,
+              trial_selection_s3_key: $key, trial_selection_sha256: $sha256,
+              git_sha: $git_sha, workflow_run_id: $workflow_run_id,
+              split: "validation", test_access_count: 0, heldout_accessed: false}' \
+            > .trial-selection/publication-receipt.json
+          {
+            echo "### Mandatory validation comparison frozen"
+            echo
+            echo "- Selection ID: \`${selection_id}\`"
+            echo "- SHA-256: \`${selection_hash}\`"
+            echo "- Trials: treatment, random-negative control, title-only control"
+            echo "- Held-out access: zero"
+          } >> "${GITHUB_STEP_SUMMARY}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: validation-trial-selection-${{ github.run_id }}
+          path: |
+            .trial-selection/trial-selection.json
+            .trial-selection/publication-receipt.json
+          if-no-files-found: warn
+          retention-days: 90

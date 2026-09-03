@@ -1,0 +1,87 @@
+{
+  "$id": "https://schemas.example.invalid/search-rank/sagemaker_managed_spot_quota_preflight.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Sanitized live Service Quotas evidence captured before training submission.",
+  "properties": {
+    "applied_value": {
+      "exclusiveMinimum": 0,
+      "title": "Applied Value",
+      "type": "number"
+    },
+    "artifact_type": {
+      "const": "sagemaker_managed_spot_quota_preflight",
+      "title": "Artifact Type",
+      "type": "string"
+    },
+    "checked_at": {
+      "format": "date-time",
+      "title": "Checked At",
+      "type": "string"
+    },
+    "instance_type": {
+      "enum": [
+        "ml.m5.xlarge",
+        "ml.g4dn.xlarge"
+      ],
+      "title": "Instance Type",
+      "type": "string"
+    },
+    "quota_code": {
+      "enum": [
+        "L-4CEE6BA6",
+        "L-944F78BB"
+      ],
+      "title": "Quota Code",
+      "type": "string"
+    },
+    "quota_guard_passed": {
+      "const": true,
+      "title": "Quota Guard Passed",
+      "type": "boolean"
+    },
+    "quota_name": {
+      "enum": [
+        "ml.m5.xlarge for spot training job usage",
+        "ml.g4dn.xlarge for spot training job usage"
+      ],
+      "title": "Quota Name",
+      "type": "string"
+    },
+    "region": {
+      "const": "us-east-1",
+      "title": "Region",
+      "type": "string"
+    },
+    "required_value": {
+      "const": 1,
+      "title": "Required Value",
+      "type": "integer"
+    },
+    "schema_version": {
+      "const": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "service_code": {
+      "const": "sagemaker",
+      "title": "Service Code",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "checked_at",
+    "region",
+    "service_code",
+    "instance_type",
+    "quota_code",
+    "quota_name",
+    "applied_value",
+    "required_value",
+    "quota_guard_passed"
+  ],
+  "title": "SageMakerManagedSpotQuotaPreflight",
+  "type": "object"
+}

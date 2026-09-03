@@ -1,6 +1,6 @@
 # Security
 
-Status: design and policy configuration. The owner-approved MFA exception prevents strict PRD security conformance but is not an operational apply blocker. AWS apply remains blocked because temporary non-root CLI access, the cost-risk decision, budget choices, and an exact saved plan are unresolved.
+Status: implementation in progress. The owner-approved MFA exception prevents strict PRD security conformance but is not an operational apply blocker. The repository-bound OIDC provider and state-bootstrap role exist, but the live state policy and the GitHub/AWS workflow-bound OIDC subject migration remain pending. The external project boundary and platform seed role are not claimed as created; platform roles remain unverified until reviewed Terraform plans run. AWS Budgets and budget email confirmation were explicitly waived.
 
 ## Protected assets
 
@@ -16,18 +16,18 @@ Status: design and policy configuration. The owner-approved MFA exception preven
 | Threat | Control |
 |---|---|
 | Stolen long-lived cloud key | No CI access keys; GitHub exchanges OIDC tokens for short-lived role sessions |
-| OIDC use from a fork or unreviewed branch | Trust `sub` must exactly match this repository and a named protected GitHub environment; audience is `sts.amazonaws.com` |
-| Root-account misuse | The owner declined MFA as an accepted exception, so the PRD control is not satisfied. Zero root keys, no routine root use, temporary non-root access, and repository-scoped OIDC are the required compensating controls; the temporary path and OIDC binding remain pending. |
-
-S3 buckets enforce TLS, public-access blocking, and AES-256 SSE-S3. The repository-scoped Trivy exception for `AVD-AWS-0132` is intentional: customer-managed KMS keys add recurring and request costs that conflict with the strict USD 0 target, while the project stores public source data and non-secret model artifacts. Revisit this exception before any sensitive data enters scope.
+| OIDC use from a fork, rename-confusion repository, wrong workflow, or unreviewed branch | Trust requires the immutable owner/repository-ID subject, exact repository name and IDs, `refs/heads/main`, one named protected environment, one exact `job_workflow_ref`, and audience `sts.amazonaws.com` |
+| Root-account misuse | The owner declined MFA as an accepted exception, so the PRD control is not satisfied. Zero root keys, no routine root use, short-lived console/CLI authentication, and repository-scoped OIDC are compensating controls. Root was used only to establish identity bootstrap; the temporary role's administrator policy was removed and replaced with a state-bucket-only inline policy before use. |
 | Train/test leakage | Query-level split assertions, train-only miner, a training role with no `test.parquet` permission, manual held-out flag, and versioned access counter |
 | Artifact substitution | Immutable paths/tags, SHA-256 manifests, S3 checksum verification, serving-image digest |
 | Public bucket exposure | Account/bucket public-access blocks and CloudFront origin access control |
 | Model reads raw data at runtime | Lambda role can read only `public/*`; model is embedded in the image |
 | Arbitrary-code or SSRF input | Curated query IDs only; no uploads, URLs, paths, serialized objects, or shell input |
-| Cost denial of service | API throttle, Lambda reserved concurrency two, zero provisioned concurrency, no always-on endpoint |
+| Cost denial of service or concurrent budget oversubscription | Operation-bound HMAC receipt, conditional S3 campaign-ledger reservation, one shared financial concurrency group, API throttle, Lambda reserved concurrency two, zero provisioned concurrency, and automatic public-serving expiry within 24 hours |
 | Sensitive logging | Structured allowlist fields; no product descriptions, payloads, credentials, account IDs, or stack traces in public responses |
 | Dependency compromise | Pinned locks, PR dependency scans, image scan, Terraform scan, non-root serving container requirement |
+
+All repository workflows and Terraform backends use HTTPS/TLS for S3, and every bucket enables public-access blocking and AES-256 SSE-S3. The fixed six-resource state bootstrap intentionally has no seventh bucket-policy resource, so it does not claim a resource-policy `aws:SecureTransport` deny; account-level preventive controls must supply that enforcement if required. The repository-scoped Trivy exception for `AVD-AWS-0132` is intentional: customer-managed KMS keys add recurring and request costs that conflict with the owner's USD 0 target, while the project stores public source data and non-secret model artifacts. Promotional credit, delayed billing, the reservation ledger, and automatic shutdown cannot make that target a hard guarantee. Revisit both exceptions before any sensitive data enters scope.
 
 ## Identities
 
@@ -35,9 +35,11 @@ S3 buckets enforce TLS, public-access blocking, and AES-256 SSE-S3. The reposito
 
 Reads a run-scoped staging prefix containing only `manifest.json`, `artifact-checksums.json`, `train.parquet`, and `validation.parquet`, plus base-model inputs and its versioned configuration. It has no `data/processed/*` or `test.parquet` permission. Writes only run checkpoint and metric prefixes. Pulls only the training repository.
 
+The serving process verifies every file declared by the immutable release manifest before readiness can become true. Missing files, symbolic links, path escapes, or byte-checksum differences—including changes to curated queries or public evidence—keep `/readyz` unavailable. Its embedded web build is separately attested as API mode so the public API origin cannot expose fixture results.
+
 ### SageMaker processing role
 
-Reads processed data, run artifacts, and promoted inputs. Writes run reports and sanitized public reports. Pulls only the evaluation repository.
+Reads processed data, run artifacts, and promoted inputs. Writes only run-scoped reports; the held-out GitHub workflow separately validates and publishes the sanitized release evidence. Pulls only the evaluation repository.
 
 ### Lambda role
 
@@ -45,11 +47,41 @@ Writes its pre-created CloudWatch log group and reads `s3://<artifact-bucket>/pu
 
 ### GitHub workflow roles
 
-Each protected environment has a separate role and trust policy bound to one exact `repo:<owner>/<repository>:environment:<name>` subject and the `sts.amazonaws.com` audience. The data role can read and create only the content-addressed prepared-data and sanitized data-preparation evidence prefixes; it cannot submit a job or change a release. The image role can push only project images. The training workflow role can read only the manifest/checksum index and train/validation source objects, stages those four allowed files under the run prefix, and can submit only training jobs. The baseline-release role can read only named validation-evidence files and create the initial promoted bundle/pointer; it cannot read processed objects or submit SageMaker jobs. The held-out role can submit only Processing jobs and advance counted release objects, and the production role can deploy the checksummed bundle. The infrastructure role reconciles project Terraform resources. Account-global cases required by AWS APIs are documented in the Terraform policy and remain protected by the exact environment reviewer gate.
+Each protected environment has a separate role and trust policy bound to the immutable subject
+`repo:<owner>@<owner-id>/<repository>@<repository-id>:environment:<name>:job_workflow_ref:<repository>/.github/workflows/<file>@refs/heads/main`, exact repository/ref claims, and the `sts.amazonaws.com` audience. The repository OIDC customization must enable immutable subjects with `environment` and then `job_workflow_ref`; migration and readback are required before first use. The state-bootstrap and platform-seed trusts are separate generated documents for `bootstrap-infrastructure.yml` and `infrastructure.yml` respectively.
+
+The data role can create only content-addressed prepared data and sanitized handoff evidence; it cannot submit a job or change a release. The image role can push only project images. The dedicated baseline role cannot submit SageMaker jobs. The training role can stage only its four named train/validation inputs and submit only training jobs. The trial-selection role can freeze only validation-selection evidence. Baseline-release can create the initial validation-only bundle/pointer; heldout-release alone can submit Processing jobs and advance counted release objects. Production can deploy, while production-benchmark has only its bounded read/request/evidence authority and cannot deploy or roll back. Infrastructure reconciles project Terraform resources. No baseline or benchmark authority is shared with training or production merely for convenience.
+
+All ordinary AWS-mutating roles can read the exact private campaign ledger and can update only that object with an S3 conditional-write header. They cannot blind-overwrite it. Account-global cases required by AWS APIs are documented in the Terraform policy and remain protected by the exact environment/workflow reviewer gate.
+
+### External identity handoff and permissions boundary
+
+`scripts/render_bootstrap_iam.py` renders and validates the account-specific trust, state policy, external
+permissions boundary, and one-time platform seed policy. The state role can create only the deterministic
+state bucket, write only bootstrap state/lock objects, and simulate only its own effective policy. The
+workflow requires all nine S3 provider refresh reads to simulate as allowed before the first create.
+
+Separate dev and prod boundaries are externally created and intentionally absent from Terraform state. Every
+Terraform-created role must carry its own environment's boundary. The boundary permits no role, trust,
+inline-policy, or boundary mutation and explicitly denies artifact-bucket-policy mutation. The persistent
+infrastructure role therefore reconciles services only. The production role has only production state/refresh
+and bounded serving authority; its one bucket-policy grant targets the intentionally public static-site bucket,
+while it has no artifact-bucket-policy access. Neither role can use a mutable proxy role or bucket policy to
+reach held-out/private artifacts. The
+exact temporary environment seed can define only the deterministic project roles and base services; it has
+no project-bucket-policy mutation at all. It may read only its own definition and the selected boundary for
+live attestation, cannot modify either trust root, and is deleted immediately after handoff. The workflow binds
+the seed mode and exact default-boundary hash
+into the reviewed plan. Exact operator commands and recovery constraints are in `docs/cloud-deployment.md`.
+
+The module pre-creates only the three project-named Lambda/API log groups with seven-day retention. It does
+not create or mutate the account-shared `/aws/sagemaker/TrainingJobs` or `/aws/sagemaker/ProcessingJobs`
+groups; job evidence is exported to the versioned artifact bucket, and any account-wide log retention must be
+set by a separate administrator control rather than the project seed.
 
 ### Human administrator
 
-The normal target state uses an SSO or other temporary-credential path, reserves root for account-owner tasks, and enables root/account-owner MFA. The owner declined MFA on 2026-09-02 as an accepted exception, so strict PRD conformance is impossible and MFA will not be requested again. Infrastructure apply remains blocked until the temporary non-root CLI path and the other recorded cost, budget, and plan gates are resolved. No static key belongs in GitHub, local configuration committed to the repository, or chat.
+The normal target state uses short-lived browser/CLI sessions and protected GitHub OIDC roles, reserving root for account-owner bootstrap and break-glass tasks. The owner declined MFA on 2026-09-02 as an accepted exception, so strict PRD conformance is impossible and MFA will not be requested again. No static key belongs in GitHub, local configuration committed to the repository, or chat. The state-bootstrap and environment seed roles are deleted after each exact handoff; the externally controlled environment boundaries remain.
 
 ## Public API rules
 
@@ -63,17 +95,20 @@ The normal target state uses an SSO or other temporary-credential path, reserves
 
 ## Secret handling
 
-The first release needs no application secret. GitHub repository variables hold non-secret resource identifiers. Notification email values should be stored as protected environment variables and are treated as sensitive Terraform inputs. If a future feature needs a secret, document the new threat and use Secrets Manager; do not overload environment variables or repository secrets without review.
+The first release needs no application secret. GitHub repository variables hold non-secret resource identifiers. The owner waived AWS Budgets and email confirmation, so `AWS_BUDGET_NOTIFICATION_EMAIL` remains absent unless a later explicit decision enables budgets. The optional `AWS_ALARM_NOTIFICATION_EMAIL` is a protected environment secret and sensitive Terraform input. Neither address belongs in variables, logs, plans, or public evidence.
+
+The financial observation time, spend, credit, reservation maximum/commitment, CPU/GPU reservation and usage counters, HMAC key, and receipt are protected environment secrets. The version-2 HMAC additionally binds the workflow, full commit, and canonical dispatch-input digest. None is a workflow input or public artifact. Before the first ordinary AWS mutation, the exact workflow/input/commit operation is conditionally reserved in the private S3 ledger. If a future application feature needs a secret, document the new threat and use Secrets Manager; do not overload repository secrets without review.
 
 ## Verification checklist
 
 - [x] Owner MFA decision recorded. MFA was declined as an accepted exception; strict PRD conformance remains unmet, and zero root access keys were observed.
 - [ ] `aws sts get-caller-identity` succeeds via temporary credentials; public evidence is redacted.
-- [ ] OIDC trust policy matches the exact public repository owner/name and protected environments.
+- [ ] Repository OIDC customization readback is immutable and includes `environment`, then `job_workflow_ref`; every AWS trust matches one exact owner/repository identity, protected environment, workflow file, and `main`.
 - [ ] A fork pull request cannot obtain an AWS token.
 - [ ] S3 public-access blocks and bucket policies are inspected after apply.
 - [ ] Lambda effective policy contains no raw-data access.
 - [ ] Reserved concurrency is two; no provisioned-concurrency configuration exists.
-- [ ] Container executes as a non-root user and uses `trust_remote_code=False`.
+- [ ] The private financial ledger denies unconditional writes, a stale ETag loses, and public serving expires within 24 hours; neither control is represented as a hard USD 0 guarantee.
+- [x] Container source contracts require a non-root user and model loading uses `trust_remote_code=False`; deployed-image inspection remains part of cloud evidence.
 - [ ] Dependency and image scans have no unreviewed high/critical findings.
-- [ ] Public errors and logs pass redaction tests.
+- [x] Public errors and structured allowlist logs pass local redaction/field tests; CloudWatch evidence remains pending.

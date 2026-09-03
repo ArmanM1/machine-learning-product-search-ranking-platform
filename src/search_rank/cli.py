@@ -56,12 +56,19 @@ from search_rank.logging import configure_logging, log_event
 from search_rank.runs import CommandRun
 from search_rank.schemas.api import (
     ModelSummary,
+    PublicEvaluationProvenance,
     PublicModelMetricRow,
     PublicRunSummary,
+    PublicTrainingProvenance,
     PublicValidationRunMetrics,
     PublicValidationRunSummary,
 )
-from search_rank.schemas.evaluation import EvaluationReport
+from search_rank.schemas.evaluation import EvaluationReport, PairedDifference, ReleaseGateResult
+from search_rank.schemas.evidence import BundleChecksums, EvaluationProvenance, ReleaseManifest
+from search_rank.schemas.model import ModelArtifact
+from search_rank.schemas.publication import BaselineSummary, CommandSummary
+from search_rank.schemas.run import RunManifest
+from search_rank.schemas.trial import TrialSelection
 from search_rank.serving.app import create_app
 from search_rank.serving.dependencies import ServiceSettings, ServiceState
 from search_rank.serving.public_evidence import (
@@ -89,6 +96,7 @@ from search_rank.training import (
 LOGGER = logging.getLogger(__name__)
 SHA256_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 GIT_SHA_PATTERN = re.compile(r"^[0-9a-f]{7,64}$")
+PUBLIC_DISTRIBUTION_NOTICES = ("LICENSE", "NOTICE")
 app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
 data_app = typer.Typer(no_args_is_help=True)
 baseline_app = typer.Typer(no_args_is_help=True)
@@ -117,6 +125,30 @@ def _read_json(path: str | Path) -> dict[str, Any]:
     return payload
 
 
+def _copy_public_distribution_notices(destination: Path) -> tuple[Path, ...]:
+    """Copy the repository license and third-party attribution into a public bundle."""
+
+    candidates = (
+        Path.cwd(),
+        Path(__file__).resolve().parents[2],
+        Path("/var/task"),
+    )
+    source_root = next(
+        (
+            candidate
+            for candidate in candidates
+            if all((candidate / name).is_file() for name in PUBLIC_DISTRIBUTION_NOTICES)
+        ),
+        None,
+    )
+    if source_root is None:
+        raise FileNotFoundError("public distribution LICENSE and NOTICE files are unavailable")
+    return tuple(
+        Path(shutil.copy2(source_root / name, destination / name))
+        for name in PUBLIC_DISTRIBUTION_NOTICES
+    )
+
+
 def _write_bundle_checksums(root: Path) -> Path:
     output = root / "bundle-checksums.json"
     files = {
@@ -124,24 +156,15 @@ def _write_bundle_checksums(root: Path) -> Path:
         for path in sorted(root.rglob("*"))
         if path.is_file() and path != output
     }
-    output.write_text(
-        json.dumps(
-            {"schema_version": "1.0.0", "files": files},
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
+    inventory = BundleChecksums.model_validate({"schema_version": "1.0.0", "files": files})
+    output.write_text(inventory.model_dump_json(indent=2) + "\n", encoding="utf-8")
     return output
 
 
 def _verify_bundle_checksum_inventory(root: Path) -> None:
     bundle_path = root / "bundle-checksums.json"
-    payload = _read_json(bundle_path)
-    files = payload.get("files")
-    if payload.get("schema_version") != "1.0.0" or not isinstance(files, dict):
-        raise ValueError("bundle checksum inventory has an invalid schema")
+    inventory = BundleChecksums.model_validate_json(bundle_path.read_text(encoding="utf-8"))
+    files = inventory.files
     actual = {
         path.relative_to(root).as_posix()
         for path in root.rglob("*")
@@ -268,12 +291,21 @@ def _p95_inference_latency(records: list[ScoredProduct]) -> float:
 
 
 def _ranking_hash(records: list[ScoredProduct], *, include_scores: bool) -> str:
-    ordered = sorted(records, key=lambda item: (item.query_id, item.product_id))
+    ordered = sorted(records, key=lambda item: (item.query_id, item.rank, item.product_id))
     rows = (
         [(row.query_id, row.product_id, row.rank, round(row.score, 12)) for row in ordered]
         if include_scores
-        else [(row.query_id, row.product_id) for row in ordered]
+        else [(row.query_id, row.product_id, row.rank) for row in ordered]
     )
+    return f"sha256:{sha256_value(rows)}"
+
+
+def _candidate_universe_hash(records: list[ScoredProduct]) -> str:
+    """Bind identical query/product membership without conflating it with model order."""
+
+    rows = sorted((row.query_id, row.product_id) for row in records)
+    if len(rows) != len(set(rows)):
+        raise ValueError("candidate universe contains a duplicate query/product pair")
     return f"sha256:{sha256_value(rows)}"
 
 
@@ -396,6 +428,7 @@ def data_prepare(
             {
                 "dataset_manifest": str((destination / "manifest.json").resolve()),
                 "processed_checksum": manifest.processed_checksum,
+                "split_manifest_hash": manifest.split_manifest_hash,
                 "query_count": manifest.query_count,
                 "row_count": manifest.row_count,
             },
@@ -444,50 +477,46 @@ def baseline_run(
         selected_aggregate = aggregates[strongest_id]
         baseline_summary = run.run_dir / "baseline-summary.json"
         baseline_summary.parent.mkdir(parents=True, exist_ok=True)
-        baseline_summary.write_text(
-            json.dumps(
-                {
-                    "schema_version": "1.0.0",
-                    "config_hash": config_hash,
-                    "dataset_manifest_hash": manifest.processed_checksum,
-                    "dataset_name": manifest.dataset_name,
-                    "dataset_version": manifest.dataset_version,
-                    "dataset_locale": manifest.locale,
-                    "split": validated.split,
-                    "metrics": metrics,
-                    "system_metrics": {
-                        model_id: {
-                            name: value
-                            for name, value in aggregate.values.items()
-                            if value is not None
-                        }
-                        for model_id, aggregate in aggregates.items()
-                    },
-                    "system_metric_query_counts": {
-                        model_id: dict(aggregate.metric_query_counts)
-                        for model_id, aggregate in aggregates.items()
-                    },
-                    "system_metric_excluded_query_counts": {
-                        model_id: dict(aggregate.metric_excluded_query_counts)
-                        for model_id, aggregate in aggregates.items()
-                    },
-                    "p95_inference_latency_ms": {
-                        model_id: _p95_inference_latency(records)
-                        for model_id, records in rankings.items()
-                    },
-                    "strongest_baseline_id": strongest_id,
-                    "strongest_baseline_value": strongest_value,
-                    "validation_query_count": manifest.split_counts[validated.split].query_count,
-                    "excluded_query_count": selected_aggregate.metric_excluded_query_counts[
-                        "graded_ndcg@10"
-                    ],
-                    "rankings": ranking_paths,
-                    "resumed_from_run_id": resumed_from_run_id,
+        baseline_artifact = BaselineSummary.model_validate(
+            {
+                "schema_version": "1.0.0",
+                "config_hash": config_hash,
+                "dataset_manifest_hash": manifest.processed_checksum,
+                "dataset_name": manifest.dataset_name,
+                "dataset_version": manifest.dataset_version,
+                "dataset_locale": manifest.locale,
+                "split": validated.split,
+                "metrics": metrics,
+                "system_metrics": {
+                    model_id: {
+                        name: value for name, value in aggregate.values.items() if value is not None
+                    }
+                    for model_id, aggregate in aggregates.items()
                 },
-                indent=2,
-                sort_keys=True,
-            )
-            + "\n",
+                "system_metric_query_counts": {
+                    model_id: dict(aggregate.metric_query_counts)
+                    for model_id, aggregate in aggregates.items()
+                },
+                "system_metric_excluded_query_counts": {
+                    model_id: dict(aggregate.metric_excluded_query_counts)
+                    for model_id, aggregate in aggregates.items()
+                },
+                "p95_inference_latency_ms": {
+                    model_id: _p95_inference_latency(records)
+                    for model_id, records in rankings.items()
+                },
+                "strongest_baseline_id": strongest_id,
+                "strongest_baseline_value": strongest_value,
+                "validation_query_count": manifest.split_counts[validated.split].query_count,
+                "excluded_query_count": selected_aggregate.metric_excluded_query_counts[
+                    "graded_ndcg@10"
+                ],
+                "rankings": ranking_paths,
+                "resumed_from_run_id": resumed_from_run_id,
+            }
+        )
+        baseline_summary.write_text(
+            baseline_artifact.model_dump_json(indent=2) + "\n",
             encoding="utf-8",
         )
         run.add_artifact("baseline_summary", baseline_summary)
@@ -550,9 +579,10 @@ def bootstrap_baseline_release(
         if str(hashes.get("curated_queries", "")) != f"sha256:{sha256_file(curated_queries)}":
             raise ValueError("curated queries differ from the baseline command evidence")
 
-        artifact = _read_json(artifact_path)
-        if artifact.get("split") != "validation":
-            raise ValueError("baseline bootstrap accepts validation evidence only")
+        baseline_artifact = BaselineSummary.model_validate_json(
+            artifact_path.read_text(encoding="utf-8")
+        )
+        artifact = baseline_artifact.model_dump(mode="json")
         validated_config = validate_config(baseline_config, BaselineRunConfig)
         config_hash = f"sha256:{sha256_value(validated_config)}"
         if artifact.get("config_hash") != config_hash:
@@ -682,6 +712,7 @@ def bootstrap_baseline_release(
             selected_model_id=selected_id,
             config_hash=config_hash,
             dataset_manifest_hash=manifest.processed_checksum,
+            split_manifest_hash=manifest.split_manifest_hash,
             git_sha=git_sha,
             image_digest=image_digest,
             model_artifact_checksum=next(
@@ -735,29 +766,36 @@ def bootstrap_baseline_release(
         shutil.copy2(artifact_path, staging / "baseline-summary.json")
         shutil.copy2(curated_queries, staging / "curated-queries.json")
         evidence_path = write_public_evidence(evidence, staging / "public-evidence.json")
+        _copy_public_distribution_notices(staging)
         artifact_checksums = {
             "baseline-summary.json": f"sha256:{sha256_file(staging / 'baseline-summary.json')}",
             "curated-queries.json": f"sha256:{sha256_file(staging / 'curated-queries.json')}",
             "public-evidence.json": f"sha256:{sha256_file(evidence_path)}",
+            "LICENSE": f"sha256:{sha256_file(staging / 'LICENSE')}",
+            "NOTICE": f"sha256:{sha256_file(staging / 'NOTICE')}",
         }
         release_id = f"baseline-{summary['run_id']}"
-        release_manifest = {
-            "schema_version": "1.0.0",
-            "release_id": release_id,
-            "promoted_model_id": selected_id,
-            "dataset_manifest_hash": manifest.processed_checksum,
-            "evaluation_report_id": evidence_id,
-            "git_sha": git_sha,
-            "evidence_mode": "validation_only",
-            "artifact_checksums": artifact_checksums,
-            "models": release_models,
-        }
+        release_manifest = ReleaseManifest.model_validate(
+            {
+                "schema_version": "1.0.0",
+                "release_id": release_id,
+                "promoted_model_id": selected_id,
+                "dataset_manifest_hash": manifest.processed_checksum,
+                "split_manifest_hash": manifest.split_manifest_hash,
+                "evaluation_report_id": evidence_id,
+                "git_sha": git_sha,
+                "evidence_mode": "validation_only",
+                "artifact_checksums": artifact_checksums,
+                "models": release_models,
+            }
+        )
+        release_manifest_payload = release_manifest.model_dump(mode="json", exclude_none=True)
         release_manifest_path = staging / "release-manifest.json"
         release_manifest_path.write_text(
-            json.dumps(release_manifest, indent=2, sort_keys=True, default=str) + "\n",
+            json.dumps(release_manifest_payload, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
-        ServiceState._validate_evidence_binding(evidence, release_manifest)
+        ServiceState._validate_evidence_binding(evidence, release_manifest_payload)
         _write_bundle_checksums(staging)
         _verify_bundle_checksum_inventory(staging)
         os.replace(staging, output_dir.resolve())
@@ -774,6 +812,7 @@ def bootstrap_baseline_release(
                 "bundle_checksums": str((output_dir / "bundle-checksums.json").resolve()),
                 "promoted_model_id": selected_id,
                 "evidence_mode": "validation_only",
+                "split_manifest_hash": manifest.split_manifest_hash,
                 "test_access_count": 0,
             },
         )
@@ -817,6 +856,25 @@ def train(
     run = CommandRun("train", str(config))
     try:
         experiment = load_frozen_experiment(config)
+        cloud_hardware = os.environ.get("SEARCH_RANK_HARDWARE_CLASS")
+        declared_accelerator = os.environ.get("SEARCH_RANK_ACCELERATOR")
+        training_device = "auto"
+        if cloud_hardware is not None or declared_accelerator is not None:
+            if cloud_hardware is None or declared_accelerator is None:
+                raise ValueError(
+                    "cloud hardware and accelerator declarations must be provided together"
+                )
+            if experiment.requested_hardware != cloud_hardware:
+                raise ValueError(
+                    "frozen experiment requested_hardware differs from the runtime instance"
+                )
+            expected_accelerator = {
+                "ml.m5.xlarge": "cpu",
+                "ml.g4dn.xlarge": "gpu",
+            }.get(cloud_hardware)
+            if expected_accelerator is None or declared_accelerator != expected_accelerator:
+                raise ValueError("runtime instance and accelerator declarations are inconsistent")
+            training_device = "cuda" if declared_accelerator == "gpu" else "cpu"
         manifest, _ = load_dataset_manifest(dataset_manifest)
         manifest_hash = manifest.processed_checksum
         if manifest_hash != experiment.dataset_manifest_hash:
@@ -892,34 +950,59 @@ def train(
             validation_frame,
             experiment,
             output_dir=run.run_dir / "candidate",
+            device=training_device,
+            checkpoint_dir=os.environ.get("SEARCH_RANK_CHECKPOINT_DIR"),
         )
+        if declared_accelerator is not None and result.accelerator_type != declared_accelerator:
+            raise RuntimeError("actual training accelerator differs from the frozen cloud request")
         frozen_copy = run.run_dir / "candidate" / "frozen-experiment.yaml"
         shutil.copy2(config, frozen_copy)
         candidate_id = f"candidate-{experiment.config_id}-{experiment.config_hash[7:19]}"
         checkpoint_checksum = f"sha256:{sha256_directory(result.best_checkpoint)}"
+        checkpoint_size_bytes = sum(
+            path.stat().st_size
+            for path in Path(result.best_checkpoint).rglob("*")
+            if path.is_file()
+        )
+        artifact = ModelArtifact.model_validate(
+            {
+                "schema_version": "1.0.0",
+                "model_id": candidate_id,
+                "run_id": os.environ.get("SEARCH_RANK_CLOUD_RUN_ID", run.run_id),
+                "base_model_id": experiment.base_model_id,
+                "base_model_revision": experiment.base_model_revision,
+                "tokenizer_revision": experiment.base_model_revision,
+                "checkpoint_uri": "candidate/best",
+                "artifact_checksum": checkpoint_checksum,
+                "artifact_size_bytes": checkpoint_size_bytes,
+                "config_id": experiment.config_id,
+                "config_hash": experiment.config_hash,
+                "dataset_manifest_hash": manifest_hash,
+                "input_contract_version": experiment.input_template_version,
+                "label_mapping_version": experiment.label_mapping_version,
+                "sampling_strategy": experiment.sampling_strategy,
+                "hard_example_sources": experiment.hard_example_sources,
+                "promoted": False,
+                "promotion_reason": "pending held-out evaluation",
+                "evaluation_report_id": "not_evaluated",
+                "git_sha": os.environ.get("SEARCH_RANK_GIT_SHA", "unavailable"),
+                "image_digest": os.environ.get("SEARCH_RANK_TRAINING_IMAGE_DIGEST", "unavailable"),
+                "sample_statistics": {
+                    "row_count": len(sample),
+                    "sampling_source_counts": sampling_counts,
+                    "label_counts": label_counts,
+                },
+                "training_result": {
+                    **result.__dict__,
+                    "best_checkpoint": "candidate/best",
+                    "curves_path": "candidate/curves.json",
+                },
+                "created_at": datetime.now(UTC),
+            }
+        )
         model_manifest = run.run_dir / "model-manifest.json"
         model_manifest.write_text(
-            json.dumps(
-                {
-                    "schema_version": "1.0.0",
-                    "candidate_model_id": candidate_id,
-                    "checkpoint": result.best_checkpoint,
-                    "checkpoint_checksum": checkpoint_checksum,
-                    "dataset_manifest_hash": manifest_hash,
-                    "config_hash": experiment.config_hash,
-                    "base_model_id": experiment.base_model_id,
-                    "base_model_revision": experiment.base_model_revision,
-                    "sample_statistics": {
-                        "row_count": len(sample),
-                        "sampling_source_counts": sampling_counts,
-                        "label_counts": label_counts,
-                    },
-                    "training_result": result.__dict__,
-                },
-                indent=2,
-                sort_keys=True,
-            )
-            + "\n",
+            artifact.model_dump_json(indent=2) + "\n",
             encoding="utf-8",
         )
         for name, path in {
@@ -940,6 +1023,15 @@ def train(
                 "dataset_manifest_hash": manifest_hash,
                 "best_validation_ndcg_at_10": result.best_validation_ndcg_at_10,
                 "duration_seconds": result.duration_seconds,
+                "hardware_class": cloud_hardware or "local-cpu",
+                "accelerator": result.accelerator_type,
+                "device_type": result.device_type,
+                "cuda_available": result.cuda_available,
+                "cuda_device_count": result.cuda_device_count,
+                "training_image_digest": os.environ.get(
+                    "SEARCH_RANK_TRAINING_IMAGE_DIGEST", "sha256:" + "0" * 64
+                ),
+                "region": os.environ.get("AWS_REGION", "local"),
                 "input_template_version": experiment.input_template_version,
                 "frozen_config": str(frozen_copy.resolve()),
                 "sample_statistics": {
@@ -1208,6 +1300,9 @@ def evaluate(
             confidence_level=evaluation.confidence_level,
             test_access_count=receipt.test_access_count if receipt else 0,
             training_runtime_seconds=float(training_result["duration_seconds"]),
+            training_hardware=str(
+                training_result.get("hardware_class", "training-hardware-not-recorded")
+            ),
             evaluation_hardware=hardware_class,
             model_artifact_size_bytes=sum(
                 item.stat().st_size for item in checkpoint.rglob("*") if item.is_file()
@@ -1234,51 +1329,51 @@ def evaluate(
             ),
         )
         universe_hashes = {
-            candidate_id: _ranking_hash(candidate_records, include_scores=False),
+            candidate_id: _candidate_universe_hash(candidate_records),
             **{
-                model_id: _ranking_hash(records, include_scores=False)
+                model_id: _candidate_universe_hash(records)
                 for model_id, records in baselines.items()
             },
         }
+        single_provenance = EvaluationProvenance.model_validate(
+            {
+                "schema_version": "1.0.0",
+                "artifact_type": "evaluation_provenance",
+                "report_id": report.report_id,
+                "split": evaluation.split,
+                "config_hash": config_hash,
+                "evaluation_config_checksum": frozen_evaluation_checksum,
+                "staged_evaluation_config_checksum": staged_evaluation_checksum,
+                "evaluation_image_digest": evaluation_image_digest or "unavailable",
+                "evaluation_git_sha": evaluation_git_sha or "unavailable",
+                "hardware_class": hardware_class,
+                "region": evaluation_region,
+                "training_strategy": experiment.sampling_strategy,
+                "frozen_config": str(frozen_config.resolve()),
+                "checkpoint_checksum": checkpoint_checksum,
+                "dataset_manifest_hash": evaluated_manifest_hash,
+                "split_manifest_hash": evaluated_manifest.split_manifest_hash,
+                "dataset_name": evaluated_manifest.dataset_name,
+                "dataset_version": evaluated_manifest.dataset_version,
+                "dataset_locale": evaluated_manifest.locale,
+                "strongest_baseline_id": report.primary_metric.strongest_baseline_id,
+                "validation_baseline_summary_checksum": baseline_artifact_hash,
+                "candidate_universe_hash": universe_hashes[candidate_id],
+                "system_universe_hashes": universe_hashes,
+                "candidate_lists_aligned": len(set(universe_hashes.values())) == 1,
+                "clean_run_metric_values": clean_values,
+                "clean_ranking_hashes": clean_hashes,
+                "independent_evaluation_count": 1,
+                "slice_min_query_count": evaluation.slice_min_query_count,
+                "reproduction_tolerance": evaluation.reproduction_tolerance,
+                "evaluated_baseline_model_ids": list(declared_baselines),
+                "test_access_count": receipt.test_access_count if receipt else 0,
+                "source_evaluations": [],
+            }
+        )
         provenance_path = run.run_dir / "evaluation-provenance.json"
         provenance_path.write_text(
-            json.dumps(
-                {
-                    "schema_version": "1.0.0",
-                    "report_id": report.report_id,
-                    "split": evaluation.split,
-                    "config_hash": config_hash,
-                    "evaluation_config_checksum": frozen_evaluation_checksum,
-                    "staged_evaluation_config_checksum": staged_evaluation_checksum,
-                    "evaluation_image_digest": evaluation_image_digest,
-                    "evaluation_git_sha": evaluation_git_sha or "unavailable",
-                    "hardware_class": hardware_class,
-                    "region": evaluation_region,
-                    "training_strategy": experiment.sampling_strategy,
-                    "frozen_config": str(frozen_config.resolve()),
-                    "checkpoint_checksum": checkpoint_checksum,
-                    "dataset_manifest_hash": evaluated_manifest_hash,
-                    "dataset_name": evaluated_manifest.dataset_name,
-                    "dataset_version": evaluated_manifest.dataset_version,
-                    "dataset_locale": evaluated_manifest.locale,
-                    "strongest_baseline_id": report.primary_metric.strongest_baseline_id,
-                    "validation_baseline_summary_checksum": baseline_artifact_hash,
-                    "candidate_universe_hash": universe_hashes[candidate_id],
-                    "system_universe_hashes": universe_hashes,
-                    "candidate_lists_aligned": len(set(universe_hashes.values())) == 1,
-                    "clean_run_metric_values": clean_values,
-                    "clean_ranking_hashes": clean_hashes,
-                    "independent_evaluation_count": 1,
-                    "slice_min_query_count": evaluation.slice_min_query_count,
-                    "reproduction_tolerance": evaluation.reproduction_tolerance,
-                    "evaluated_baseline_model_ids": list(declared_baselines),
-                    "test_access_count": receipt.test_access_count if receipt else 0,
-                },
-                indent=2,
-                sort_keys=True,
-            )
-            + "\n",
-            encoding="utf-8",
+            single_provenance.model_dump_json(indent=2) + "\n", encoding="utf-8"
         )
         run.add_artifact("evaluation_report", report_path)
         run.add_artifact("curated_queries", curated_path)
@@ -1297,6 +1392,7 @@ def evaluate(
                 "checkpoint": str(checkpoint.resolve()),
                 "checkpoint_checksum": checkpoint_checksum,
                 "dataset_manifest_hash": evaluated_manifest_hash,
+                "split_manifest_hash": evaluated_manifest.split_manifest_hash,
                 "evaluation_provenance": str(provenance_path.resolve()),
                 "evaluation_config_checksum": frozen_evaluation_checksum,
                 "evaluation_image_digest": evaluation_image_digest,
@@ -1317,29 +1413,47 @@ def _evaluation_source(
     reference: Path,
 ) -> tuple[dict[str, Any], EvaluationReport, dict[str, Any], Path, Path]:
     summary = _latest_summary(reference)
-    if summary.get("command") != "evaluate" or summary.get("status") != "succeeded":
+    command = CommandSummary.model_validate(summary)
+    if command.command != "evaluate" or command.status != "succeeded":
         raise ValueError("clean-run source must be a successful evaluate command summary")
-    result = summary.get("result")
-    hashes = summary.get("artifact_hashes")
+    result = command.result
+    hashes = command.artifact_hashes
     if not isinstance(result, dict) or not isinstance(hashes, dict):
         raise ValueError("evaluation source is missing result or artifact hashes")
+    expected_artifacts = {"evaluation_report", "evaluation_provenance", "curated_queries"}
+    if set(hashes) != expected_artifacts:
+        raise ValueError("clean-run command artifact inventory is not exact")
     summary_dir = reference.resolve().parent
     report_path = Path(str(result.get("evaluation_report", "")))
     provenance_path = Path(str(result.get("evaluation_provenance", "")))
+    curated_path = Path(str(result.get("curated_queries", "")))
     if not report_path.is_file():
         report_path = summary_dir / "evaluation-report.json"
     if not provenance_path.is_file():
         provenance_path = summary_dir / "evaluation-provenance.json"
+    if not curated_path.is_file():
+        curated_path = summary_dir / "curated-queries.json"
     expected_report = str(hashes.get("evaluation_report", ""))
     expected_provenance = str(hashes.get("evaluation_provenance", ""))
+    expected_curated = str(hashes.get("curated_queries", ""))
     if expected_report != f"sha256:{sha256_file(report_path)}":
         raise ValueError("clean-run evaluation report checksum mismatch")
     if expected_provenance != f"sha256:{sha256_file(provenance_path)}":
         raise ValueError("clean-run evaluation provenance checksum mismatch")
+    if expected_curated != f"sha256:{sha256_file(curated_path)}":
+        raise ValueError("clean-run curated-query checksum mismatch")
     report = EvaluationReport.model_validate_json(report_path.read_text(encoding="utf-8"))
-    provenance = _read_json(provenance_path)
+    provenance = EvaluationProvenance.model_validate_json(
+        provenance_path.read_text(encoding="utf-8")
+    ).model_dump(mode="json")
     if provenance.get("report_id") != report.report_id:
         raise ValueError("clean-run report and provenance IDs differ")
+    if command.run_id != report.run_id:
+        raise ValueError("clean-run command and report run IDs differ")
+    if command.repository_dirty:
+        raise ValueError("clean-run command was produced from a dirty repository")
+    if command.git_sha != provenance.get("evaluation_git_sha"):
+        raise ValueError("clean-run command and provenance Git revisions differ")
     return summary, report, provenance, report_path, provenance_path
 
 
@@ -1380,11 +1494,18 @@ def bind_clean_evaluations(
         if first_report.run_id == second_report.run_id:
             raise ValueError("clean evaluations must have distinct run IDs")
 
+        first_result = first_summary_payload.get("result")
+        second_result = second_summary_payload.get("result")
+        if not isinstance(first_result, dict) or not isinstance(second_result, dict):
+            raise ValueError("clean evaluation summaries have invalid result objects")
+
         identity_keys = (
             "config_hash",
             "evaluation_config_checksum",
+            "staged_evaluation_config_checksum",
             "checkpoint_checksum",
             "dataset_manifest_hash",
+            "split_manifest_hash",
             "dataset_name",
             "dataset_version",
             "dataset_locale",
@@ -1408,8 +1529,59 @@ def bind_clean_evaluations(
             raise ValueError("clean evaluations lack a canonical evaluation-config checksum")
         if not SHA256_PATTERN.fullmatch(str(first_provenance["evaluation_image_digest"])):
             raise ValueError("clean evaluations lack an immutable image digest")
-        if not GIT_SHA_PATTERN.fullmatch(str(first_provenance["evaluation_git_sha"])):
-            raise ValueError("clean evaluations lack an immutable Git revision")
+        if re.fullmatch(r"[0-9a-f]{40}", str(first_provenance["evaluation_git_sha"])) is None:
+            raise ValueError("clean evaluations lack a full immutable Git revision")
+
+        summary_identity_keys = (
+            "candidate_model_id",
+            "checkpoint_checksum",
+            "config_hash",
+            "dataset_manifest_hash",
+            "split_manifest_hash",
+            "evaluation_config_checksum",
+            "evaluation_image_digest",
+            "evaluation_git_sha",
+            "hardware_class",
+            "region",
+            "training_strategy",
+            "input_template_version",
+            "base_model_id",
+            "base_model_revision",
+            "primary_metric",
+        )
+        for key in summary_identity_keys:
+            if key not in first_result or key not in second_result:
+                raise ValueError(f"clean evaluation summaries lack frozen identity: {key}")
+            if first_result[key] != second_result[key]:
+                raise ValueError(f"clean evaluation summaries differ in frozen identity: {key}")
+
+        for label, result, report, provenance in (
+            ("first", first_result, first_report, first_provenance),
+            ("second", second_result, second_report, second_provenance),
+        ):
+            expected_summary_identity = {
+                "candidate_model_id": report.candidate_model_id,
+                "checkpoint_checksum": provenance["checkpoint_checksum"],
+                "config_hash": provenance["config_hash"],
+                "dataset_manifest_hash": provenance["dataset_manifest_hash"],
+                "split_manifest_hash": provenance["split_manifest_hash"],
+                "evaluation_config_checksum": provenance["evaluation_config_checksum"],
+                "evaluation_image_digest": provenance["evaluation_image_digest"],
+                "evaluation_git_sha": provenance["evaluation_git_sha"],
+                "hardware_class": provenance["hardware_class"],
+                "region": provenance["region"],
+                "training_strategy": provenance["training_strategy"],
+                "primary_metric": report.primary_metric.model_dump(mode="json"),
+            }
+            for key, expected in expected_summary_identity.items():
+                if result.get(key) != expected:
+                    raise ValueError(
+                        f"{label} clean evaluation summary is not bound to its evidence: {key}"
+                    )
+            if report.evaluation_runtime.hardware != provenance["hardware_class"]:
+                raise ValueError(
+                    f"{label} clean evaluation report is not bound to its hardware identity"
+                )
 
         report_identity = (
             "candidate_model_id",
@@ -1421,10 +1593,35 @@ def bind_clean_evaluations(
             "bootstrap_seed",
             "bootstrap_resamples",
             "confidence_level",
+            "training_runtime",
         )
         for field in report_identity:
             if getattr(first_report, field) != getattr(second_report, field):
                 raise ValueError(f"clean evaluation reports differ in {field}")
+        if first_report.primary_metric != second_report.primary_metric:
+            raise ValueError("clean evaluation reports differ in primary metric evidence")
+        if first_report.paired_differences != second_report.paired_differences:
+            raise ValueError("clean evaluation reports differ in paired-difference evidence")
+        if first_report.slice_results != second_report.slice_results:
+            raise ValueError("clean evaluation reports differ in release-gated slice evidence")
+
+        slice_min_query_count = int(first_provenance["slice_min_query_count"])
+        for label, report in (("first", first_report), ("second", second_report)):
+            for item in report.slice_results:
+                derived_adequacy = item.query_count >= slice_min_query_count
+                if item.adequate_sample_size != derived_adequacy:
+                    raise ValueError(
+                        f"{label} clean evaluation slice adequacy is inconsistent with "
+                        f"the frozen minimum query count: {item.dimension}/{item.slice_name}"
+                    )
+
+        clean_ranking_hashes = [
+            str(first_provenance["clean_ranking_hashes"][0]),
+            str(second_provenance["clean_ranking_hashes"][0]),
+        ]
+        if clean_ranking_hashes[0] != clean_ranking_hashes[1]:
+            raise ValueError("clean evaluations produced different candidate ranking hashes")
+
         clean_values = (
             float(first_report.primary_metric.candidate_value),
             float(second_report.primary_metric.candidate_value),
@@ -1439,48 +1636,108 @@ def bind_clean_evaluations(
             if int(provenance.get("independent_evaluation_count", 0)) != 1:
                 raise ValueError("each source must represent exactly one clean evaluation")
 
-        primary_interval = next(
-            interval
-            for interval in first_report.paired_differences
-            if interval.baseline_model_id == first_report.primary_metric.strongest_baseline_id
-            and interval.metric_name == "graded_ndcg@10"
-        )
-        slice_regressions = tuple(
-            float(item.point_estimate)
-            for item in first_report.slice_results
-            if item.adequate_sample_size
-            and item.point_estimate is not None
-            and item.point_estimate < 0
-        )
-        gate = evaluate_release_gate(
-            ReleaseGateInputs(
-                candidate_model_id=first_report.candidate_model_id,
-                strongest_baseline_model_id=first_report.primary_metric.strongest_baseline_id,
-                candidate_ndcg_at_10=first_report.primary_metric.candidate_value,
-                baseline_ndcg_at_10=first_report.primary_metric.strongest_baseline_value,
-                difference_ci_lower=primary_interval.ci_lower,
-                difference_ci_upper=primary_interval.ci_upper,
-                confidence_level=first_report.confidence_level,
-                relevance_mapping_version=first_report.metric_definition_version,
-                resampling_unit=primary_interval.resampling_unit,
-                bootstrap_seed=first_report.bootstrap_seed,
-                bootstrap_resamples=first_report.bootstrap_resamples,
-                query_count=first_report.query_count,
-                excluded_query_count=first_report.excluded_query_count,
-                test_access_count=second_report.test_access_count,
-                clean_run_metric_values=clean_values,
-                candidate_lists_aligned=bool(
-                    first_provenance["candidate_lists_aligned"]
-                    and second_provenance["candidate_lists_aligned"]
+        def primary_interval(report: EvaluationReport) -> PairedDifference:
+            intervals = [
+                interval
+                for interval in report.paired_differences
+                if interval.baseline_model_id == report.primary_metric.strongest_baseline_id
+                and interval.metric_name == report.primary_metric.metric_name
+            ]
+            if len(intervals) != 1:
+                raise ValueError(
+                    "each clean report must contain exactly one primary strongest-baseline interval"
+                )
+            interval = intervals[0]
+            interval_identity = {
+                "candidate model": interval.candidate_model_id == report.candidate_model_id,
+                "point estimate": math.isclose(
+                    interval.point_estimate,
+                    report.primary_metric.candidate_minus_baseline,
+                    rel_tol=0.0,
+                    abs_tol=1e-12,
                 ),
-                configuration_frozen=True,
-                clean_runs_match_artifacts=True,
-                unexplained_slice_deltas=slice_regressions,
-            ),
-            ReleaseGateConfig(
-                reproducibility_tolerance=float(first_provenance["reproduction_tolerance"])
-            ),
+                "confidence level": interval.confidence_level == report.confidence_level,
+                "query count": interval.query_count == report.query_count,
+                "excluded query count": (
+                    interval.excluded_query_count == report.excluded_query_count
+                ),
+                "bootstrap seed": interval.bootstrap_seed == report.bootstrap_seed,
+                "bootstrap resamples": (interval.bootstrap_resamples == report.bootstrap_resamples),
+            }
+            failures = [name for name, matches in interval_identity.items() if not matches]
+            if failures:
+                raise ValueError(
+                    "primary paired interval is not bound to its report: " + ", ".join(failures)
+                )
+            return interval
+
+        first_interval = primary_interval(first_report)
+        second_interval = primary_interval(second_report)
+        configuration_frozen = all(
+            first_provenance[key] == second_provenance[key] for key in identity_keys
         )
+        reports_match_release_evidence = (
+            all(
+                getattr(first_report, field) == getattr(second_report, field)
+                for field in report_identity
+            )
+            and first_report.primary_metric == second_report.primary_metric
+            and first_report.paired_differences == second_report.paired_differences
+            and first_report.slice_results == second_report.slice_results
+        )
+        clean_runs_match_artifacts = (
+            configuration_frozen
+            and reports_match_release_evidence
+            and clean_ranking_hashes[0] == clean_ranking_hashes[1]
+            and all(first_result[key] == second_result[key] for key in summary_identity_keys)
+        )
+        candidate_lists_aligned = bool(
+            first_provenance["candidate_lists_aligned"]
+            and second_provenance["candidate_lists_aligned"]
+        )
+
+        def recompute_gate(
+            report: EvaluationReport, interval: PairedDifference
+        ) -> ReleaseGateResult:
+            slice_regressions = tuple(
+                float(item.point_estimate)
+                for item in report.slice_results
+                if item.query_count >= slice_min_query_count
+                and item.point_estimate is not None
+                and item.point_estimate < 0
+            )
+            return evaluate_release_gate(
+                ReleaseGateInputs(
+                    candidate_model_id=report.candidate_model_id,
+                    strongest_baseline_model_id=report.primary_metric.strongest_baseline_id,
+                    candidate_ndcg_at_10=report.primary_metric.candidate_value,
+                    baseline_ndcg_at_10=report.primary_metric.strongest_baseline_value,
+                    difference_ci_lower=interval.ci_lower,
+                    difference_ci_upper=interval.ci_upper,
+                    confidence_level=report.confidence_level,
+                    relevance_mapping_version=report.metric_definition_version,
+                    resampling_unit=interval.resampling_unit,
+                    bootstrap_seed=report.bootstrap_seed,
+                    bootstrap_resamples=report.bootstrap_resamples,
+                    query_count=report.query_count,
+                    excluded_query_count=report.excluded_query_count,
+                    test_access_count=second_report.test_access_count,
+                    clean_run_metric_values=clean_values,
+                    candidate_lists_aligned=candidate_lists_aligned,
+                    configuration_frozen=configuration_frozen,
+                    clean_runs_match_artifacts=clean_runs_match_artifacts,
+                    unexplained_slice_deltas=slice_regressions,
+                ),
+                ReleaseGateConfig(
+                    reproducibility_tolerance=float(first_provenance["reproduction_tolerance"])
+                ),
+            )
+
+        first_gate = recompute_gate(first_report, first_interval)
+        second_gate = recompute_gate(second_report, second_interval)
+        if first_gate != second_gate:
+            raise ValueError("clean evaluation reports produce different final release gates")
+        gate = first_gate
         bound_report = EvaluationReport.model_validate(
             first_report.model_copy(
                 update={
@@ -1497,58 +1754,53 @@ def bind_clean_evaluations(
             ).model_dump(mode="json")
         )
         report_path = write_evaluation_report(bound_report, run.run_dir / "evaluation-report.json")
-        clean_ranking_hashes = [
-            str(first_provenance["clean_ranking_hashes"][0]),
-            str(second_provenance["clean_ranking_hashes"][0]),
-        ]
-        provenance = {
-            **{key: first_provenance[key] for key in identity_keys},
-            "schema_version": "1.0.0",
-            "report_id": bound_report.report_id,
-            "split": "test",
-            "frozen_config": first_provenance["frozen_config"],
-            "candidate_lists_aligned": bool(
-                first_provenance["candidate_lists_aligned"]
-                and second_provenance["candidate_lists_aligned"]
-            ),
-            "clean_run_metric_values": list(clean_values),
-            "clean_ranking_hashes": clean_ranking_hashes,
-            "independent_evaluation_count": 2,
-            "test_access_count": second_report.test_access_count,
-            "source_evaluations": [
-                {
-                    "run_id": report.run_id,
-                    "report_id": report.report_id,
-                    "report_checksum": f"sha256:{sha256_file(report_path_source)}",
-                    "provenance_checksum": f"sha256:{sha256_file(provenance_path_source)}",
-                    "test_access_count": report.test_access_count,
-                    "candidate_metric": report.primary_metric.candidate_value,
-                    "candidate_ranking_hash": ranking_hash,
-                }
-                for report, report_path_source, provenance_path_source, ranking_hash in (
-                    (
-                        first_report,
-                        first_report_path,
-                        first_prov_path,
-                        clean_ranking_hashes[0],
-                    ),
-                    (
-                        second_report,
-                        second_report_path,
-                        second_prov_path,
-                        clean_ranking_hashes[1],
-                    ),
-                )
-            ],
-        }
+        bound_provenance = EvaluationProvenance.model_validate(
+            {
+                **{key: first_provenance[key] for key in identity_keys},
+                "schema_version": "1.0.0",
+                "artifact_type": "evaluation_provenance",
+                "report_id": bound_report.report_id,
+                "split": "test",
+                "frozen_config": first_provenance["frozen_config"],
+                "candidate_lists_aligned": bool(
+                    first_provenance["candidate_lists_aligned"]
+                    and second_provenance["candidate_lists_aligned"]
+                ),
+                "clean_run_metric_values": list(clean_values),
+                "clean_ranking_hashes": clean_ranking_hashes,
+                "independent_evaluation_count": 2,
+                "test_access_count": second_report.test_access_count,
+                "source_evaluations": [
+                    {
+                        "run_id": report.run_id,
+                        "report_id": report.report_id,
+                        "report_checksum": f"sha256:{sha256_file(report_path_source)}",
+                        "provenance_checksum": f"sha256:{sha256_file(provenance_path_source)}",
+                        "test_access_count": report.test_access_count,
+                        "candidate_metric": report.primary_metric.candidate_value,
+                        "candidate_ranking_hash": ranking_hash,
+                    }
+                    for report, report_path_source, provenance_path_source, ranking_hash in (
+                        (
+                            first_report,
+                            first_report_path,
+                            first_prov_path,
+                            clean_ranking_hashes[0],
+                        ),
+                        (
+                            second_report,
+                            second_report_path,
+                            second_prov_path,
+                            clean_ranking_hashes[1],
+                        ),
+                    )
+                ],
+            }
+        )
         provenance_path = run.run_dir / "evaluation-provenance.json"
         provenance_path.write_text(
-            json.dumps(provenance, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            bound_provenance.model_dump_json(indent=2) + "\n", encoding="utf-8"
         )
-        first_result = first_summary_payload["result"]
-        second_result = second_summary_payload["result"]
-        if not isinstance(first_result, dict) or not isinstance(second_result, dict):
-            raise ValueError("clean evaluation summaries have invalid result objects")
         curated_candidates = [
             Path(str(first_result["curated_queries"])),
             Path(str(second_result["curated_queries"])),
@@ -1578,6 +1830,7 @@ def bind_clean_evaluations(
                         "checkpoint_checksum",
                         "config_hash",
                         "dataset_manifest_hash",
+                        "split_manifest_hash",
                         "input_template_version",
                         "base_model_id",
                         "base_model_revision",
@@ -1631,7 +1884,39 @@ def _git_sha() -> str:
 
 
 @app.command("promote")
-def promote(report_id: Annotated[str, typer.Option("--report-id")]) -> None:
+def promote(
+    report_id: Annotated[str, typer.Option("--report-id")],
+    trial_selection: Annotated[
+        Path, typer.Option("--trial-selection", exists=True, dir_okay=False, readable=True)
+    ],
+    selected_training_run_manifest: Annotated[
+        Path,
+        typer.Option(
+            "--selected-training-run-manifest",
+            exists=True,
+            dir_okay=False,
+            readable=True,
+        ),
+    ],
+    selected_training_model_artifact: Annotated[
+        Path,
+        typer.Option(
+            "--selected-training-model-artifact",
+            exists=True,
+            dir_okay=False,
+            readable=True,
+        ),
+    ],
+    evaluation_runtime_seconds: Annotated[
+        float, typer.Option("--evaluation-runtime-seconds", min=0)
+    ],
+    evaluation_estimated_cost_usd: Annotated[
+        float, typer.Option("--evaluation-estimated-cost-usd", min=0)
+    ],
+    evaluation_actual_cost_usd: Annotated[
+        float | None, typer.Option("--evaluation-actual-cost-usd", min=0)
+    ] = None,
+) -> None:
     """Create an immutable, fail-closed release bundle from an evaluation report."""
 
     configure_logging()
@@ -1655,7 +1940,12 @@ def promote(report_id: Annotated[str, typer.Option("--report-id")]) -> None:
         )
         if expected_provenance_hash != f"sha256:{sha256_file(provenance_path)}":
             raise ValueError("evaluation provenance differs from its completed run summary")
-        provenance = _read_json(provenance_path)
+        provenance_contract = EvaluationProvenance.model_validate_json(
+            provenance_path.read_text(encoding="utf-8")
+        )
+        provenance = provenance_contract.model_dump(mode="json")
+        if not SHA256_PATTERN.fullmatch(str(provenance["split_manifest_hash"])):
+            raise ValueError("evaluation provenance lacks a canonical split manifest hash")
         if provenance["report_id"] != report.report_id:
             raise ValueError("evaluation report and provenance IDs differ")
         if (
@@ -1667,12 +1957,151 @@ def promote(report_id: Annotated[str, typer.Option("--report-id")]) -> None:
             provenance["checkpoint_checksum"] != result["checkpoint_checksum"]
             or provenance["config_hash"] != result["config_hash"]
             or provenance["dataset_manifest_hash"] != result["dataset_manifest_hash"]
+            or provenance["split_manifest_hash"] != result["split_manifest_hash"]
             or provenance["strongest_baseline_id"] != report.primary_metric.strongest_baseline_id
         ):
             raise ValueError("evaluation provenance does not match the evaluated inputs")
         frozen = load_frozen_experiment(str(provenance["frozen_config"]))
         if frozen.config_hash != provenance["config_hash"]:
             raise ValueError("frozen configuration no longer matches held-out provenance")
+        selection = TrialSelection.model_validate_json(trial_selection.read_text(encoding="utf-8"))
+        selection_checksum = f"sha256:{sha256_file(trial_selection)}"
+        treatment = next(
+            (trial for trial in selection.trials if trial.role == "candidate_treatment"),
+            None,
+        )
+        if treatment is None:
+            raise ValueError("trial selection has no candidate treatment")
+        training_manifest_checksum = f"sha256:{sha256_file(selected_training_run_manifest)}"
+        if training_manifest_checksum != treatment.training_run_manifest_sha256:
+            raise ValueError("selected training RunManifest checksum differs from the selection")
+        training_manifest = RunManifest.model_validate_json(
+            selected_training_run_manifest.read_text(encoding="utf-8")
+        )
+        expected_training_manifest = {
+            "run_id": treatment.candidate_run_id,
+            "run_type": "training",
+            "git_sha": selection.git_sha,
+            "repository_dirty": False,
+            "image_digest": treatment.training_image_digest,
+            "config_hash": treatment.candidate_training_config_sha256,
+            "dataset_manifest_hash": selection.dataset_manifest_hash,
+            "region": treatment.region,
+            "job_id": treatment.training_job_id,
+            "hardware": treatment.hardware_class,
+            "accelerator": treatment.accelerator,
+            "status": "succeeded",
+        }
+        for field, expected in expected_training_manifest.items():
+            if getattr(training_manifest, field) != expected:
+                raise ValueError(f"selected training RunManifest disagrees on {field}")
+        if training_manifest.duration_seconds is None:
+            raise ValueError("selected training RunManifest has no measured duration")
+        source_model_artifact_checksum = f"sha256:{sha256_file(selected_training_model_artifact)}"
+        source_model_artifact = ModelArtifact.model_validate_json(
+            selected_training_model_artifact.read_text(encoding="utf-8")
+        )
+        expected_source_artifact = {
+            "model_id": treatment.candidate_model_id,
+            "run_id": training_manifest.run_id,
+            "base_model_id": frozen.base_model_id,
+            "base_model_revision": frozen.base_model_revision,
+            "tokenizer_revision": frozen.base_model_revision,
+            "checkpoint_uri": "candidate/best",
+            "artifact_checksum": treatment.candidate_checkpoint_sha256,
+            "config_id": treatment.config_id,
+            "config_hash": training_manifest.config_hash,
+            "dataset_manifest_hash": training_manifest.dataset_manifest_hash,
+            "input_contract_version": treatment.input_template_version,
+            "label_mapping_version": frozen.label_mapping_version,
+            "sampling_strategy": treatment.sampling_strategy,
+            "hard_example_sources": treatment.hard_example_sources,
+            "promoted": False,
+            "promotion_reason": "pending held-out evaluation",
+            "evaluation_report_id": "not_evaluated",
+            "git_sha": training_manifest.git_sha,
+            "image_digest": training_manifest.image_digest,
+        }
+        for field, expected in expected_source_artifact.items():
+            if getattr(source_model_artifact, field) != expected:
+                raise ValueError(f"selected training ModelArtifact disagrees on {field}")
+        if any(
+            value is not None
+            for value in (
+                source_model_artifact.source_model_artifact_sha256,
+                source_model_artifact.selected_training_run_manifest_sha256,
+                source_model_artifact.evaluation_report_sha256,
+            )
+        ):
+            raise ValueError("selected training ModelArtifact already claims release bindings")
+        actual_training = source_model_artifact.training_result
+        if (
+            actual_training.device_type != training_manifest.device_type
+            or actual_training.cuda_available != training_manifest.cuda_available
+            or actual_training.cuda_device_count != training_manifest.cuda_device_count
+            or actual_training.accelerator_type != training_manifest.accelerator
+        ):
+            raise ValueError("selected ModelArtifact and RunManifest execution evidence differ")
+        if (
+            selection.selected_candidate_run_id != training_manifest.run_id
+            or selection.selected_candidate_model_id != report.candidate_model_id
+            or selection.selected_candidate_config_sha256 != provenance["config_hash"]
+            or selection.dataset_manifest_hash != provenance["dataset_manifest_hash"]
+            or selection.git_sha != provenance["evaluation_git_sha"]
+            or treatment.candidate_checkpoint_sha256 != provenance["checkpoint_checksum"]
+        ):
+            raise ValueError(
+                "trial selection, selected training run, and held-out evaluation are not identical"
+            )
+        if int(provenance["independent_evaluation_count"]) != 2:
+            raise ValueError("public release requires exactly two clean evaluation executions")
+        training_provenance = PublicTrainingProvenance(
+            trial_selection_id=selection.selection_id,
+            trial_selection_sha256=selection_checksum,
+            run_id=training_manifest.run_id,
+            run_manifest_sha256=training_manifest_checksum,
+            selected_model_id=selection.selected_candidate_model_id,
+            selected_model_artifact_checksum=treatment.candidate_checkpoint_sha256,
+            config_hash=training_manifest.config_hash,
+            git_sha=training_manifest.git_sha,
+            image_digest=training_manifest.image_digest,
+            hardware_class=treatment.hardware_class,
+            accelerator=treatment.accelerator,
+            region=treatment.region,
+            runtime_seconds=training_manifest.duration_seconds,
+            estimated_cost_usd=training_manifest.estimated_cost_usd,
+            actual_cost_usd=training_manifest.actual_cost_usd,
+            cost_evidence=(
+                "Selected training RunManifest estimate; final managed-service charge is not "
+                "yet reconciled."
+                if training_manifest.actual_cost_usd is None
+                else "Selected training RunManifest with reconciled actual cost."
+            ),
+        )
+        evaluation_hardware = provenance_contract.hardware_class
+        evaluation_region = provenance_contract.region
+        if evaluation_hardware != "ml.m5.xlarge" or evaluation_region != "us-east-1":
+            raise ValueError("public held-out provenance requires the fixed cloud environment")
+        evaluation_provenance = PublicEvaluationProvenance(
+            candidate_model_id=report.candidate_model_id,
+            candidate_model_artifact_checksum=treatment.candidate_checkpoint_sha256,
+            evaluation_config_hash=str(provenance["evaluation_config_checksum"]),
+            git_sha=str(provenance["evaluation_git_sha"]),
+            image_digest=str(provenance["evaluation_image_digest"]),
+            hardware_class=evaluation_hardware,
+            region=evaluation_region,
+            clean_execution_count=2,
+            runtime_seconds=evaluation_runtime_seconds,
+            runtime_basis="processing_job_wall_clock_sum",
+            estimated_cost_usd=evaluation_estimated_cost_usd,
+            actual_cost_usd=evaluation_actual_cost_usd,
+            cost_evidence=(
+                "Live on-demand upper bound for two clean Processing jobs; final charge is not "
+                "yet reconciled."
+                if evaluation_actual_cost_usd is None
+                else "Two clean Processing jobs with reconciled actual cost."
+            ),
+        )
         primary_interval = next(
             interval
             for interval in report.paired_differences
@@ -1736,12 +2165,21 @@ def promote(report_id: Annotated[str, typer.Option("--report-id")]) -> None:
         candidate_dir = release_dir / "models" / "candidate"
         shutil.copytree(checkpoint, candidate_dir)
         candidate_checksum = f"sha256:{sha256_directory(candidate_dir)}"
+        candidate_size_bytes = sum(
+            path.stat().st_size for path in candidate_dir.rglob("*") if path.is_file()
+        )
+        if (
+            candidate_checksum != source_model_artifact.artifact_checksum
+            or candidate_size_bytes != source_model_artifact.artifact_size_bytes
+        ):
+            raise ValueError("release checkpoint differs from the selected training ModelArtifact")
         pinned = Path("configs/models/cross-encoder-minilm-l6-v2.yaml")
         pinned_config = _read_yaml(pinned)
         curated_source = Path(str(result["curated_queries"]))
         shutil.copy2(curated_source, release_dir / "curated-queries.json")
         shutil.copy2(report_path, release_dir / "evaluation-report.json")
         shutil.copy2(provenance_path, release_dir / "evaluation-provenance.json")
+        _copy_public_distribution_notices(release_dir)
         promoted_id = report.release_gate_results.promoted_model_id
         strongest_id = report.release_gate_results.baseline_model_id
         baseline_template = (
@@ -1828,8 +2266,8 @@ def promote(report_id: Annotated[str, typer.Option("--report-id")]) -> None:
             run_id=report.run_id,
             config_hash=str(provenance["config_hash"]),
             dataset_manifest_hash=str(provenance["dataset_manifest_hash"]),
+            split_manifest_hash=str(provenance["split_manifest_hash"]),
             git_sha=str(provenance["evaluation_git_sha"]),
-            image_digest=str(provenance["evaluation_image_digest"]),
             model_artifact_checksum=promoted_checksum,
             dataset_name=str(provenance["dataset_name"]),
             dataset_version=str(provenance["dataset_version"]),
@@ -1837,16 +2275,10 @@ def promote(report_id: Annotated[str, typer.Option("--report-id")]) -> None:
             base_model_id=frozen.base_model_id,
             base_model_revision=frozen.base_model_revision,
             training_strategy=str(provenance["training_strategy"]),
-            hardware_class=str(provenance["hardware_class"]),
-            region=str(provenance["region"]),
+            training_provenance=training_provenance,
+            evaluation_provenance=evaluation_provenance,
             metrics=public_run_metrics(report),
             intervals=public_run_intervals(report),
-            duration_seconds=(
-                report.training_runtime.duration_seconds
-                + report.evaluation_runtime.duration_seconds
-            ),
-            actual_cost_usd=report.cost_evidence.actual_cost_usd,
-            cost_evidence=report.cost_evidence.source,
             test_access_count=report.test_access_count,
             limitations=report.limitations,
             prohibited_claims=[
@@ -1868,28 +2300,62 @@ def promote(report_id: Annotated[str, typer.Option("--report-id")]) -> None:
             public_evidence,
             release_dir / "public-evidence.json",
         )
+        report_checksum = f"sha256:{sha256_file(release_dir / 'evaluation-report.json')}"
+        candidate_promoted = report.release_gate_results.passed
+        if candidate_promoted != (promoted_id == report.candidate_model_id):
+            raise ValueError("held-out decision and active-model identity differ")
+        final_model_artifact = ModelArtifact.model_validate(
+            {
+                **source_model_artifact.model_dump(mode="json"),
+                "promoted": candidate_promoted,
+                "promotion_reason": (
+                    "held-out release gates passed"
+                    if candidate_promoted
+                    else "held-out release gates failed; prior baseline retained"
+                ),
+                "evaluation_report_id": report.report_id,
+                "source_model_artifact_sha256": source_model_artifact_checksum,
+                "selected_training_run_manifest_sha256": training_manifest_checksum,
+                "evaluation_report_sha256": report_checksum,
+            }
+        )
+        final_model_artifact_path = release_dir / "candidate-model-artifact.json"
+        final_model_artifact_path.write_text(
+            final_model_artifact.model_dump_json(indent=2) + "\n",
+            encoding="utf-8",
+        )
         artifact_checksums = {
             name: f"sha256:{sha256_file(release_dir / name)}"
             for name in (
+                "candidate-model-artifact.json",
                 "evaluation-report.json",
                 "evaluation-provenance.json",
                 "curated-queries.json",
                 "public-evidence.json",
+                "LICENSE",
+                "NOTICE",
             )
         }
-        manifest = {
-            "schema_version": "1.0.0",
-            "release_id": report.report_id,
-            "promoted_model_id": promoted_id,
-            "dataset_manifest_hash": str(
-                evaluation_summary["result"].get("dataset_manifest_hash", "sha256:" + "0" * 64)
-            ),
-            "evaluation_report_id": report.report_id,
-            "git_sha": str(provenance["evaluation_git_sha"]),
-            "evidence_mode": "verified",
-            "artifact_checksums": artifact_checksums,
-            "models": models,
-        }
+        manifest = ReleaseManifest.model_validate(
+            {
+                "schema_version": "1.0.0",
+                "release_id": report.report_id,
+                "promoted_model_id": promoted_id,
+                "dataset_manifest_hash": str(
+                    evaluation_summary["result"].get("dataset_manifest_hash", "sha256:" + "0" * 64)
+                ),
+                "split_manifest_hash": str(provenance["split_manifest_hash"]),
+                "evaluation_report_id": report.report_id,
+                "git_sha": str(provenance["evaluation_git_sha"]),
+                "evidence_mode": "verified",
+                "provenance": {
+                    "training": training_provenance.model_dump(mode="json"),
+                    "evaluation": evaluation_provenance.model_dump(mode="json"),
+                },
+                "artifact_checksums": artifact_checksums,
+                "models": models,
+            }
+        ).model_dump(mode="json", exclude_none=True)
         manifest_path = release_dir / "release-manifest.json"
         manifest_path.write_text(
             json.dumps(manifest, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8"
@@ -1905,6 +2371,7 @@ def promote(report_id: Annotated[str, typer.Option("--report-id")]) -> None:
         run.add_artifact("release_manifest", manifest_path)
         run.add_artifact("evaluation_report", release_dir / "evaluation-report.json")
         run.add_artifact("evaluation_provenance", release_dir / "evaluation-provenance.json")
+        run.add_artifact("candidate_model_artifact", release_dir / "candidate-model-artifact.json")
         run.add_artifact("curated_queries", release_dir / "curated-queries.json")
         run.add_artifact("public_evidence", public_evidence_path)
         run.add_artifact("bundle_checksums", bundle_checksums_path)
@@ -1915,8 +2382,12 @@ def promote(report_id: Annotated[str, typer.Option("--report-id")]) -> None:
                 "release_manifest": str(manifest_path.resolve()),
                 "public_evidence": str(public_evidence_path.resolve()),
                 "bundle_checksums": str(bundle_checksums_path.resolve()),
+                "candidate_model_artifact": str(
+                    (release_dir / "candidate-model-artifact.json").resolve()
+                ),
                 "promoted_model_id": promoted_id,
                 "candidate_promoted": report.release_gate_results.passed,
+                "split_manifest_hash": str(provenance["split_manifest_hash"]),
             },
         )
     except (OSError, StopIteration, KeyError, ValueError, ValidationError, RuntimeError) as error:

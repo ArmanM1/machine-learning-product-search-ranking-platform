@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import json
 import sys
+import urllib.parse
 from pathlib import Path
 from typing import Any
 
@@ -27,11 +28,16 @@ container_train = importlib.import_module("scripts.container_train")
 estimate_cloud_cost = importlib.import_module("scripts.estimate_cloud_cost")
 smoke_test = importlib.import_module("scripts.smoke_test")
 verify_release = importlib.import_module("scripts.verify_release")
+validate_release_artifacts = importlib.import_module("scripts.validate_release_artifacts")
+validate_training_contracts = importlib.import_module("scripts.validate_training_contracts")
 
 pytestmark = pytest.mark.integration
 
 
-def test_training_entrypoint_bundles_frozen_config(tmp_path: Path) -> None:
+@pytest.mark.parametrize("sage_maker_argv", [[], ["train"]])
+def test_training_entrypoint_bundles_frozen_config(
+    tmp_path: Path, sage_maker_argv: list[str]
+) -> None:
     config = tmp_path / "candidate.yaml"
     manifest = tmp_path / "manifest.json"
     model_dir = tmp_path / "model"
@@ -39,6 +45,7 @@ def test_training_entrypoint_bundles_frozen_config(tmp_path: Path) -> None:
     manifest.write_text("{}\n", encoding="utf-8")
     command, selected_output = container_train.build_command(
         [
+            *sage_maker_argv,
             "--config",
             str(config),
             "--dataset-manifest",
@@ -52,6 +59,27 @@ def test_training_entrypoint_bundles_frozen_config(tmp_path: Path) -> None:
     assert command[-2:] == ["--dataset-manifest", str(manifest.resolve())]
     assert str(bundled) in command
     assert selected_output == model_dir.resolve()
+
+
+def test_training_entrypoint_rejects_non_sagemaker_program_argument() -> None:
+    with pytest.raises(SystemExit):
+        container_train.build_command(["serve"])
+
+
+def test_training_dispatch_requires_the_frozen_requested_hardware() -> None:
+    config = ROOT / "configs" / "experiments" / "candidate-v1.yaml"
+    validated = validate_training_contracts.validate_config(
+        config,
+        instance_type="ml.g4dn.xlarge",
+        accelerator="gpu",
+    )
+    assert validated.requested_hardware == "ml.g4dn.xlarge"
+    with pytest.raises(ValueError, match="requested_hardware"):
+        validate_training_contracts.validate_config(
+            config,
+            instance_type="ml.m5.xlarge",
+            accelerator="cpu",
+        )
 
 
 def test_evaluation_entrypoint_refuses_unapproved_heldout(
@@ -110,7 +138,10 @@ def test_smoke_script_exercises_primary_flow_without_error_rate_claim(
         if path == "/readyz":
             return {"status": "ready", "model_id": "candidate"}, 2.0
         if path == "/api/v1/models":
-            return [{"model_id": "baseline"}, {"model_id": "candidate"}], 3.0
+            return [
+                {"model_id": "baseline", "kind": "pretrained"},
+                {"model_id": "candidate", "kind": "fine_tuned"},
+            ], 3.0
         if path == "/api/v1/queries?limit=1":
             return [{"query_id": "q1", "candidate_count": 2}], 4.0
         if path == "/api/v1/rank":
@@ -127,7 +158,52 @@ def test_smoke_script_exercises_primary_flow_without_error_rate_claim(
     report = smoke_test.run_smoke("https://demo.example.test", repeat=2)
     assert report["status"] == "passed"
     assert report["comparison_checked"] is True
+    assert report["evaluated_candidate_model_id"] == "candidate"
     assert report["production_error_rate_claim_eligible"] is False
+
+
+def test_smoke_script_keeps_failed_candidate_distinct_from_active_baseline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requested_comparison: dict[str, str] = {}
+
+    def fake_request(
+        _base_url: str, path: str, payload: dict[str, Any] | None = None
+    ) -> tuple[Any, float]:
+        if path == "/healthz":
+            return {"status": "ok", "service_version": "test"}, 1.0
+        if path == "/readyz":
+            return {"status": "ready", "model_id": "baseline"}, 2.0
+        if path == "/api/v1/models":
+            return [
+                {"model_id": "baseline", "kind": "pretrained"},
+                {"model_id": "failed-candidate", "kind": "fine_tuned"},
+            ], 3.0
+        if path == "/api/v1/queries?limit=1":
+            return [{"query_id": "q1", "candidate_count": 2}], 4.0
+        if path == "/api/v1/rank":
+            assert payload == {"query_id": "q1", "model_id": "baseline", "top_k": 2}
+            return {"results": [{}, {}]}, 5.0
+        if path.startswith("/api/v1/comparisons/q1?"):
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(path).query)
+            requested_comparison.update({key: values[0] for key, values in query.items()})
+            return {
+                "baseline_model_id": "baseline",
+                "candidate_model_id": "failed-candidate",
+            }, 6.0
+        raise AssertionError(path)
+
+    monkeypatch.setattr(smoke_test, "_request", fake_request)
+    report = smoke_test.run_smoke("https://demo.example.test", repeat=1)
+
+    assert report["model_id"] == "baseline"
+    assert report["evaluated_candidate_model_id"] == "failed-candidate"
+    assert report["comparison_checked"] is True
+    assert requested_comparison == {
+        "baseline": "baseline",
+        "candidate": "failed-candidate",
+        "include_judgments": "true",
+    }
 
 
 def test_release_verifier_accepts_exact_validation_bundle_and_rejects_tamper(
@@ -135,6 +211,7 @@ def test_release_verifier_accepts_exact_validation_bundle_and_rejects_tamper(
 ) -> None:
     data_hash = "sha256:" + "a" * 64
     image_hash = "sha256:" + "b" * 64
+    split_hash = "sha256:" + "c" * 64
     model_ids = ("bm25-title-v1", "bm25-enriched-v1")
     checksums = {
         model_id: f"sha256:{sha256_value({'model_id': model_id})}" for model_id in model_ids
@@ -163,7 +240,39 @@ def test_release_verifier_accepts_exact_validation_bundle_and_rejects_tamper(
         encoding="utf-8",
     )
     (tmp_path / "baseline-summary.json").write_text(
-        json.dumps({"split": "validation", "strongest_baseline_id": model_ids[0]}) + "\n",
+        json.dumps(
+            {
+                "schema_version": "1.0.0",
+                "config_hash": "sha256:" + "c" * 64,
+                "dataset_manifest_hash": data_hash,
+                "dataset_name": "Amazon Shopping Queries ESCI",
+                "dataset_version": "small-v1",
+                "dataset_locale": "us",
+                "split": "validation",
+                "metrics": {model_ids[0]: 0.5, model_ids[1]: 0.4},
+                "system_metrics": {
+                    model_ids[0]: {"graded_ndcg@10": 0.5},
+                    model_ids[1]: {"graded_ndcg@10": 0.4},
+                },
+                "system_metric_query_counts": {
+                    model_ids[0]: {"graded_ndcg@10": 1},
+                    model_ids[1]: {"graded_ndcg@10": 1},
+                },
+                "system_metric_excluded_query_counts": {
+                    model_ids[0]: {"graded_ndcg@10": 0},
+                    model_ids[1]: {"graded_ndcg@10": 0},
+                },
+                "p95_inference_latency_ms": {model_ids[0]: 1, model_ids[1]: 1},
+                "strongest_baseline_id": model_ids[0],
+                "strongest_baseline_value": 0.5,
+                "validation_query_count": 1,
+                "excluded_query_count": 0,
+                "rankings": {model_ids[0]: "rankings-a.jsonl", model_ids[1]: "rankings-b.jsonl"},
+                "resumed_from_run_id": None,
+            },
+            sort_keys=True,
+        )
+        + "\n",
         encoding="utf-8",
     )
     run = PublicValidationRunSummary(
@@ -171,6 +280,7 @@ def test_release_verifier_accepts_exact_validation_bundle_and_rejects_tamper(
         selected_model_id=model_ids[0],
         config_hash="sha256:" + "c" * 64,
         dataset_manifest_hash=data_hash,
+        split_manifest_hash=split_hash,
         git_sha="abcdef0",
         image_digest=image_hash,
         model_artifact_checksum=checksums[model_ids[0]],
@@ -208,16 +318,21 @@ def test_release_verifier_accepts_exact_validation_bundle_and_rejects_tamper(
         failure_analysis_reason="Held-out failure analysis was not performed.",
     )
     write_public_evidence(evidence, tmp_path / "public-evidence.json")
+    for name in ("LICENSE", "NOTICE"):
+        (tmp_path / name).write_bytes((ROOT / name).read_bytes())
     artifact_names = (
         "baseline-summary.json",
         "curated-queries.json",
         "public-evidence.json",
+        "LICENSE",
+        "NOTICE",
     )
     manifest = {
         "schema_version": "1.0.0",
         "release_id": "baseline-run-1",
         "promoted_model_id": model_ids[0],
         "dataset_manifest_hash": data_hash,
+        "split_manifest_hash": split_hash,
         "evaluation_report_id": "validation-baseline-run-1",
         "git_sha": "abcdef0",
         "evidence_mode": "validation_only",
@@ -228,7 +343,18 @@ def test_release_verifier_accepts_exact_validation_bundle_and_rejects_tamper(
             {
                 "model_id": model_id,
                 "kind": "bm25",
+                "text_template": "title_v1" if "title" in model_id else "enriched_v1",
                 "artifact_checksum": checksums[model_id],
+                "public_summary": {
+                    "model_id": model_id,
+                    "display_name": model_id,
+                    "kind": "bm25",
+                    "base_model_id": None,
+                    "artifact_checksum": checksums[model_id],
+                    "evaluation_report_id": "validation-baseline-run-1",
+                    "promoted_at": ("2026-09-02T00:00:00Z" if model_id == model_ids[0] else None),
+                    "limitations_url": "/methodology#limitations",
+                },
             }
             for model_id in model_ids
         ],
@@ -249,6 +375,8 @@ def test_release_verifier_accepts_exact_validation_bundle_and_rejects_tamper(
     result = verify_release.verify_release(tmp_path, load_models=False)
     assert result["status"] == "passed"
     assert result["evidence_mode"] == "validation_only"
+    assert result["split_manifest_hash"] == split_hash
+    validate_release_artifacts.validate_bundle(tmp_path)
 
     with (tmp_path / "public-evidence.json").open("a", encoding="utf-8") as handle:
         handle.write(" \n")

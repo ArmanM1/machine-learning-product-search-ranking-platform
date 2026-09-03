@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.example.invalid/search-rank/automatic_deployment_rollback.schema.json",
+  "additionalProperties": false,
+  "description": "Compensating rollback after a candidate crossed the activation boundary.",
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "artifact_type": {
+      "const": "automatic_deployment_rollback",
+      "title": "Artifact Type",
+      "type": "string"
+    },
+    "status": {
+      "const": "automatically_rolled_back",
+      "title": "Status",
+      "type": "string"
+    },
+    "rollback_trigger": {
+      "enum": [
+        "production_verification_failed",
+        "post_activation_failure"
+      ],
+      "title": "Rollback Trigger",
+      "type": "string"
+    },
+    "failed_release_id": {
+      "minLength": 1,
+      "title": "Failed Release Id",
+      "type": "string"
+    },
+    "restored_lambda_version": {
+      "pattern": "^[1-9][0-9]*$",
+      "title": "Restored Lambda Version",
+      "type": "string"
+    },
+    "restored_pointer_version_id": {
+      "minLength": 1,
+      "title": "Restored Pointer Version Id",
+      "type": "string"
+    },
+    "service_disabled": {
+      "title": "Service Disabled",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "status",
+    "rollback_trigger",
+    "failed_release_id",
+    "restored_lambda_version",
+    "restored_pointer_version_id",
+    "service_disabled"
+  ],
+  "title": "AutomaticDeploymentRollback",
+  "type": "object"
+}

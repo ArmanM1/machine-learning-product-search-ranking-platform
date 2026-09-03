@@ -1,28 +1,12 @@
 resource "aws_sns_topic" "operations" {
-  count = var.alarm_notification_email == "" ? 0 : 1
+  count = local.alarm_notifications_enabled ? 1 : 0
 
   name = "${local.name}-operations"
   tags = local.common_tags
 }
 
-resource "aws_cloudwatch_log_group" "sagemaker_training" {
-  count = var.environment == "prod" ? 1 : 0
-
-  name              = "/aws/sagemaker/TrainingJobs"
-  retention_in_days = var.cloudwatch_log_retention_days
-  tags              = local.common_tags
-}
-
-resource "aws_cloudwatch_log_group" "sagemaker_processing" {
-  count = var.environment == "prod" ? 1 : 0
-
-  name              = "/aws/sagemaker/ProcessingJobs"
-  retention_in_days = var.cloudwatch_log_retention_days
-  tags              = local.common_tags
-}
-
 resource "aws_sns_topic_subscription" "operations_email" {
-  count = var.alarm_notification_email == "" ? 0 : 1
+  count = local.alarm_notifications_enabled ? 1 : 0
 
   topic_arn = aws_sns_topic.operations[0].arn
   protocol  = "email"
@@ -40,6 +24,74 @@ resource "aws_cloudwatch_log_metric_filter" "model_load_failure" {
     name      = "ModelLoadFailure"
     namespace = "ProductSearchRanking/${var.environment}"
     value     = "1"
+  }
+}
+
+locals {
+  service_log_metrics = var.enable_serving ? {
+    service_startup_success = {
+      metric_name = "ServiceStartupSuccess"
+      pattern     = "{ $.message = \"service_startup_success\" && $.startup_success = true }"
+      value       = "1"
+      unit        = "Count"
+    }
+    model_load_duration = {
+      metric_name = "ModelLoadDuration"
+      pattern     = "{ $.message = \"service_startup_success\" && $.model_load_duration_ms >= 0 }"
+      value       = "$.model_load_duration_ms"
+      unit        = "Milliseconds"
+    }
+    api_request_count = {
+      metric_name = "ApiRequestCount"
+      pattern     = "{ $.message = \"api_request\" }"
+      value       = "1"
+      unit        = "Count"
+    }
+    api_error_count = {
+      metric_name = "ApiErrorCount"
+      pattern     = "{ $.message = \"api_request\" && $.status_code >= 400 }"
+      value       = "1"
+      unit        = "Count"
+    }
+    end_to_end_latency = {
+      metric_name = "EndToEndLatency"
+      pattern     = "{ $.message = \"api_request\" && $.total_latency_ms >= 0 }"
+      value       = "$.total_latency_ms"
+      unit        = "Milliseconds"
+    }
+    model_latency = {
+      metric_name = "ModelLatency"
+      pattern     = "{ $.message = \"api_request\" && $.model_latency_ms > 0 }"
+      value       = "$.model_latency_ms"
+      unit        = "Milliseconds"
+    }
+    candidate_count = {
+      metric_name = "CandidateCount"
+      pattern     = "{ $.message = \"api_request\" && $.candidate_count > 0 }"
+      value       = "$.candidate_count"
+      unit        = "Count"
+    }
+    memory_used = {
+      metric_name = "MemoryUsed"
+      pattern     = "{ $.message = \"api_request\" && $.memory_used_mb > 0 }"
+      value       = "$.memory_used_mb"
+      unit        = "Megabytes"
+    }
+  } : {}
+}
+
+resource "aws_cloudwatch_log_metric_filter" "service" {
+  for_each = local.service_log_metrics
+
+  name           = "${local.name}-${replace(each.key, "_", "-")}"
+  pattern        = each.value.pattern
+  log_group_name = aws_cloudwatch_log_group.lambda.name
+
+  metric_transformation {
+    name      = each.value.metric_name
+    namespace = "ProductSearchRanking/${var.environment}"
+    value     = each.value.value
+    unit      = each.value.unit
   }
 }
 
@@ -61,7 +113,7 @@ resource "aws_cloudwatch_metric_alarm" "model_load_failure" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "api_server_errors" {
-  count = var.enable_serving ? 1 : 0
+  count = var.enable_public_serving ? 1 : 0
 
   alarm_name          = "${local.name}-api-5xx"
   alarm_description   = "Repeated public API server errors."
@@ -106,7 +158,7 @@ resource "aws_cloudwatch_metric_alarm" "concurrency_bound" {
 }
 
 locals {
-  sagemaker_failure_events = var.alarm_notification_email == "" ? {} : {
+  sagemaker_failure_events = local.alarm_notifications_enabled ? {
     training = {
       detail_type = "SageMaker Training Job State Change"
       status_key  = "TrainingJobStatus"
@@ -117,7 +169,7 @@ locals {
       status_key  = "ProcessingJobStatus"
       name_key    = "ProcessingJobName"
     }
-  }
+  } : {}
 }
 
 resource "aws_cloudwatch_event_rule" "sagemaker_failure" {
@@ -144,7 +196,7 @@ resource "aws_cloudwatch_event_target" "sagemaker_failure" {
 }
 
 data "aws_iam_policy_document" "sns_events" {
-  count = var.alarm_notification_email == "" ? 0 : 1
+  count = local.alarm_notifications_enabled ? 1 : 0
 
   statement {
     effect  = "Allow"
@@ -167,7 +219,7 @@ data "aws_iam_policy_document" "sns_events" {
 }
 
 resource "aws_sns_topic_policy" "operations" {
-  count = var.alarm_notification_email == "" ? 0 : 1
+  count = local.alarm_notifications_enabled ? 1 : 0
 
   arn    = aws_sns_topic.operations[0].arn
   policy = data.aws_iam_policy_document.sns_events[0].json

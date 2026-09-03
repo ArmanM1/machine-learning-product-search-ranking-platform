@@ -32,12 +32,20 @@ resource "aws_lambda_function" "api" {
       SEARCH_RANK_CURATED_QUERIES  = "/var/task/release/curated-queries.json"
       SEARCH_RANK_PUBLIC_EVIDENCE  = "/var/task/release/public-evidence.json"
       SEARCH_RANK_RELEASE_MODE     = "true"
+      SEARCH_RANK_SERVICE_VERSION  = var.serving_git_sha
+      SEARCH_RANK_DEPLOYMENT_NONCE = var.serving_deployment_nonce
       SEARCH_RANK_WEB_DIST         = "/var/task/web/dist"
     }
   }
 
   depends_on = [aws_cloudwatch_log_group.lambda]
   tags       = local.common_tags
+
+  # A budget trip must survive ordinary Terraform reconciliation. Recovery is an
+  # explicit, financially approved control-plane action.
+  lifecycle {
+    ignore_changes = [reserved_concurrent_executions]
+  }
 }
 
 resource "aws_lambda_alias" "candidate" {
@@ -124,7 +132,7 @@ resource "aws_apigatewayv2_stage" "candidate" {
 }
 
 resource "aws_apigatewayv2_api" "production" {
-  count = var.enable_serving ? 1 : 0
+  count = var.enable_public_serving ? 1 : 0
 
   name          = "${local.name}-production"
   protocol_type = "HTTP"
@@ -133,7 +141,7 @@ resource "aws_apigatewayv2_api" "production" {
 }
 
 resource "aws_apigatewayv2_integration" "production" {
-  count = var.enable_serving ? 1 : 0
+  count = var.enable_public_serving ? 1 : 0
 
   api_id                 = aws_apigatewayv2_api.production[0].id
   integration_type       = "AWS_PROXY"
@@ -144,7 +152,7 @@ resource "aws_apigatewayv2_integration" "production" {
 }
 
 resource "aws_apigatewayv2_route" "production" {
-  count = var.enable_serving ? 1 : 0
+  count = var.enable_public_serving ? 1 : 0
 
   api_id    = aws_apigatewayv2_api.production[0].id
   route_key = "$default"
@@ -158,7 +166,7 @@ resource "aws_cloudwatch_log_group" "production_api" {
 }
 
 resource "aws_apigatewayv2_stage" "production" {
-  count = var.enable_serving ? 1 : 0
+  count = var.enable_public_serving ? 1 : 0
 
   api_id      = aws_apigatewayv2_api.production[0].id
   name        = "$default"
@@ -195,7 +203,7 @@ resource "aws_lambda_permission" "candidate_api" {
 }
 
 resource "aws_lambda_permission" "production_api" {
-  count = var.enable_serving ? 1 : 0
+  count = var.enable_public_serving ? 1 : 0
 
   statement_id  = "AllowProductionApiGateway"
   action        = "lambda:InvokeFunction"
@@ -206,7 +214,7 @@ resource "aws_lambda_permission" "production_api" {
 }
 
 resource "aws_cloudfront_origin_access_control" "site" {
-  count = var.enable_serving ? 1 : 0
+  count = var.enable_public_serving ? 1 : 0
 
   name                              = "${local.name}-site"
   description                       = "SigV4 access to the private static-site bucket"
@@ -216,22 +224,22 @@ resource "aws_cloudfront_origin_access_control" "site" {
 }
 
 data "aws_cloudfront_cache_policy" "optimized" {
-  count = var.enable_serving ? 1 : 0
+  count = var.enable_public_serving ? 1 : 0
   name  = "Managed-CachingOptimized"
 }
 
 data "aws_cloudfront_cache_policy" "disabled" {
-  count = var.enable_serving ? 1 : 0
+  count = var.enable_public_serving ? 1 : 0
   name  = "Managed-CachingDisabled"
 }
 
 data "aws_cloudfront_origin_request_policy" "all_viewer_except_host" {
-  count = var.enable_serving ? 1 : 0
+  count = var.enable_public_serving ? 1 : 0
   name  = "Managed-AllViewerExceptHostHeader"
 }
 
 resource "aws_cloudfront_response_headers_policy" "security" {
-  count = var.enable_serving ? 1 : 0
+  count = var.enable_public_serving ? 1 : 0
 
   name = "${local.name}-security"
 
@@ -271,12 +279,13 @@ resource "aws_cloudfront_response_headers_policy" "security" {
 }
 
 resource "aws_cloudfront_function" "spa_rewrite" {
-  count = var.enable_serving ? 1 : 0
+  count = var.enable_public_serving ? 1 : 0
 
   name    = "${local.name}-spa-rewrite"
   runtime = "cloudfront-js-1.0"
   comment = "Rewrite extensionless static routes to the SPA entry point"
   publish = true
+  tags    = local.common_tags
   code    = <<-JAVASCRIPT
     function handler(event) {
       var request = event.request;
@@ -292,7 +301,7 @@ resource "aws_cloudfront_function" "spa_rewrite" {
 }
 
 resource "aws_cloudfront_distribution" "site" {
-  count = var.enable_serving ? 1 : 0
+  count = var.enable_public_serving ? 1 : 0
 
   enabled             = true
   is_ipv6_enabled     = true
@@ -381,11 +390,17 @@ resource "aws_cloudfront_distribution" "site" {
     minimum_protocol_version       = "TLSv1.2_2021"
   }
 
-  tags = local.common_tags
+  tags = merge(local.common_tags, { Name = "${local.name}-site" })
+
+  # Preserve the budget kill switch's disabled state until an operator explicitly
+  # restores the distribution after reviewing fresh financial evidence.
+  lifecycle {
+    ignore_changes = [enabled]
+  }
 }
 
 data "aws_iam_policy_document" "site_cloudfront" {
-  count = var.enable_serving ? 1 : 0
+  count = var.enable_public_serving ? 1 : 0
 
   statement {
     sid     = "CloudFrontReadOnly"
@@ -409,7 +424,7 @@ data "aws_iam_policy_document" "site_cloudfront" {
 }
 
 resource "aws_s3_bucket_policy" "site" {
-  count = var.enable_serving ? 1 : 0
+  count = var.enable_public_serving ? 1 : 0
 
   bucket = aws_s3_bucket.site.id
   policy = data.aws_iam_policy_document.site_cloudfront[0].json

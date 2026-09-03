@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
+
+from search_rank.schemas.publication import CuratedQueryCollection
 
 EscIRelevance = Literal["Exact", "Substitute", "Complement", "Irrelevant"]
 
@@ -41,13 +42,23 @@ class QueryStore:
 
     @classmethod
     def from_json(cls, path: str | Path) -> QueryStore:
-        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        payload = CuratedQueryCollection.model_validate_json(Path(path).read_text(encoding="utf-8"))
         queries = []
-        for item in payload["queries"]:
-            products = tuple(CuratedProduct(**product) for product in item["products"])
+        for item in payload.queries:
+            products = tuple(
+                CuratedProduct(
+                    product_id=product.product_id,
+                    title=product.title,
+                    text=product.text,
+                    esci_label=product.esci_label,
+                )
+                for product in item.products
+            )
             queries.append(
                 CuratedQuery(
-                    query_id=str(item["query_id"]), query=str(item["query"]), products=products
+                    query_id=item.query_id,
+                    query=item.query,
+                    products=products,
                 )
             )
         return cls(queries)
@@ -73,16 +84,18 @@ class QueryStore:
 def write_curated_queries(path: str | Path, queries: list[CuratedQuery]) -> Path:
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "schema_version": "1.0.0",
-        "queries": [
-            {
-                "query_id": query.query_id,
-                "query": query.query,
-                "products": [product.__dict__ for product in query.products],
-            }
-            for query in queries
-        ],
-    }
-    output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    payload = CuratedQueryCollection.model_validate(
+        {
+            "schema_version": "1.0.0",
+            "queries": [
+                {
+                    "query_id": query.query_id,
+                    "query": query.query,
+                    "products": [product.__dict__ for product in query.products],
+                }
+                for query in queries
+            ],
+        }
+    )
+    output.write_text(payload.model_dump_json(indent=2) + "\n", encoding="utf-8")
     return output

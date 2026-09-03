@@ -1,0 +1,728 @@
+{
+  "$defs": {
+    "BrowserSmoke": {
+      "additionalProperties": false,
+      "properties": {
+        "desktop": {
+          "const": true,
+          "title": "Desktop",
+          "type": "boolean"
+        },
+        "keyboard": {
+          "const": true,
+          "title": "Keyboard",
+          "type": "boolean"
+        },
+        "mobile": {
+          "const": true,
+          "title": "Mobile",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "desktop",
+        "mobile",
+        "keyboard"
+      ],
+      "title": "BrowserSmoke",
+      "type": "object"
+    },
+    "CandidateApiGate": {
+      "additionalProperties": false,
+      "properties": {
+        "architecture": {
+          "const": "x86_64",
+          "title": "Architecture",
+          "type": "string"
+        },
+        "candidate_count": {
+          "const": 40,
+          "title": "Candidate Count",
+          "type": "integer"
+        },
+        "concurrency": {
+          "const": 1,
+          "title": "Concurrency",
+          "type": "integer"
+        },
+        "controlled_cold_sample_included": {
+          "const": false,
+          "title": "Controlled Cold Sample Included",
+          "type": "boolean"
+        },
+        "controlled_cold_start_evidence_file": {
+          "const": "candidate-cold-start.json",
+          "title": "Controlled Cold Start Evidence File",
+          "type": "string"
+        },
+        "end_to_end_latency_ms": {
+          "$ref": "#/$defs/ThreePercentileLatency"
+        },
+        "error_rate": {
+          "exclusiveMaximum": 0.01,
+          "minimum": 0,
+          "title": "Error Rate",
+          "type": "number"
+        },
+        "error_rate_target": {
+          "const": "less_than_0.01",
+          "title": "Error Rate Target",
+          "type": "string"
+        },
+        "failure_count": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Failure Count",
+          "type": "integer"
+        },
+        "lambda_memory_mb": {
+          "const": 4096,
+          "title": "Lambda Memory Mb",
+          "type": "integer"
+        },
+        "limitations": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Limitations",
+          "type": "array"
+        },
+        "measurement_phase": {
+          "const": "warm_after_ten_explicit_warmups",
+          "title": "Measurement Phase",
+          "type": "string"
+        },
+        "model_latency_ms": {
+          "$ref": "#/$defs/ThreePercentileLatency"
+        },
+        "provisioned_concurrency": {
+          "const": 0,
+          "title": "Provisioned Concurrency",
+          "type": "integer"
+        },
+        "region": {
+          "const": "us-east-1",
+          "title": "Region",
+          "type": "string"
+        },
+        "reserved_concurrency": {
+          "const": 2,
+          "title": "Reserved Concurrency",
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": "1.0.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "scope": {
+          "const": "candidate_alias_primary_release_gate",
+          "title": "Scope",
+          "type": "string"
+        },
+        "status": {
+          "const": "passed",
+          "title": "Status",
+          "type": "string"
+        },
+        "valid_request_count": {
+          "const": 200,
+          "title": "Valid Request Count",
+          "type": "integer"
+        },
+        "warmup_request_count": {
+          "const": 10,
+          "title": "Warmup Request Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schema_version",
+        "status",
+        "scope",
+        "valid_request_count",
+        "failure_count",
+        "error_rate",
+        "error_rate_target",
+        "warmup_request_count",
+        "candidate_count",
+        "concurrency",
+        "end_to_end_latency_ms",
+        "model_latency_ms",
+        "lambda_memory_mb",
+        "architecture",
+        "region",
+        "reserved_concurrency",
+        "provisioned_concurrency",
+        "measurement_phase",
+        "controlled_cold_start_evidence_file",
+        "controlled_cold_sample_included",
+        "limitations"
+      ],
+      "title": "CandidateApiGate",
+      "type": "object"
+    },
+    "ColdStartControlProof": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate_version_changed": {
+          "const": true,
+          "title": "Candidate Version Changed",
+          "type": "boolean"
+        },
+        "new_version_prior_cloudwatch_event_count": {
+          "const": 0,
+          "title": "New Version Prior Cloudwatch Event Count",
+          "type": "integer"
+        },
+        "newly_published_after_apply_started": {
+          "const": true,
+          "title": "Newly Published After Apply Started",
+          "type": "boolean"
+        },
+        "on_demand_execution": {
+          "const": true,
+          "title": "On Demand Execution",
+          "type": "boolean"
+        },
+        "previous_candidate_version": {
+          "pattern": "^(absent|[1-9][0-9]*)$",
+          "title": "Previous Candidate Version",
+          "type": "string"
+        },
+        "provisioned_concurrency": {
+          "const": 0,
+          "title": "Provisioned Concurrency",
+          "type": "integer"
+        },
+        "reserved_concurrency": {
+          "const": 2,
+          "title": "Reserved Concurrency",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "newly_published_after_apply_started",
+        "candidate_version_changed",
+        "previous_candidate_version",
+        "new_version_prior_cloudwatch_event_count",
+        "on_demand_execution",
+        "reserved_concurrency",
+        "provisioned_concurrency"
+      ],
+      "title": "ColdStartControlProof",
+      "type": "object"
+    },
+    "ColdStartEvidence": {
+      "additionalProperties": false,
+      "description": "One controlled first invocation, intentionally separate from warm samples.",
+      "properties": {
+        "control_proof": {
+          "$ref": "#/$defs/ColdStartControlProof"
+        },
+        "controlled_cold_start": {
+          "const": true,
+          "title": "Controlled Cold Start",
+          "type": "boolean"
+        },
+        "excluded_from_warm_samples": {
+          "const": true,
+          "title": "Excluded From Warm Samples",
+          "type": "boolean"
+        },
+        "first_request": {
+          "$ref": "#/$defs/ColdStartFirstRequest"
+        },
+        "identifiers": {
+          "$ref": "#/$defs/ColdStartIdentifiers"
+        },
+        "lambda_report": {
+          "$ref": "#/$defs/ColdStartLambdaReport"
+        },
+        "limitations": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Limitations",
+          "type": "array"
+        },
+        "measured_at": {
+          "format": "date-time",
+          "title": "Measured At",
+          "type": "string"
+        },
+        "measurement_class": {
+          "const": "controlled_on_demand_lambda_cold_start",
+          "title": "Measurement Class",
+          "type": "string"
+        },
+        "sample_count": {
+          "const": 1,
+          "title": "Sample Count",
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": "1.0.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "status": {
+          "const": "measured",
+          "title": "Status",
+          "type": "string"
+        },
+        "structured_request": {
+          "$ref": "#/$defs/ColdStartStructuredRequest"
+        },
+        "structured_startup": {
+          "$ref": "#/$defs/ColdStartStructuredStartup"
+        }
+      },
+      "required": [
+        "schema_version",
+        "status",
+        "measurement_class",
+        "controlled_cold_start",
+        "measured_at",
+        "identifiers",
+        "control_proof",
+        "first_request",
+        "lambda_report",
+        "structured_startup",
+        "structured_request",
+        "sample_count",
+        "excluded_from_warm_samples",
+        "limitations"
+      ],
+      "title": "ColdStartEvidence",
+      "type": "object"
+    },
+    "ColdStartFirstRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate_count": {
+          "maximum": 40,
+          "minimum": 1,
+          "title": "Candidate Count",
+          "type": "integer"
+        },
+        "end_to_end_latency_ms": {
+          "exclusiveMinimum": 0,
+          "title": "End To End Latency Ms",
+          "type": "number"
+        },
+        "http_status": {
+          "const": 200,
+          "title": "Http Status",
+          "type": "integer"
+        },
+        "model_latency_ms": {
+          "minimum": 0,
+          "title": "Model Latency Ms",
+          "type": "number"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "route": {
+          "const": "/api/v1/rank",
+          "title": "Route",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "route",
+        "http_status",
+        "candidate_count",
+        "end_to_end_latency_ms",
+        "model_latency_ms"
+      ],
+      "title": "ColdStartFirstRequest",
+      "type": "object"
+    },
+    "ColdStartIdentifiers": {
+      "additionalProperties": false,
+      "properties": {
+        "alias": {
+          "const": "candidate",
+          "title": "Alias",
+          "type": "string"
+        },
+        "dataset_manifest_hash": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Dataset Manifest Hash",
+          "type": "string"
+        },
+        "function_name": {
+          "minLength": 1,
+          "title": "Function Name",
+          "type": "string"
+        },
+        "function_version": {
+          "pattern": "^[1-9][0-9]*$",
+          "title": "Function Version",
+          "type": "string"
+        },
+        "model_artifact_checksum": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Model Artifact Checksum",
+          "type": "string"
+        },
+        "model_id": {
+          "minLength": 1,
+          "title": "Model Id",
+          "type": "string"
+        },
+        "region": {
+          "const": "us-east-1",
+          "title": "Region",
+          "type": "string"
+        },
+        "release_id": {
+          "minLength": 1,
+          "title": "Release Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "release_id",
+        "model_id",
+        "dataset_manifest_hash",
+        "model_artifact_checksum",
+        "function_name",
+        "alias",
+        "function_version",
+        "region"
+      ],
+      "title": "ColdStartIdentifiers",
+      "type": "object"
+    },
+    "ColdStartLambdaReport": {
+      "additionalProperties": false,
+      "properties": {
+        "billed_duration_ms": {
+          "exclusiveMinimum": 0,
+          "title": "Billed Duration Ms",
+          "type": "number"
+        },
+        "configured_memory_mb": {
+          "const": 4096,
+          "title": "Configured Memory Mb",
+          "type": "integer"
+        },
+        "init_duration_ms": {
+          "exclusiveMinimum": 0,
+          "title": "Init Duration Ms",
+          "type": "number"
+        },
+        "invocation_duration_ms": {
+          "exclusiveMinimum": 0,
+          "title": "Invocation Duration Ms",
+          "type": "number"
+        },
+        "max_memory_used_mb": {
+          "exclusiveMinimum": 0,
+          "title": "Max Memory Used Mb",
+          "type": "number"
+        }
+      },
+      "required": [
+        "init_duration_ms",
+        "invocation_duration_ms",
+        "billed_duration_ms",
+        "configured_memory_mb",
+        "max_memory_used_mb"
+      ],
+      "title": "ColdStartLambdaReport",
+      "type": "object"
+    },
+    "ColdStartStructuredRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "process_peak_memory_mb": {
+          "exclusiveMinimum": 0,
+          "title": "Process Peak Memory Mb",
+          "type": "number"
+        }
+      },
+      "required": [
+        "process_peak_memory_mb"
+      ],
+      "title": "ColdStartStructuredRequest",
+      "type": "object"
+    },
+    "ColdStartStructuredStartup": {
+      "additionalProperties": false,
+      "properties": {
+        "model_load_duration_ms": {
+          "exclusiveMinimum": 0,
+          "title": "Model Load Duration Ms",
+          "type": "number"
+        },
+        "startup_succeeded": {
+          "const": true,
+          "title": "Startup Succeeded",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "startup_succeeded",
+        "model_load_duration_ms"
+      ],
+      "title": "ColdStartStructuredStartup",
+      "type": "object"
+    },
+    "SmokeLatency": {
+      "additionalProperties": false,
+      "properties": {
+        "maximum": {
+          "minimum": 0,
+          "title": "Maximum",
+          "type": "number"
+        },
+        "median": {
+          "minimum": 0,
+          "title": "Median",
+          "type": "number"
+        },
+        "minimum": {
+          "minimum": 0,
+          "title": "Minimum",
+          "type": "number"
+        },
+        "rank_median": {
+          "minimum": 0,
+          "title": "Rank Median",
+          "type": "number"
+        }
+      },
+      "required": [
+        "minimum",
+        "median",
+        "maximum",
+        "rank_median"
+      ],
+      "title": "SmokeLatency",
+      "type": "object"
+    },
+    "SmokeTestEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "base_url_origin": {
+          "pattern": "^https?://[^/?#]+$",
+          "title": "Base Url Origin",
+          "type": "string"
+        },
+        "candidate_count": {
+          "maximum": 40,
+          "minimum": 1,
+          "title": "Candidate Count",
+          "type": "integer"
+        },
+        "comparison_checked": {
+          "title": "Comparison Checked",
+          "type": "boolean"
+        },
+        "error_count": {
+          "const": 0,
+          "title": "Error Count",
+          "type": "integer"
+        },
+        "evaluated_candidate_model_id": {
+          "minLength": 1,
+          "title": "Evaluated Candidate Model Id",
+          "type": "string"
+        },
+        "latency_ms": {
+          "$ref": "#/$defs/SmokeLatency"
+        },
+        "model_id": {
+          "minLength": 1,
+          "title": "Model Id",
+          "type": "string"
+        },
+        "note": {
+          "minLength": 1,
+          "title": "Note",
+          "type": "string"
+        },
+        "production_error_rate_claim_eligible": {
+          "const": false,
+          "title": "Production Error Rate Claim Eligible",
+          "type": "boolean"
+        },
+        "query_id": {
+          "minLength": 1,
+          "title": "Query Id",
+          "type": "string"
+        },
+        "rank_requests": {
+          "maximum": 20,
+          "minimum": 1,
+          "title": "Rank Requests",
+          "type": "integer"
+        },
+        "request_count": {
+          "minimum": 5,
+          "title": "Request Count",
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": "1.0.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "scope": {
+          "const": "bounded_release_smoke",
+          "title": "Scope",
+          "type": "string"
+        },
+        "status": {
+          "const": "passed",
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "status",
+        "scope",
+        "base_url_origin",
+        "model_id",
+        "evaluated_candidate_model_id",
+        "query_id",
+        "candidate_count",
+        "rank_requests",
+        "comparison_checked",
+        "request_count",
+        "error_count",
+        "latency_ms",
+        "production_error_rate_claim_eligible",
+        "note"
+      ],
+      "title": "SmokeTestEvidence",
+      "type": "object"
+    },
+    "ThreePercentileLatency": {
+      "additionalProperties": false,
+      "properties": {
+        "p50": {
+          "minimum": 0,
+          "title": "P50",
+          "type": "number"
+        },
+        "p95": {
+          "minimum": 0,
+          "title": "P95",
+          "type": "number"
+        },
+        "p99": {
+          "minimum": 0,
+          "title": "P99",
+          "type": "number"
+        }
+      },
+      "required": [
+        "p50",
+        "p95",
+        "p99"
+      ],
+      "title": "ThreePercentileLatency",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.example.invalid/search-rank/deployment_evidence.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Successful production activation, including the separate cold observation.",
+  "properties": {
+    "artifact_type": {
+      "const": "deployment_evidence",
+      "title": "Artifact Type",
+      "type": "string"
+    },
+    "browser_smoke": {
+      "$ref": "#/$defs/BrowserSmoke"
+    },
+    "candidate_api_gate": {
+      "$ref": "#/$defs/CandidateApiGate"
+    },
+    "code_commit": {
+      "pattern": "^[0-9a-f]{40}$",
+      "title": "Code Commit",
+      "type": "string"
+    },
+    "controlled_cold_start": {
+      "$ref": "#/$defs/ColdStartEvidence"
+    },
+    "model_id": {
+      "minLength": 1,
+      "title": "Model Id",
+      "type": "string"
+    },
+    "previous_lambda_version": {
+      "pattern": "^[1-9][0-9]*$",
+      "title": "Previous Lambda Version",
+      "type": "string"
+    },
+    "production_api_smoke": {
+      "$ref": "#/$defs/SmokeTestEvidence"
+    },
+    "production_lambda_version": {
+      "pattern": "^[1-9][0-9]*$",
+      "title": "Production Lambda Version",
+      "type": "string"
+    },
+    "promoted_pointer_version_id": {
+      "minLength": 1,
+      "title": "Promoted Pointer Version Id",
+      "type": "string"
+    },
+    "release_id": {
+      "minLength": 1,
+      "title": "Release Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "serving_image_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Serving Image Digest",
+      "type": "string"
+    },
+    "smoke_tests_passed": {
+      "const": true,
+      "title": "Smoke Tests Passed",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "release_id",
+    "model_id",
+    "code_commit",
+    "serving_image_digest",
+    "previous_lambda_version",
+    "production_lambda_version",
+    "promoted_pointer_version_id",
+    "smoke_tests_passed",
+    "controlled_cold_start",
+    "candidate_api_gate",
+    "production_api_smoke",
+    "browser_smoke"
+  ],
+  "title": "DeploymentEvidence",
+  "type": "object"
+}

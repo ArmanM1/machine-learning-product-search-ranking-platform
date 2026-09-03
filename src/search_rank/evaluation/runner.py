@@ -259,7 +259,9 @@ def _examples(
     candidate_per_query: dict[str, float | None],
     baseline_per_query: dict[str, float | None],
     *,
-    baseline_id: str,
+    lexical_baseline_id: str | None,
+    lexical_per_query: dict[str, float | None] | None,
+    require_complete: bool,
 ) -> list[ExampleResult]:
     baseline_ranks = {(row.query_id, row.product_id): row for row in baseline_records}
     output: list[ExampleCandidate] = []
@@ -268,6 +270,7 @@ def _examples(
         baseline_value = baseline_per_query[query_id]
         if candidate_value is None or baseline_value is None:
             continue
+        lexical_value = lexical_per_query.get(query_id) if lexical_per_query is not None else None
         query_candidate = [row for row in candidate_records if row.query_id == query_id]
         complement_exact_confusion = any(
             left.esci_label == "Complement"
@@ -287,12 +290,23 @@ def _examples(
                     row.product_id
                     for row in sorted(query_candidate, key=lambda item: item.rank)[:10]
                 ),
-                lexical_preferred=baseline_id.startswith("bm25")
-                and float(candidate_value) < float(baseline_value),
+                lexical_preferred=(
+                    lexical_value is not None and float(candidate_value) < float(lexical_value)
+                ),
+                lexical_baseline_metric=(
+                    float(lexical_value) if lexical_value is not None else None
+                ),
                 complement_exact_confusion=complement_exact_confusion,
+                notes=(
+                    f"Lexical baseline {lexical_baseline_id} outscored the candidate."
+                    if lexical_value is not None
+                    and float(candidate_value) < float(lexical_value)
+                    and lexical_baseline_id is not None
+                    else None
+                ),
             )
         )
-    return select_representative_examples(output)
+    return select_representative_examples(output, require_complete=require_complete)
 
 
 def evaluate_systems(
@@ -310,6 +324,7 @@ def evaluate_systems(
     bootstrap_seed: int,
     confidence_level: float,
     training_runtime_seconds: float,
+    training_hardware: str,
     evaluation_hardware: str,
     model_artifact_size_bytes: int,
     estimated_cost_usd: float = 0.0,
@@ -395,6 +410,27 @@ def evaluate_systems(
         query_id: metrics.graded_ndcg_at_10
         for query_id, metrics in strongest_aggregate.per_query.items()
     }
+    lexical_baseline_values = {
+        model_id: value
+        for model_id, value in baseline_values.items()
+        if model_id.startswith("bm25-")
+    }
+    lexical_baseline_id = (
+        min(
+            lexical_baseline_values,
+            key=lambda model_id: (-lexical_baseline_values[model_id], model_id),
+        )
+        if lexical_baseline_values
+        else None
+    )
+    lexical_per_query = (
+        {
+            query_id: metrics.graded_ndcg_at_10
+            for query_id, metrics in baseline_aggregates[lexical_baseline_id].per_query.items()
+        }
+        if lexical_baseline_id is not None
+        else None
+    )
     assignments = _slice_assignments(frame)
     slice_results = evaluate_slices(
         candidate_per_query,
@@ -410,7 +446,9 @@ def evaluate_systems(
         baseline_records[strongest_baseline_id],
         candidate_per_query,
         strongest_per_query,
-        baseline_id=strongest_baseline_id,
+        lexical_baseline_id=lexical_baseline_id,
+        lexical_per_query=lexical_per_query,
+        require_complete=split.casefold() == "test",
     )
     primary_interval = intervals[strongest_baseline_id]
     unexplained_regressions = tuple(
@@ -514,7 +552,7 @@ def evaluate_systems(
         ),
         training_runtime=RuntimeResult(
             duration_seconds=training_runtime_seconds,
-            hardware=evaluation_hardware,
+            hardware=training_hardware,
             measured=True,
         ),
         evaluation_runtime=RuntimeResult(

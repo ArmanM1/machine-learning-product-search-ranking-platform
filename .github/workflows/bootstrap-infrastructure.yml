@@ -1,0 +1,577 @@
+name: Bootstrap Terraform state infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Plan for review, or apply the separately reviewed exact plan
+        required: true
+        type: choice
+        options: [plan, apply]
+      owner_alias:
+        description: Non-sensitive owner alias used in resource tags
+        required: true
+        type: string
+      reviewed_commit_sha:
+        description: Apply only - full commit SHA printed by the reviewed plan run
+        required: false
+        type: string
+      approved_plan_sha256:
+        description: Apply only - canonical SHA-256 printed by the reviewed plan run
+        required: false
+        type: string
+      authorization:
+        description: Apply only - type APPLY APPROVED CREDITS ONLY STATE BOOTSTRAP
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: aws-financial-operations
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  TF_IN_AUTOMATION: "true"
+  MAXIMUM_OUT_OF_POCKET_USD: "0"
+  CAMPAIGN_BUDGET_USD: "40"
+  REQUIRED_CREDIT_RESERVE_USD: "40"
+  STATE_BOOTSTRAP_ALLOWANCE_USD: "0.10"
+  STATE_KEY: product-search-ranking/bootstrap/terraform.tfstate
+
+jobs:
+  bootstrap:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: aws-state-bootstrap
+    env:
+      OPERATION: ${{ inputs.operation }}
+      OWNER_ALIAS: ${{ inputs.owner_alias }}
+      REVIEWED_COMMIT_SHA: ${{ inputs.reviewed_commit_sha }}
+      APPROVED_PLAN_SHA256: ${{ inputs.approved_plan_sha256 }}
+      AUTHORIZATION: ${{ inputs.authorization }}
+      CAMPAIGN_SPEND_TO_DATE_USD: ${{ secrets.AWS_CAMPAIGN_SPEND_TO_DATE_USD }}
+      REMAINING_APPLICABLE_CREDIT_USD: ${{ secrets.AWS_REMAINING_APPLICABLE_CREDIT_USD }}
+      FINANCIAL_SNAPSHOT_OBSERVED_AT: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_OBSERVED_AT }}
+      FINANCIAL_SNAPSHOT_RECEIPT_SHA256: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_RECEIPT_SHA256 }}
+      FINANCIAL_SNAPSHOT_HMAC_KEY: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_HMAC_KEY }}
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_WORKFLOW: bootstrap-infrastructure
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_INPUTS_JSON: ${{ toJSON(inputs) }}
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_COMMIT_SHA: ${{ github.sha }}
+      FINANCIAL_SNAPSHOT_SOURCE: "aws_billing_and_cost_management_console"
+      FINANCIAL_SNAPSHOT_MAX_AGE_SECONDS: "21600"
+      FINANCIAL_RESERVATION_MAX_USD: "0.10"
+      FINANCIAL_RESERVATION_REMAINING_COMMITTED_USD: "0"
+      FINANCIAL_RESERVATION_CPU_HOURS: "0"
+      FINANCIAL_RESERVATION_GPU_HOURS: "0"
+      FINANCIAL_CPU_HOURS_USED_TO_DATE: "0"
+      FINANCIAL_GPU_HOURS_USED_TO_DATE: "0"
+      TF_GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+      TF_GITHUB_REPOSITORY: ${{ github.repository }}
+      TF_GITHUB_REPOSITORY_OWNER_ID: ${{ vars.TF_GITHUB_REPOSITORY_OWNER_ID }}
+      TF_GITHUB_REPOSITORY_ID: ${{ vars.TF_GITHUB_REPOSITORY_ID }}
+    steps:
+      - name: Validate dispatch authorization and credits-only cost boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${OWNER_ALIAS}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$ ]]
+          [[ "${TF_GITHUB_REPOSITORY_OWNER}" =~ ^[A-Za-z0-9_.-]+$ ]]
+          test "${TF_GITHUB_REPOSITORY}" = \
+            "${TF_GITHUB_REPOSITORY_OWNER}/machine-learning-product-search-ranking-platform"
+          [[ "${TF_GITHUB_REPOSITORY_OWNER_ID}" =~ ^[1-9][0-9]{0,19}$ ]]
+          [[ "${TF_GITHUB_REPOSITORY_ID}" =~ ^[1-9][0-9]{0,19}$ ]]
+          if [[ "${OPERATION}" == "plan" ]]; then
+            test -z "${REVIEWED_COMMIT_SHA}"
+            test -z "${APPROVED_PLAN_SHA256}"
+            test -z "${AUTHORIZATION}"
+          else
+            test "${OPERATION}" = "apply"
+            test "${AUTHORIZATION}" = "APPLY APPROVED CREDITS ONLY STATE BOOTSTRAP"
+            [[ "${REVIEWED_COMMIT_SHA}" =~ ^[0-9a-f]{40}$ ]]
+            [[ "${APPROVED_PLAN_SHA256}" =~ ^[0-9a-f]{64}$ ]]
+          fi
+          python - <<'PY'
+          import os
+          from decimal import Decimal, InvalidOperation
+
+          def amount(name: str) -> Decimal:
+              try:
+                  value = Decimal(os.environ[name])
+              except (InvalidOperation, KeyError) as exc:
+                  raise SystemExit(f"{name} must be a decimal number") from exc
+              if not value.is_finite() or value < 0:
+                  raise SystemExit(f"{name} must be finite and non-negative")
+              return value
+
+          allowance = amount("STATE_BOOTSTRAP_ALLOWANCE_USD")
+          spent = amount("CAMPAIGN_SPEND_TO_DATE_USD")
+          remaining_credit = amount("REMAINING_APPLICABLE_CREDIT_USD")
+          campaign = amount("CAMPAIGN_BUDGET_USD")
+          reserve = amount("REQUIRED_CREDIT_RESERVE_USD")
+          if amount("MAXIMUM_OUT_OF_POCKET_USD") != 0:
+              raise SystemExit("Owner-approved out-of-pocket limit must remain exactly USD 0")
+          if campaign != Decimal("40") or reserve < Decimal("40"):
+              raise SystemExit("Campaign or applicable-credit reserve policy changed")
+          if spent + allowance > campaign:
+              raise SystemExit("State bootstrap allowance would breach the campaign envelope")
+          if remaining_credit < allowance + reserve:
+              raise SystemExit(
+                  "Applicable promotional credit cannot cover the state bootstrap allowance "
+                  "and required reserve"
+              )
+          print("Credits-only cost guard passed for the USD 0.10 state-bootstrap allowance.")
+          PY
+
+      - name: Select the exact reviewed source revision
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${OPERATION}" == "apply" ]]; then
+            target="${REVIEWED_COMMIT_SHA}"
+          else
+            target="${GITHUB_SHA}"
+          fi
+          echo "target=${target}" >> "${GITHUB_OUTPUT}"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.source.outputs.target }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - name: Install the protected financial snapshot validator dependency
+        run: python -m pip install --disable-pip-version-check pydantic==2.13.5
+
+      - name: Prove the selected revision belongs to main
+        shell: bash
+        env:
+          TARGET_COMMIT: ${{ steps.source.outputs.target }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${TARGET_COMMIT}"
+          git merge-base --is-ancestor "${TARGET_COMMIT}" "origin/main"
+          if [[ "${OPERATION}" == "plan" ]]; then
+            test "${TARGET_COMMIT}" = "${GITHUB_SHA}"
+          fi
+
+      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ vars.AWS_BOOTSTRAP_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-state-bootstrap-${{ github.run_id }}
+          mask-aws-account-id: true
+
+      - name: Verify non-root OIDC identity and unused state-bucket name
+        shell: bash
+        run: |
+          set -euo pipefail
+          identity="$(aws sts get-caller-identity --output json)"
+          caller_arn="$(jq -r '.Arn' <<<"${identity}")"
+          account_id="$(jq -r '.Account' <<<"${identity}")"
+          [[ "${caller_arn}" =~ ^arn:aws:sts::[0-9]{12}:assumed-role/[^/]+/[^/]+$ ]]
+          [[ "${caller_arn}" != *":root" ]]
+          [[ "${account_id}" =~ ^[0-9]{12}$ ]]
+          state_bucket="product-search-ranking-terraform-state-${account_id}-${AWS_REGION}"
+          echo "STATE_BUCKET=${state_bucket}" >> "${GITHUB_ENV}"
+
+          set +e
+          head_error="$(aws s3api head-bucket --bucket "${state_bucket}" 2>&1)"
+          head_status=$?
+          set -e
+          if [[ ${head_status} -eq 0 ]]; then
+            echo "The bootstrap bucket already exists; refuse a second local-state bootstrap." >&2
+            exit 1
+          fi
+          if ! grep -Eq '(^|[^0-9])404([^0-9]|$)|Not Found|NoSuchBucket' <<<"${head_error}"; then
+            echo "Unable to prove that the deterministic state-bucket name is unused." >&2
+            exit 1
+          fi
+
+      - name: Prove the complete state-bootstrap authorization before any create
+        shell: bash
+        env:
+          BOOTSTRAP_ROLE_ARN: ${{ vars.AWS_BOOTSTRAP_ROLE_ARN }}
+        run: |
+          set -euo pipefail
+          [[ "${BOOTSTRAP_ROLE_ARN}" =~ ^arn:aws:iam::([0-9]{12}):role/product-search-github-bootstrap$ ]]
+          test "${BASH_REMATCH[1]}" = "$(aws sts get-caller-identity --query Account --output text)"
+
+          aws iam get-role --role-name product-search-github-bootstrap --output json \
+            > live-bootstrap-role.json
+          aws iam list-role-policies --role-name product-search-github-bootstrap --output json \
+            > live-inline-policies.json
+          aws iam list-attached-role-policies \
+            --role-name product-search-github-bootstrap \
+            --output json > live-attached-policies.json
+          aws iam get-role-policy \
+            --role-name product-search-github-bootstrap \
+            --policy-name fixed-six-resource-state-bootstrap \
+            --output json > live-bootstrap-policy.json
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from scripts.render_bootstrap_iam import build_state_policy, build_trust
+
+          account_id = os.environ["BOOTSTRAP_ROLE_ARN"].split(":")[4]
+          inline = json.loads(Path("live-inline-policies.json").read_text(encoding="utf-8"))
+          attached = json.loads(Path("live-attached-policies.json").read_text(encoding="utf-8"))
+          role = json.loads(Path("live-bootstrap-role.json").read_text(encoding="utf-8"))["Role"]
+          policy = json.loads(
+              Path("live-bootstrap-policy.json").read_text(encoding="utf-8")
+          )["PolicyDocument"]
+          if inline.get("PolicyNames") != ["fixed-six-resource-state-bootstrap"]:
+              raise SystemExit("Bootstrap role must have exactly one named inline policy")
+          if attached.get("AttachedPolicies") != []:
+              raise SystemExit("Bootstrap role must have no attached managed policies")
+          if policy != build_state_policy(account_id):
+              raise SystemExit("Live bootstrap policy differs from the generated exact contract")
+          expected_trust = build_trust(
+              account_id,
+              os.environ["TF_GITHUB_REPOSITORY_OWNER"],
+              os.environ["TF_GITHUB_REPOSITORY_OWNER_ID"],
+              os.environ["TF_GITHUB_REPOSITORY_ID"],
+              "state-bootstrap",
+          )
+          if role.get("AssumeRolePolicyDocument") != expected_trust:
+              raise SystemExit("Live bootstrap trust differs from the immutable repository contract")
+          PY
+
+          state_bucket_arn="arn:aws:s3:::${STATE_BUCKET}"
+          state_object_arn="${state_bucket_arn}/${STATE_KEY}"
+          lock_object_arn="${state_object_arn}.tflock"
+          simulation_dir="$(mktemp -d)"
+          cleanup_simulation() {
+            rm -f "${simulation_dir}/bucket.json"
+            rm -f "${simulation_dir}/state-object.json"
+            rm -f "${simulation_dir}/lock-object.json"
+            rmdir "${simulation_dir}"
+            rm -f live-bootstrap-role.json live-inline-policies.json
+            rm -f live-attached-policies.json live-bootstrap-policy.json
+          }
+          trap cleanup_simulation EXIT
+
+          require_allowed() {
+            local resource_arn="$1"
+            local output_file="$2"
+            shift 2
+            aws iam simulate-principal-policy \
+              --policy-source-arn "${BOOTSTRAP_ROLE_ARN}" \
+              --action-names "$@" \
+              --resource-arns "${resource_arn}" \
+              --output json > "${output_file}"
+            jq -e --argjson expected "$#" '
+              (.EvaluationResults | length) == $expected
+              and all(.EvaluationResults[]; .EvalDecision == "allowed")
+              and all(.EvaluationResults[]; (.MissingContextValues // []) | length == 0)
+            ' "${output_file}" >/dev/null
+          }
+
+          require_allowed "${state_bucket_arn}" "${simulation_dir}/bucket.json" \
+            s3:CreateBucket \
+            s3:GetAccelerateConfiguration \
+            s3:GetBucketAcl \
+            s3:GetBucketCORS \
+            s3:GetBucketLocation \
+            s3:GetBucketLogging \
+            s3:GetBucketObjectLockConfiguration \
+            s3:GetBucketOwnershipControls \
+            s3:GetBucketPolicy \
+            s3:GetBucketPublicAccessBlock \
+            s3:GetBucketRequestPayment \
+            s3:GetBucketTagging \
+            s3:GetBucketVersioning \
+            s3:GetBucketWebsite \
+            s3:GetEncryptionConfiguration \
+            s3:GetLifecycleConfiguration \
+            s3:GetReplicationConfiguration \
+            s3:ListBucket \
+            s3:PutBucketOwnershipControls \
+            s3:PutBucketPublicAccessBlock \
+            s3:PutBucketTagging \
+            s3:PutBucketVersioning \
+            s3:PutEncryptionConfiguration \
+            s3:PutLifecycleConfiguration
+          require_allowed "${state_object_arn}" "${simulation_dir}/state-object.json" \
+            s3:GetObject s3:PutObject
+          require_allowed "${lock_object_arn}" "${simulation_dir}/lock-object.json" \
+            s3:DeleteObject s3:GetObject s3:PutObject
+          echo "The live bootstrap role is authorized for the complete fixed state-bootstrap contract."
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: "1.10.5"
+          terraform_wrapper: false
+
+      - name: Create or reproduce the exact plan, then optionally apply and migrate state
+        id: terraform
+        working-directory: infra/terraform/environments/bootstrap
+        shell: bash
+        env:
+          TARGET_COMMIT: ${{ steps.source.outputs.target }}
+        run: |
+          set -euo pipefail
+
+          migration_complete=0
+          apply_attempted=0
+          preserve_partial_state() {
+            original_status=$?
+            trap - EXIT
+            if [[ ${apply_attempted} -eq 1 && ${migration_complete} -ne 1 && -s terraform.tfstate ]]; then
+              echo "A local Terraform state exists; checking whether migration completed." >&2
+              if aws s3api get-object \
+                --bucket "${STATE_BUCKET}" \
+                --key "${STATE_KEY}" \
+                /tmp/bootstrap-remote-state >/dev/null 2>&1; then
+                if cmp -s terraform.tfstate /tmp/bootstrap-remote-state; then
+                  migration_complete=1
+                else
+                  echo "::error::A different remote state object already exists; refusing to overwrite it. Reconcile the bucket before any retry."
+                fi
+              else
+                for attempt in 1 2 3; do
+                  PYTHONPATH=../../../../src python \
+                    ../../../../scripts/validate_financial_snapshot.py emit --output /dev/null
+                  if aws s3api put-object \
+                    --bucket "${STATE_BUCKET}" \
+                    --key "${STATE_KEY}" \
+                    --body terraform.tfstate \
+                    --checksum-algorithm SHA256 \
+                    --if-none-match '*' \
+                    --server-side-encryption AES256 >/dev/null; then
+                    migration_complete=1
+                    echo "::warning::Terraform backend migration failed after apply; the partial local state was preserved at the intended encrypted S3 state key. Reconcile it before any retry."
+                    break
+                  fi
+                  sleep "$((attempt * 2))"
+                done
+              fi
+            fi
+            rm -f reviewed.tfplan reviewed-plan.private.json reviewed-plan.canonical.private.json
+            rm -f reviewed-plan.unredacted.private.txt post-migration.tfplan
+            rm -f terraform-version.private.json
+            rm -f backend.bootstrap.runtime.tf
+            rm -f /tmp/bootstrap-remote-state
+            if [[ ${migration_complete} -eq 1 ]]; then
+              rm -f terraform.tfstate terraform.tfstate.backup
+            fi
+            exit "${original_status}"
+          }
+          trap preserve_partial_state EXIT
+
+          rm -rf .terraform
+          rm -f terraform.tfstate terraform.tfstate.backup backend.bootstrap.runtime.tf
+          terraform version | grep -F 'Terraform v1.10.5'
+          terraform fmt -check
+          lockfile_sha256_before="$(sha256sum .terraform.lock.hcl | cut -d' ' -f1)"
+          terraform init -backend=false -input=false -lockfile=readonly
+          lockfile_sha256_after="$(sha256sum .terraform.lock.hcl | cut -d' ' -f1)"
+          test "${lockfile_sha256_before}" = "${lockfile_sha256_after}"
+          export TF_LOCKFILE_SHA256="${lockfile_sha256_after}"
+          terraform version -json > terraform-version.private.json
+          terraform validate
+          terraform plan \
+            -input=false \
+            -refresh=false \
+            -lock=false \
+            -out=reviewed.tfplan \
+            -var="owner_alias=${OWNER_ALIAS}"
+          terraform show -json reviewed.tfplan > reviewed-plan.private.json
+          terraform show -no-color reviewed.tfplan > reviewed-plan.unredacted.private.txt
+
+          python - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          plan_path = Path("reviewed-plan.private.json")
+          payload = json.loads(plan_path.read_text(encoding="utf-8"))
+          version = json.loads(Path("terraform-version.private.json").read_text(encoding="utf-8"))
+          if payload.get("errored") is True or payload.get("complete") is False:
+              raise SystemExit("Terraform did not produce a complete, non-errored plan")
+
+          expected = {
+              "aws_s3_bucket.state",
+              "aws_s3_bucket_lifecycle_configuration.state",
+              "aws_s3_bucket_ownership_controls.state",
+              "aws_s3_bucket_public_access_block.state",
+              "aws_s3_bucket_server_side_encryption_configuration.state",
+              "aws_s3_bucket_versioning.state",
+          }
+          managed = {
+              change["address"]: change.get("change", {}).get("actions", [])
+              for change in payload.get("resource_changes", [])
+              if change.get("mode", "managed") == "managed"
+          }
+          if set(managed) != expected:
+              raise SystemExit(
+                  "State-bootstrap plan resource inventory changed: "
+                  + json.dumps(managed, sort_keys=True)
+              )
+          invalid = {
+              address: actions
+              for address, actions in managed.items()
+              if actions != ["create"] or "delete" in actions
+          }
+          if invalid:
+              raise SystemExit(
+                  "State bootstrap permits creates only and refuses deletes/replacements: "
+                  + json.dumps(invalid, sort_keys=True)
+              )
+
+          managed_changes = sorted(
+              (
+                  change
+                  for change in payload.get("resource_changes", [])
+                  if change.get("mode", "managed") == "managed"
+              ),
+              key=lambda change: change["address"],
+          )
+          canonical = {
+              "reviewed_commit_sha": os.environ["TARGET_COMMIT"],
+              "terraform_lock_sha256": os.environ["TF_LOCKFILE_SHA256"],
+              "terraform_cli_version": version.get("terraform_version"),
+              "provider_selections": version.get("provider_selections", {}),
+              "format_version": payload.get("format_version"),
+              "terraform_version": payload.get("terraform_version"),
+              "variables": payload.get("variables", {}),
+              "managed_resource_changes": managed_changes,
+              "output_changes": payload.get("output_changes", {}),
+          }
+          Path("reviewed-plan.canonical.private.json").write_text(
+              json.dumps(canonical, sort_keys=True, separators=(",", ":")),
+              encoding="utf-8",
+          )
+
+          text = Path("reviewed-plan.unredacted.private.txt").read_text(encoding="utf-8")
+          substitutions = (
+              (r"arn:aws(?:-[a-z]+)?:[^\s\"']+", "<redacted-aws-arn>"),
+              (r"(?<![0-9])[0-9]{12}(?![0-9])", "<redacted-account-id>"),
+              (
+                  r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}",
+                  "<redacted-email>",
+              ),
+              (r"(?:AKIA|ASIA)[0-9A-Z]{16}", "<redacted-access-key>"),
+              (
+                  r"\b(?:AIDA|AROA|AGPA|ANPA|ANVA|ASCA)[A-Z0-9]{12,}"
+                  r"(?::[A-Za-z0-9+=,.@_-]+)?",
+                  "<redacted-principal-id>",
+              ),
+          )
+          for pattern, replacement in substitutions:
+              text = re.sub(pattern, replacement, text)
+          residual_patterns = (
+              r"arn:aws(?:-[a-z]+)?:",
+              r"(?<![0-9])[0-9]{12}(?![0-9])",
+              r"(?:AKIA|ASIA)[0-9A-Z]{16}",
+              r"\b(?:AIDA|AROA|AGPA|ANPA|ANVA|ASCA)[A-Z0-9]{12,}",
+          )
+          if any(re.search(pattern, text) for pattern in residual_patterns):
+              raise SystemExit("Redacted plan still contains an AWS identity-shaped value")
+          Path("reviewed-plan.txt").write_text(text, encoding="utf-8")
+          PY
+          rm -f reviewed-plan.unredacted.private.txt terraform-version.private.json
+
+          plan_hash="$(sha256sum reviewed-plan.canonical.private.json | cut -d' ' -f1)"
+          printf '%s\n' "${plan_hash}" > reviewed-plan.sha256
+          {
+            echo "### Terraform state bootstrap review"
+            echo
+            echo "- Reviewed commit: \`${TARGET_COMMIT}\`"
+            echo "- Terraform lockfile SHA-256: \`${TF_LOCKFILE_SHA256}\`"
+            echo "- Canonical plan SHA-256: \`${plan_hash}\`"
+            echo "- Inventory: six create-only S3 state-bucket resources"
+            echo "- Artifact: redacted human-readable plan and hash only"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          if [[ "${OPERATION}" == "plan" ]]; then
+            echo "Review the redacted artifact, then use its commit and hash in a separate apply dispatch." \
+              >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+
+          test "${plan_hash}" = "${APPROVED_PLAN_SHA256}"
+          PYTHONPATH=../../../../src python \
+            ../../../../scripts/validate_financial_snapshot.py emit --output /dev/null
+          apply_attempted=1
+          terraform apply -input=false -auto-approve reviewed.tfplan
+          test -s terraform.tfstate
+          test "$(terraform output -raw state_bucket_name)" = "${STATE_BUCKET}"
+
+          printf '%s\n' \
+            'terraform {' \
+            '  backend "s3" {}' \
+            '}' \
+            > backend.bootstrap.runtime.tf
+          PYTHONPATH=../../../../src python \
+            ../../../../scripts/validate_financial_snapshot.py emit --output /dev/null
+          terraform init \
+            -input=false \
+            -lockfile=readonly \
+            -migrate-state \
+            -force-copy \
+            -backend-config="bucket=${STATE_BUCKET}" \
+            -backend-config="key=${STATE_KEY}" \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config="encrypt=true" \
+            -backend-config="use_lockfile=true"
+
+          mapfile -t state_resources < <(terraform state list | grep -v '^data\.')
+          test "${#state_resources[@]}" -eq 6
+          for expected_resource in \
+            aws_s3_bucket.state \
+            aws_s3_bucket_lifecycle_configuration.state \
+            aws_s3_bucket_ownership_controls.state \
+            aws_s3_bucket_public_access_block.state \
+            aws_s3_bucket_server_side_encryption_configuration.state \
+            aws_s3_bucket_versioning.state; do
+            printf '%s\n' "${state_resources[@]}" | grep -Fx "${expected_resource}" >/dev/null
+          done
+
+          head_metadata="$(aws s3api head-object \
+            --bucket "${STATE_BUCKET}" \
+            --key "${STATE_KEY}" \
+            --output json)"
+          test "$(jq -r '.ServerSideEncryption' <<<"${head_metadata}")" = "AES256"
+          test "$(jq -r '.ContentLength' <<<"${head_metadata}")" -gt 0
+          migration_complete=1
+
+          # The state bootstrap is the sole exception before a shared ledger can exist. Create
+          # that exact private object immediately after the encrypted/versioned bucket and state
+          # are durable; all later AWS workflows must reserve through it before mutation.
+          PYTHONPATH=../../../../src python \
+            ../../../../scripts/reserve_financial_capacity.py init \
+              --bucket "${STATE_BUCKET}"
+
+          set +e
+          terraform plan \
+            -input=false \
+            -detailed-exitcode \
+            -out=post-migration.tfplan \
+            -var="owner_alias=${OWNER_ALIAS}"
+          post_status=$?
+          set -e
+          test "${post_status}" -eq 0
+          echo "Exact reviewed plan applied; encrypted remote state migration and no-drift check passed." \
+            >> "${GITHUB_STEP_SUMMARY}"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: state-bootstrap-${{ inputs.operation }}-${{ github.run_id }}
+          path: |
+            infra/terraform/environments/bootstrap/reviewed-plan.txt
+            infra/terraform/environments/bootstrap/reviewed-plan.sha256
+          if-no-files-found: warn
+          retention-days: 30

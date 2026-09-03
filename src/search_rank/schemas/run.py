@@ -33,6 +33,9 @@ class RunManifest(ContractModel):
     job_id: NonEmptyStr
     hardware: NonEmptyStr
     accelerator: NonEmptyStr | None
+    device_type: Literal["cpu", "cuda", "mps"] | None = None
+    cuda_available: bool | None = None
+    cuda_device_count: Annotated[int, Field(ge=0)] | None = None
     started_at: UtcDateTime
     ended_at: UtcDateTime | None
     duration_seconds: Annotated[float, Field(ge=0, allow_inf_nan=False)] | None
@@ -55,6 +58,24 @@ class RunManifest(ContractModel):
             raise ValueError("failed runs require failure_summary")
         if set(self.artifact_uris) != set(self.artifact_checksums):
             raise ValueError("every artifact URI must have a same-key SHA-256 checksum")
+        device_fields = (self.device_type, self.cuda_available, self.cuda_device_count)
+        if self.run_type == "training" and any(value is None for value in device_fields):
+            raise ValueError("training runs require actual device and CUDA evidence")
+        if any(value is not None for value in device_fields):
+            if any(value is None for value in device_fields):
+                raise ValueError("device and CUDA evidence must be recorded together")
+            device_type = self.device_type
+            cuda_available = self.cuda_available
+            cuda_device_count = self.cuda_device_count
+            assert device_type is not None
+            assert cuda_available is not None
+            assert cuda_device_count is not None
+            if cuda_available != (cuda_device_count > 0):
+                raise ValueError("CUDA availability and device count differ")
+            if (device_type == "cuda") != (self.accelerator == "gpu"):
+                raise ValueError("actual device and accelerator differ")
+            if device_type == "cuda" and not cuda_available:
+                raise ValueError("CUDA execution requires an available CUDA device")
         return self
 
 

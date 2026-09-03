@@ -44,6 +44,12 @@ def build_command(argv: list[str]) -> tuple[list[str], Path]:
     parser = argparse.ArgumentParser(
         description="Run one versioned candidate training job in a SageMaker training container."
     )
+    parser.add_argument(
+        "program",
+        nargs="?",
+        choices=("train",),
+        help="SageMaker invokes custom training images as `docker run IMAGE train`.",
+    )
     parser.add_argument("--config", help="Frozen candidate experiment YAML")
     parser.add_argument("--dataset-manifest", help="Prepared-data current.json or manifest.json")
     parser.add_argument(

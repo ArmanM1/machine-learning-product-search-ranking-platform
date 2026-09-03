@@ -34,7 +34,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: public-production
+  group: aws-financial-operations
   cancel-in-progress: false
 
 env:
@@ -56,30 +56,59 @@ jobs:
       AUTHORIZATION: ${{ inputs.authorization }}
       CAMPAIGN_SPEND_TO_DATE_USD: ${{ secrets.AWS_CAMPAIGN_SPEND_TO_DATE_USD }}
       REMAINING_APPLICABLE_CREDIT_USD: ${{ secrets.AWS_REMAINING_APPLICABLE_CREDIT_USD }}
+      FINANCIAL_SNAPSHOT_OBSERVED_AT: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_OBSERVED_AT }}
+      FINANCIAL_SNAPSHOT_RECEIPT_SHA256: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_RECEIPT_SHA256 }}
+      FINANCIAL_SNAPSHOT_HMAC_KEY: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_HMAC_KEY }}
+      FINANCIAL_RESERVATION_MAX_USD: ${{ secrets.AWS_FINANCIAL_RESERVATION_MAX_USD }}
+      FINANCIAL_RESERVATION_REMAINING_COMMITTED_USD: ${{ secrets.AWS_FINANCIAL_RESERVATION_REMAINING_COMMITTED_USD }}
+      FINANCIAL_RESERVATION_CPU_HOURS: ${{ secrets.AWS_FINANCIAL_RESERVATION_CPU_HOURS }}
+      FINANCIAL_RESERVATION_GPU_HOURS: ${{ secrets.AWS_FINANCIAL_RESERVATION_GPU_HOURS }}
+      FINANCIAL_CPU_HOURS_USED_TO_DATE: ${{ secrets.AWS_FINANCIAL_CPU_HOURS_USED_TO_DATE }}
+      FINANCIAL_GPU_HOURS_USED_TO_DATE: ${{ secrets.AWS_FINANCIAL_GPU_HOURS_USED_TO_DATE }}
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_WORKFLOW: deploy
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_INPUTS_JSON: ${{ toJSON(inputs) }}
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_COMMIT_SHA: ${{ github.sha }}
+      FINANCIAL_SNAPSHOT_SOURCE: "aws_billing_and_cost_management_console"
+      FINANCIAL_SNAPSHOT_MAX_AGE_SECONDS: "21600"
       ARTIFACT_BUCKET: ${{ vars.AWS_ARTIFACT_BUCKET }}
       SITE_BUCKET: ${{ vars.AWS_SITE_BUCKET }}
       SERVE_REPOSITORY: ${{ vars.AWS_SERVE_ECR_REPOSITORY_URL }}
       TF_STATE_BUCKET: ${{ vars.AWS_TERRAFORM_STATE_BUCKET }}
       TF_OWNER_ALIAS: ${{ vars.TF_OWNER_ALIAS }}
       TF_GITHUB_REPOSITORY: ${{ github.repository }}
+      TF_GITHUB_REPOSITORY_OWNER_ID: ${{ vars.TF_GITHUB_REPOSITORY_OWNER_ID }}
+      TF_GITHUB_REPOSITORY_ID: ${{ vars.TF_GITHUB_REPOSITORY_ID }}
       TF_GITHUB_OIDC_PROVIDER_ARN: ${{ vars.AWS_GITHUB_OIDC_PROVIDER_ARN }}
       TF_CREATE_GITHUB_OIDC_PROVIDER: ${{ vars.TF_CREATE_GITHUB_OIDC_PROVIDER || 'false' }}
       TF_ENABLE_BUDGETS: ${{ vars.TF_ENABLE_BUDGETS || 'false' }}
-      TF_BUDGET_NOTIFICATION_EMAIL: ${{ vars.AWS_BUDGET_NOTIFICATION_EMAIL }}
-      TF_ALARM_NOTIFICATION_EMAIL: ${{ vars.AWS_ALARM_NOTIFICATION_EMAIL }}
+      TF_BUDGET_NOTIFICATION_EMAIL: ${{ secrets.AWS_BUDGET_NOTIFICATION_EMAIL }}
+      TF_ALARM_NOTIFICATION_EMAIL: ${{ secrets.AWS_ALARM_NOTIFICATION_EMAIL }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - name: Install the protected AWS mutation gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          gate_dir="${RUNNER_TEMP}/financial-aws-gate"
+          mkdir -p "${gate_dir}"
+          install -m 0755 scripts/aws_financial_gate.sh "${gate_dir}/aws"
+          printf 'REAL_AWS_CLI=%s\n' "$(command -v aws)" >> "${GITHUB_ENV}"
+          printf '%s\n' "${gate_dir}" >> "${GITHUB_PATH}"
       - name: Enforce public-deployment and zero-out-of-pocket gates
         shell: bash
         run: |
           set -euo pipefail
           test "${AUTHORIZATION}" = "DEPLOY PUBLIC AWS DEMO"
           test "${ALLOW_HELDOUT_EVAL}" = "0"
+          [[ "${TF_GITHUB_REPOSITORY_OWNER_ID}" =~ ^[1-9][0-9]*$ ]]
+          [[ "${TF_GITHUB_REPOSITORY_ID}" =~ ^[1-9][0-9]*$ ]]
           [[ "${RELEASE_ID}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{2,62}$ ]]
-          [[ "${MODEL_ID}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{2,99}$ ]]
+          ((${#MODEL_ID} >= 3 && ${#MODEL_ID} <= 100))
+          [[ "${MODEL_ID}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*(@[A-Za-z0-9][A-Za-z0-9._-]*)?$ ]]
           : "${ARTIFACT_BUCKET:?Missing AWS_ARTIFACT_BUCKET variable}"
           : "${SITE_BUCKET:?Missing AWS_SITE_BUCKET variable}"
           : "${SERVE_REPOSITORY:?Missing AWS_SERVE_ECR_REPOSITORY_URL variable}"
@@ -93,8 +122,8 @@ jobs:
                   value = Decimal(os.environ[name])
               except (InvalidOperation, KeyError) as exc:
                   raise SystemExit(f"{name} must be a decimal number") from exc
-              if value < 0:
-                  raise SystemExit(f"{name} may not be negative")
+              if not value.is_finite() or value < 0:
+                  raise SystemExit(f"{name} must be finite and non-negative")
               return value
 
           # PRD allowance for S3, ECR, Lambda, API Gateway, and CloudFront combined.
@@ -117,34 +146,157 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: gha-deploy-${{ github.run_id }}
           mask-aws-account-id: true
+      - name: Atomically reserve the signed campaign capacity
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${TF_STATE_BUCKET:?Missing AWS_TERRAFORM_STATE_BUCKET variable}"
+          python -m pip install --disable-pip-version-check pydantic==2.13.5
+          PYTHONPATH=src python scripts/reserve_financial_capacity.py reserve \
+            --bucket "${TF_STATE_BUCKET}" \
+            --output financial-capacity-reservation.json
       - uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2
       - name: Verify promotion and build immutable serving image
         shell: bash
         run: |
           set -euo pipefail
+          current_pointer_key="promoted/current.json"
+          decision_pointer_key="promoted/decisions/${RELEASE_ID}.json"
+          aws s3api head-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key "${current_pointer_key}" \
+            > previous-promotion-pointer-head.json
           aws s3api get-object \
             --bucket "${ARTIFACT_BUCKET}" \
-            --key promoted/current.json \
-            promotion-pointer.json >/dev/null
+            --key "${current_pointer_key}" \
+            previous-promotion-pointer.json >/dev/null
+          previous_pointer_etag="$(jq -er '.ETag' previous-promotion-pointer-head.json)"
+          previous_pointer_version="$(jq -er '.VersionId' previous-promotion-pointer-head.json)"
+          [[ "${previous_pointer_etag}" =~ ^\"[0-9a-f]{32}\"$ ]]
+          ((${#previous_pointer_version} >= 1 && ${#previous_pointer_version} <= 1024))
+          [[ "${previous_pointer_version}" =~ ^[A-Za-z0-9._=+/-]+$ ]]
+          printf '%s' "${previous_pointer_etag}" > previous-promotion-pointer-etag.txt
+          printf '%s' "${previous_pointer_version}" > previous-promotion-pointer-version.txt
+
+          # The canonical deployment-evidence key is a versioned CAS pointer to
+          # the newest successful deployment of this release. Capture its exact
+          # pre-run state now so a retry can publish a fresh Lambda-version
+          # observation without overwriting a concurrent deployment.
+          deployment_evidence_key="public/${RELEASE_ID}/deployment-evidence.json"
+          set +e
+          aws s3api head-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key "${deployment_evidence_key}" \
+            > prior-deployment-evidence-head.json \
+            2> prior-deployment-evidence-head-error.txt
+          prior_deployment_evidence_status=$?
+          set -e
+          if [[ "${prior_deployment_evidence_status}" -eq 0 ]]; then
+            prior_deployment_evidence_etag="$(jq -er '.ETag' prior-deployment-evidence-head.json)"
+            prior_deployment_evidence_version="$(jq -er '.VersionId' prior-deployment-evidence-head.json)"
+            [[ "${prior_deployment_evidence_etag}" =~ ^\"[0-9a-f]{32}\"$ ]]
+            ((${#prior_deployment_evidence_version} >= 1 && ${#prior_deployment_evidence_version} <= 1024))
+            [[ "${prior_deployment_evidence_version}" =~ ^[A-Za-z0-9._=+/-]+$ ]]
+            printf '%s' "${prior_deployment_evidence_etag}" > prior-deployment-evidence-etag.txt
+            printf '%s' "${prior_deployment_evidence_version}" > prior-deployment-evidence-version.txt
+          else
+            if ! grep -Eq 'NoSuchKey|Not Found|404' prior-deployment-evidence-head-error.txt; then
+              cat prior-deployment-evidence-head-error.txt >&2
+              exit "${prior_deployment_evidence_status}"
+            fi
+            touch prior-deployment-evidence-absent.txt
+          fi
+
+          set +e
+          aws s3api get-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key "${decision_pointer_key}" \
+            promotion-pointer.json \
+            > promotion-decision-get.json 2>promotion-decision-get-error.txt
+          decision_get_status=$?
+          set -e
+          if [[ "${decision_get_status}" -eq 0 ]]; then
+            decision_pointer_etag="$(jq -er '.ETag' promotion-decision-get.json)"
+            decision_pointer_version="$(jq -er '.VersionId' promotion-decision-get.json)"
+            [[ "${decision_pointer_etag}" =~ ^\"[0-9a-f]{32}\"$ ]]
+            ((${#decision_pointer_version} >= 1 && ${#decision_pointer_version} <= 1024))
+            [[ "${decision_pointer_version}" =~ ^[A-Za-z0-9._=+/-]+$ ]]
+            printf '%s' "${decision_pointer_etag}" > promotion-decision-etag.txt
+            printf '%s' "${decision_pointer_version}" > promotion-decision-version.txt
+            # A rerun of an already activated release is a safe no-op at the
+            # pointer boundary. A first activation must still be based on the
+            # exact version captured by the release decision.
+            if cmp --silent promotion-pointer.json previous-promotion-pointer.json; then
+              pointer_requires_advance=0
+            else
+              pointer_requires_advance=1
+              jq -e \
+                --arg release "$(jq -er '.release_id' previous-promotion-pointer.json)" \
+                --arg model "$(jq -er '.model_id' previous-promotion-pointer.json)" \
+                --arg version "${previous_pointer_version}" \
+                '.evidence_mode == "verified" and
+                 .previous.release_id == $release and
+                 .previous.model_id == $model and
+                 .previous.pointer_version_id == $version' \
+                promotion-pointer.json >/dev/null
+            fi
+          else
+            if ! grep -Eq 'NoSuchKey|Not Found|404' promotion-decision-get-error.txt; then
+              cat promotion-decision-get-error.txt >&2
+              exit "${decision_get_status}"
+            fi
+            # The bootstrap baseline predates staged decisions. It is the only
+            # deployable release allowed to use the live pointer as its input.
+            cp previous-promotion-pointer.json promotion-pointer.json
+            pointer_requires_advance=0
+            jq -e \
+              --arg release "${RELEASE_ID}" \
+              --arg model "${MODEL_ID}" \
+              '.release_id == $release and .model_id == $model and
+               .evidence_mode == "validation_only" and
+               .release_decision == "validation_baseline" and .previous == null' \
+              promotion-pointer.json >/dev/null
+          fi
+          printf '%s' "${pointer_requires_advance}" > pointer-requires-advance.txt
           jq -e \
             --arg release "${RELEASE_ID}" \
             --arg model "${MODEL_ID}" \
-            '.release_id == $release and .model_id == $model and
-             .bundle_s3_key == ("promoted/" + $model + "/") and
-             (.evidence_mode == "validation_only" or .evidence_mode == "verified")' \
+            '.schema_version == "1.0.0" and
+             .release_id == $release and .model_id == $model and
+             ((.evidence_mode == "validation_only" and
+               .bundle_s3_key == ("promoted/" + $model + "/") and
+               .release_decision == "validation_baseline" and
+               .gate_passed == null and .evaluated_candidate_model_id == null) or
+              (.evidence_mode == "verified" and
+               .bundle_s3_key == ("promoted/releases/" + $release + "/") and
+               ((.gate_passed == true and .release_decision == "promote_candidate" and
+                 .evaluated_candidate_model_id == $model) or
+                (.gate_passed == false and .release_decision == "retain_baseline" and
+                 .evaluated_candidate_model_id != $model and .previous.model_id == $model))))' \
             promotion-pointer.json >/dev/null
+          bundle_s3_key="$(jq -er '.bundle_s3_key' promotion-pointer.json)"
+          [[ "${bundle_s3_key}" =~ ^promoted/[A-Za-z0-9._@/-]+/$ ]]
+          [[ "${bundle_s3_key}" != *".."* ]]
           mkdir -p .release/model
-          aws s3 sync "s3://${ARTIFACT_BUCKET}/promoted/${MODEL_ID}/" .release/model/ --no-progress
+          aws s3 sync "s3://${ARTIFACT_BUCKET}/${bundle_s3_key}" .release/model/ --no-progress
           test -f .release/model/release-manifest.json
           test -f .release/model/curated-queries.json
           test -f .release/model/public-evidence.json
           test -f .release/model/bundle-checksums.json
+          test -f .release/model/LICENSE
+          test -f .release/model/NOTICE
+          if [[ "$(jq -er '.evidence_mode' promotion-pointer.json)" == "verified" ]]; then
+            test -f .release/model/candidate-model-artifact.json
+          else
+            test ! -e .release/model/candidate-model-artifact.json
+          fi
           jq -e \
             --arg model "${MODEL_ID}" \
             --arg release "${RELEASE_ID}" \
             --arg mode "$(jq -r '.evidence_mode' promotion-pointer.json)" \
+            --arg release_git "$(jq -er '.git_sha' promotion-pointer.json)" \
             '.promoted_model_id == $model and .release_id == $release and
-             .evidence_mode == $mode' \
+             .evidence_mode == $mode and .git_sha == $release_git' \
             .release/model/release-manifest.json >/dev/null
           python - <<'PY'
           import hashlib
@@ -175,13 +327,39 @@ jobs:
           release = json.loads((root / "release-manifest.json").read_text(encoding="utf-8"))
           bound = release.get("artifact_checksums")
           source_names = {"evaluation-report.json", "baseline-summary.json"} & actual_files
-          required = {"public-evidence.json", "curated-queries.json", *source_names}
-          if len(source_names) != 1 or not isinstance(bound, dict) or not required <= bound.keys():
+          if release.get("evidence_mode") == "verified":
+              mode_files = {
+                  "candidate-model-artifact.json",
+                  "evaluation-report.json",
+                  "evaluation-provenance.json",
+              }
+              expected_source_names = {"evaluation-report.json"}
+          elif release.get("evidence_mode") == "validation_only":
+              mode_files = {"baseline-summary.json"}
+              expected_source_names = {"baseline-summary.json"}
+          else:
+              raise SystemExit("release manifest has an unsupported evidence mode")
+          required = {
+              "public-evidence.json",
+              "curated-queries.json",
+              "LICENSE",
+              "NOTICE",
+              *mode_files,
+          }
+          if (
+              source_names != expected_source_names
+              or not isinstance(bound, dict)
+              or set(bound) != required
+          ):
               raise SystemExit("release manifest has no exact mode-specific public evidence binding")
           for relative in required:
               if bound[relative] != manifest["files"][relative]:
                   raise SystemExit(f"release manifest checksum differs for {relative}")
           PY
+          uv run --frozen --no-dev python scripts/verify_release.py \
+            .release/model \
+            --metadata-only \
+            --output deployment-release-verification.json
           public_run_id="$(jq -er '.run.run_id | select(test("^[A-Za-z0-9._-]{3,100}$"))' .release/model/public-evidence.json)"
           default_query_id="$(jq -er '.queries[0].query_id | select(test("^[A-Za-z0-9._-]{1,200}$"))' .release/model/curated-queries.json)"
           promoted_model_id="$(jq -er '.promoted_model_id' .release/model/release-manifest.json)"
@@ -193,6 +371,7 @@ jobs:
             echo "RELEASE_HAS_FINE_TUNED_CANDIDATE=0" >> "${GITHUB_ENV}"
             expected_evidence_mode="validation_only"
           fi
+          printf 'RELEASE_EVIDENCE_MODE=%s\n' "${expected_evidence_mode}" >> "${GITHUB_ENV}"
           jq -e --arg mode "${expected_evidence_mode}" \
             --slurpfile release .release/model/release-manifest.json \
             --slurpfile pointer promotion-pointer.json \
@@ -200,11 +379,34 @@ jobs:
              .schema_version == "1.0.0" and .evidence_mode == $mode and
              $manifest.evidence_mode == $mode and $pointer[0].evidence_mode == $mode and
              .run.dataset_manifest_hash == $manifest.dataset_manifest_hash and
+             .run.split_manifest_hash == $manifest.split_manifest_hash and
              ([.run.run_id, .evaluation.run_id, .failure_analysis.run_id] | unique | length) == 1 and
              (if $mode == "verified" then
                 .evaluation.report_id == $manifest.evaluation_report_id and
-                .evaluation.release_status == "passed" and
-                .evaluation.candidate_model_id == $manifest.promoted_model_id
+                (.run.training_provenance |
+                  with_entries(select(.value != null))) == $manifest.provenance.training and
+                (.run.evaluation_provenance |
+                  with_entries(select(.value != null))) == $manifest.provenance.evaluation and
+                (.run.training_provenance.trial_selection_id |
+                  test("^trial-selection-[0-9a-f]{20}$")) and
+                (.run.training_provenance.trial_selection_sha256 |
+                  test("^sha256:[0-9a-f]{64}$")) and
+                (.run.training_provenance.run_manifest_sha256 |
+                  test("^sha256:[0-9a-f]{64}$")) and
+                .run.training_provenance.selected_model_id ==
+                  .evaluation.candidate_model_id and
+                .run.training_provenance.selected_model_artifact_checksum ==
+                  .run.evaluation_provenance.candidate_model_artifact_checksum and
+                .run.evaluation_provenance.clean_execution_count == 2 and
+                ((.evaluation.release_status == "passed" and
+                  .evaluation.candidate_model_id == $manifest.promoted_model_id and
+                  $pointer[0].gate_passed == true and
+                  $pointer[0].release_decision == "promote_candidate") or
+                 (.evaluation.release_status == "failed" and
+                  .evaluation.strongest_baseline_model_id == $manifest.promoted_model_id and
+                  .evaluation.candidate_model_id != $manifest.promoted_model_id and
+                  $pointer[0].gate_passed == false and
+                  $pointer[0].release_decision == "retain_baseline"))
               else
                 .evaluation.evidence_id == $manifest.evaluation_report_id and
                 .evaluation.selected_model_id == $manifest.promoted_model_id and
@@ -224,33 +426,335 @@ jobs:
             echo "VITE_BASELINE_MODEL_ID=${baseline_model_id}"
             echo "VITE_CANDIDATE_MODEL_ID=${candidate_model_id}"
           } >> "${GITHUB_ENV}"
-          model_hash="$(sha256sum .release/model/release-manifest.json | cut -c1-12)"
+          release_manifest_sha256="$(sha256sum .release/model/release-manifest.json | cut -d' ' -f1)"
+          [[ "${release_manifest_sha256}" =~ ^[0-9a-f]{64}$ ]]
+          model_hash="${release_manifest_sha256:0:12}"
+          model_identity_hash="$(printf '%s' "${MODEL_ID}" | sha256sum | cut -c1-12)"
+          model_slug="${MODEL_ID//@/-at-}"
+          model_slug="${model_slug:0:80}"
           release_tag="release-${RELEASE_ID}"
           sha_tag="sha-${GITHUB_SHA}-${model_hash}"
-          model_tag="model-${MODEL_ID}"
-          docker build \
-            --file Dockerfile.serve \
-            --build-arg MODEL_ARTIFACT_DIR=.release/model \
-            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
-            --label "io.product-search.model-id=${MODEL_ID}" \
-            --tag "${SERVE_REPOSITORY}:${release_tag}" \
-            --tag "${SERVE_REPOSITORY}:${sha_tag}" \
-            --tag "${SERVE_REPOSITORY}:${model_tag}" .
-          docker push "${SERVE_REPOSITORY}:${release_tag}"
-          docker push "${SERVE_REPOSITORY}:${sha_tag}"
-          docker push "${SERVE_REPOSITORY}:${model_tag}"
+          # The repository is immutable. Include the release-manifest hash so a
+          # negative result can safely redeploy the retained baseline model ID.
+          # The model slug is readable, while the full-identity hash prevents a
+          # collision if an unusually long ID is truncated. `@` is never legal
+          # in a Docker tag, so pinned model revisions use the explicit `-at-`.
+          model_tag="model-${model_slug}-${model_identity_hash}-${model_hash}"
+          validate_ecr_tag() {
+            local tag="$1"
+            ((${#tag} >= 1 && ${#tag} <= 128))
+            [[ "${tag}" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]
+          }
+          for tag in "${release_tag}" "${sha_tag}" "${model_tag}"; do
+            if ! validate_ecr_tag "${tag}"; then
+              echo "Derived ECR tag is not Docker-safe: ${tag}" >&2
+              exit 1
+            fi
+          done
           repository_name="${SERVE_REPOSITORY#*/}"
-          digest="$(aws ecr describe-images \
-            --repository-name "${repository_name}" \
-            --image-ids imageTag="${release_tag}" \
-            --query 'imageDetails[0].imageDigest' \
-            --output text)"
+          lookup_tag_digest() {
+            local tag="$1"
+            local output
+            local status
+            set +e
+            output="$(aws ecr describe-images \
+              --repository-name "${repository_name}" \
+              --image-ids imageTag="${tag}" \
+              --query 'imageDetails[0].imageDigest' \
+              --output text 2>ecr-describe-error.txt)"
+            status=$?
+            set -e
+            if [[ "${status}" -eq 0 ]]; then
+              if [[ ! "${output}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+                echo "ECR returned a non-canonical digest for tag ${tag}." >&2
+                return 1
+              fi
+              printf '%s' "${output}"
+              return 0
+            fi
+            if grep -q 'ImageNotFoundException' ecr-describe-error.txt; then
+              return 0
+            fi
+            cat ecr-describe-error.txt >&2
+            return "${status}"
+          }
+          verify_registry_image_content() {
+            local digest="$1"
+            local image_ref="${SERVE_REPOSITORY}@${digest}"
+            local container_id
+            test ! -e registry-image-release
+            test ! -e registry-image-web-config.json
+            docker pull "${image_ref}" >/dev/null
+            test "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "${image_ref}")" = "${GITHUB_SHA}"
+            test "$(docker image inspect --format '{{ index .Config.Labels "io.product-search.model-id" }}' "${image_ref}")" = "${MODEL_ID}"
+            test "$(docker image inspect --format '{{ index .Config.Labels "io.product-search.release-id" }}' "${image_ref}")" = "${RELEASE_ID}"
+            test "$(docker image inspect --format '{{ index .Config.Labels "io.product-search.release-manifest-sha256" }}' "${image_ref}")" = "sha256:${release_manifest_sha256}"
+            container_id="$(docker create --entrypoint /bin/true "${image_ref}")"
+            mkdir registry-image-release
+            if ! docker cp "${container_id}:/var/task/release/." registry-image-release/; then
+              docker rm -f "${container_id}" >/dev/null 2>&1 || true
+              return 1
+            fi
+            if ! docker cp \
+              "${container_id}:/var/task/web/dist/build-config.json" \
+              registry-image-web-config.json; then
+              docker rm -f "${container_id}" >/dev/null 2>&1 || true
+              return 1
+            fi
+            docker rm -f "${container_id}" >/dev/null
+            jq -e \
+              --arg mode "${VITE_DATA_MODE}" \
+              --arg base_url "${VITE_API_BASE_URL}" \
+              --arg run_id "${VITE_PUBLIC_RUN_ID}" \
+              --arg query_id "${VITE_DEFAULT_QUERY_ID}" \
+              --arg baseline_id "${VITE_BASELINE_MODEL_ID}" \
+              --arg candidate_id "${VITE_CANDIDATE_MODEL_ID}" \
+              '.data_mode == $mode and .data_mode == "api" and
+               .api_base_url == $base_url and .public_run_id == $run_id and
+               .default_query_id == $query_id and
+               .baseline_model_id == $baseline_id and
+               .candidate_model_id == $candidate_id' \
+              registry-image-web-config.json >/dev/null
+            python - <<'PY'
+          import hashlib
+          from pathlib import Path
+
+          def inventory(root: Path) -> dict[str, str]:
+              result = {}
+              for path in root.rglob("*"):
+                  if path.is_symlink():
+                      raise SystemExit(f"image release contains a symbolic link: {path}")
+                  if path.is_file():
+                      result[path.relative_to(root).as_posix()] = hashlib.sha256(
+                          path.read_bytes()
+                      ).hexdigest()
+                  elif not path.is_dir():
+                      raise SystemExit(f"image release contains a non-regular entry: {path}")
+              return result
+
+          expected = inventory(Path(".release/model"))
+          observed = inventory(Path("registry-image-release"))
+          if observed != expected:
+              raise SystemExit("existing ECR image does not embed the exact release bundle")
+          PY
+          }
+          ensure_immutable_tag() {
+            local tag="$1"
+            local digest="$2"
+            local observed
+            local status
+            observed="$(lookup_tag_digest "${tag}")"
+            if [[ -n "${observed}" ]]; then
+              test "${observed}" = "${digest}"
+              return 0
+            fi
+            PYTHONPATH=src uv run --frozen --no-dev python \
+              scripts/validate_financial_snapshot.py emit --output /dev/null
+            set +e
+            aws ecr put-image \
+              --repository-name "${repository_name}" \
+              --image-tag "${tag}" \
+              --image-manifest file://registry-image-manifest.json \
+              --image-manifest-media-type "${registry_manifest_media_type}" \
+              >ecr-put-image.json 2>ecr-put-image-error.txt
+            status=$?
+            set -e
+            observed="$(lookup_tag_digest "${tag}")"
+            if [[ "${status}" -ne 0 && "${observed}" != "${digest}" ]]; then
+              cat ecr-put-image-error.txt >&2
+              return "${status}"
+            fi
+            test "${observed}" = "${digest}"
+          }
+
+          digest=""
+          existing_tag_count=0
+          for tag in "${release_tag}" "${sha_tag}" "${model_tag}"; do
+            observed="$(lookup_tag_digest "${tag}")"
+            if [[ -n "${observed}" ]]; then
+              existing_tag_count=$((existing_tag_count + 1))
+              if [[ -n "${digest}" && "${observed}" != "${digest}" ]]; then
+                echo "Immutable ECR tags disagree on image digest; refusing reuse." >&2
+                exit 1
+              fi
+              digest="${observed}"
+            fi
+          done
+          if [[ "${existing_tag_count}" -eq 0 ]]; then
+            docker build \
+              --file Dockerfile.serve \
+              --build-arg MODEL_ARTIFACT_DIR=.release/model \
+              --build-arg VITE_DATA_MODE="${VITE_DATA_MODE}" \
+              --build-arg VITE_API_BASE_URL="${VITE_API_BASE_URL}" \
+              --build-arg VITE_PUBLIC_RUN_ID="${VITE_PUBLIC_RUN_ID}" \
+              --build-arg VITE_DEFAULT_QUERY_ID="${VITE_DEFAULT_QUERY_ID}" \
+              --build-arg VITE_BASELINE_MODEL_ID="${VITE_BASELINE_MODEL_ID}" \
+              --build-arg VITE_CANDIDATE_MODEL_ID="${VITE_CANDIDATE_MODEL_ID}" \
+              --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+              --label "io.product-search.model-id=${MODEL_ID}" \
+              --label "io.product-search.release-id=${RELEASE_ID}" \
+              --label "io.product-search.release-manifest-sha256=sha256:${release_manifest_sha256}" \
+              --tag "${SERVE_REPOSITORY}:${release_tag}" .
+            PYTHONPATH=src uv run --frozen --no-dev python \
+              scripts/validate_financial_snapshot.py emit --output /dev/null
+            set +e
+            docker push "${SERVE_REPOSITORY}:${release_tag}"
+            push_status=$?
+            set -e
+            digest="$(lookup_tag_digest "${release_tag}")"
+            if [[ "${push_status}" -ne 0 && -z "${digest}" ]]; then
+              echo "Initial immutable ECR push failed without publishing the release tag." >&2
+              exit "${push_status}"
+            fi
+          fi
           [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          verify_registry_image_content "${digest}"
+          docker run --rm -i \
+            --entrypoint /opt/search-rank-venv/bin/python \
+            --mount "type=bind,source=$(pwd)/.release/model,target=/evidence,readonly" \
+            "${SERVE_REPOSITORY}@${digest}" - <<'PY'
+          import hashlib
+          from pathlib import Path
+
+          from search_rank.schemas.api import PublicEvidenceEnvelope
+          from search_rank.schemas.evaluation import EvaluationReport
+          from search_rank.schemas.evidence import BundleChecksums, ReleaseManifest
+          from search_rank.schemas.model import ModelArtifact
+
+          root = Path("/evidence")
+
+          def sha256(path: Path) -> str:
+              return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+
+          release = ReleaseManifest.model_validate_json(
+              (root / "release-manifest.json").read_text(encoding="utf-8")
+          )
+          evidence = PublicEvidenceEnvelope.model_validate_json(
+              (root / "public-evidence.json").read_text(encoding="utf-8")
+          )
+          checksums = BundleChecksums.model_validate_json(
+              (root / "bundle-checksums.json").read_text(encoding="utf-8")
+          )
+          actual = {
+              path.relative_to(root).as_posix(): sha256(path)
+              for path in root.rglob("*")
+              if path.is_file() and path.name != "bundle-checksums.json"
+          }
+          if checksums.files != actual:
+              raise SystemExit("Pydantic-validated bundle checksum inventory differs from disk")
+          if evidence.run.split_manifest_hash != release.split_manifest_hash:
+              raise SystemExit("public run and release split identities differ")
+
+          artifact_path = root / "candidate-model-artifact.json"
+          if release.evidence_mode == "validation_only":
+              if artifact_path.exists():
+                  raise SystemExit("validation-only baseline cannot fabricate a trained artifact")
+          else:
+              artifact = ModelArtifact.model_validate_json(
+                  artifact_path.read_text(encoding="utf-8")
+              )
+              report_path = root / "evaluation-report.json"
+              report = EvaluationReport.model_validate_json(
+                  report_path.read_text(encoding="utf-8")
+              )
+              if release.provenance is None:
+                  raise SystemExit("verified release is missing execution provenance")
+              candidates = [model for model in release.models if model.kind == "fine_tuned"]
+              if len(candidates) != 1:
+                  raise SystemExit("verified release must contain exactly one fine-tuned candidate")
+              candidate = candidates[0]
+              training = release.provenance.training
+              evaluation = release.provenance.evaluation
+              public_run = evidence.run
+              public_evaluation = evidence.evaluation
+              bindings = {
+                  "candidate model ID": (
+                      artifact.model_id
+                      == candidate.model_id
+                      == training.selected_model_id
+                      == evaluation.candidate_model_id
+                      == report.candidate_model_id
+                      == public_evaluation.candidate_model_id
+                  ),
+                  "candidate artifact checksum": (
+                      artifact.artifact_checksum
+                      == candidate.artifact_checksum
+                      == training.selected_model_artifact_checksum
+                      == evaluation.candidate_model_artifact_checksum
+                  ),
+                  "training run": artifact.run_id == training.run_id,
+                  "training config": (
+                      artifact.config_hash == training.config_hash == public_run.config_hash
+                  ),
+                  "training Git SHA": (
+                      artifact.git_sha == training.git_sha == release.git_sha == public_run.git_sha
+                  ),
+                  "training image": artifact.image_digest == training.image_digest,
+                  "dataset": (
+                      artifact.dataset_manifest_hash
+                      == release.dataset_manifest_hash
+                      == public_run.dataset_manifest_hash
+                  ),
+                  "split manifest": public_run.split_manifest_hash == release.split_manifest_hash,
+                  "input contract": artifact.input_contract_version == candidate.text_template,
+                  "base model": (
+                      artifact.base_model_id == public_run.base_model_id
+                      and candidate.public_summary.base_model_id == artifact.base_model_id
+                      and artifact.base_model_revision == public_run.base_model_revision
+                  ),
+                  "evaluation report ID": (
+                      artifact.evaluation_report_id
+                      == release.evaluation_report_id
+                      == report.report_id
+                      == public_evaluation.report_id
+                  ),
+                  "evaluation report checksum": (
+                      artifact.evaluation_report_sha256 == sha256(report_path)
+                  ),
+                  "selected run-manifest checksum": (
+                      artifact.selected_training_run_manifest_sha256
+                      == training.run_manifest_sha256
+                  ),
+                  "release artifact checksum": (
+                      release.artifact_checksums["candidate-model-artifact.json"]
+                      == sha256(artifact_path)
+                  ),
+                  "promotion outcome": (
+                      artifact.promoted
+                      == (release.promoted_model_id == candidate.model_id)
+                      == report.release_gate_results.passed
+                  ),
+              }
+              failures = [name for name, matches in bindings.items() if not matches]
+              if failures:
+                  raise SystemExit(
+                      "candidate model artifact binding failed: " + ", ".join(failures)
+                  )
+          PY
+          aws ecr batch-get-image \
+            --repository-name "${repository_name}" \
+            --image-ids imageDigest="${digest}" \
+            --accepted-media-types \
+              application/vnd.docker.distribution.manifest.v2+json \
+              application/vnd.oci.image.manifest.v1+json \
+            > registry-image.json
+          jq -er --arg digest "${digest}" \
+            '.images | map(select(.imageId.imageDigest == $digest)) | .[0].imageManifest' \
+            registry-image.json > registry-image-manifest.json
+          registry_manifest_media_type="$(jq -er --arg digest "${digest}" \
+            '.images | map(select(.imageId.imageDigest == $digest)) | .[0].imageManifestMediaType' \
+            registry-image.json)"
+          for tag in "${release_tag}" "${sha_tag}" "${model_tag}"; do
+            ensure_immutable_tag "${tag}" "${digest}"
+          done
+          for tag in "${release_tag}" "${sha_tag}" "${model_tag}"; do
+            test "$(lookup_tag_digest "${tag}")" = "${digest}"
+          done
           printf '%s@%s' "${SERVE_REPOSITORY}" "${digest}" > serving-image-uri.txt
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: "1.10.5"
-      - name: Reconcile versioned serving infrastructure
+      - name: Reconcile the private candidate serving infrastructure
         working-directory: infra/terraform/environments/prod
         shell: bash
         run: |
@@ -261,16 +765,37 @@ jobs:
             -backend-config="region=${AWS_REGION}" \
             -backend-config="encrypt=true" \
             -backend-config="use_lockfile=true"
+          terraform_state="$(terraform state list)"
+          public_serving_enabled=false
+          for public_address in \
+            'module.platform.aws_apigatewayv2_api.production[0]' \
+            'module.platform.aws_cloudfront_distribution.site[0]' \
+            'module.platform.aws_lambda_permission.production_api[0]' \
+            'module.platform.aws_s3_bucket_policy.site[0]'; do
+            if grep -Fqx "${public_address}" <<<"${terraform_state}"; then
+              public_serving_enabled=true
+              break
+            fi
+          done
+          printf '%s' "${public_serving_enabled}" \
+            > ../../../../public-serving-existed.txt
+          PYTHONPATH=../../../../src uv run --frozen --no-dev python \
+            ../../../../scripts/validate_financial_snapshot.py emit --output /dev/null
           terraform plan -input=false -out=deploy.tfplan \
             -var="owner_alias=${TF_OWNER_ALIAS}" \
             -var="github_repository=${TF_GITHUB_REPOSITORY}" \
+            -var="github_repository_owner_id=${TF_GITHUB_REPOSITORY_OWNER_ID}" \
+            -var="github_repository_id=${TF_GITHUB_REPOSITORY_ID}" \
             -var="create_github_oidc_provider=${TF_CREATE_GITHUB_OIDC_PROVIDER}" \
             -var="existing_github_oidc_provider_arn=${TF_GITHUB_OIDC_PROVIDER_ARN}" \
             -var="enable_budgets=${TF_ENABLE_BUDGETS}" \
             -var="budget_notification_email=${TF_BUDGET_NOTIFICATION_EMAIL}" \
             -var="alarm_notification_email=${TF_ALARM_NOTIFICATION_EMAIL}" \
             -var="enable_serving=true" \
-            -var="serving_image_uri=$(cat ../../../../serving-image-uri.txt)"
+            -var="enable_public_serving=${public_serving_enabled}" \
+            -var="serving_image_uri=$(cat ../../../../serving-image-uri.txt)" \
+            -var="serving_git_sha=${GITHUB_SHA}" \
+            -var="serving_deployment_nonce=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${RELEASE_ID}"
           terraform show -json deploy.tfplan > deploy-plan.private.json
           python - <<'PY'
           import json
@@ -288,11 +813,206 @@ jobs:
                   + json.dumps(destructive, sort_keys=True)
               )
           PY
+          previous_candidate_version="absent"
+          if existing_function="$(terraform output -raw lambda_function_name 2>/dev/null)" \
+            && [[ -n "${existing_function}" ]]; then
+            set +e
+            observed_previous="$(aws lambda get-alias \
+              --function-name "${existing_function}" \
+              --name candidate \
+              --query FunctionVersion \
+              --output text 2>/dev/null)"
+            previous_status=$?
+            set -e
+            if [[ "${previous_status}" -eq 0 ]]; then
+              [[ "${observed_previous}" =~ ^[1-9][0-9]*$ ]]
+              previous_candidate_version="${observed_previous}"
+            fi
+          fi
+          printf '%s' "${previous_candidate_version}" \
+            > ../../../../candidate-version-before.txt
+          PYTHONPATH=../../../../src uv run --frozen --no-dev python \
+            ../../../../scripts/validate_financial_snapshot.py emit --output /dev/null
+          date -u +%s%3N > ../../../../terraform-apply-start-ms.txt
           terraform apply -input=false -auto-approve deploy.tfplan
           terraform output -raw lambda_function_name > ../../../../lambda-function-name.txt
           terraform output -raw candidate_api_url > ../../../../candidate-api-url.txt
-          terraform output -raw cloudfront_distribution_id > ../../../../cloudfront-distribution-id.txt
-          terraform output -raw cloudfront_url > ../../../../cloudfront-url.txt
+      - name: Measure the newly published candidate's first on-demand invocation
+        shell: bash
+        run: |
+          set -euo pipefail
+          function_name="$(cat lambda-function-name.txt)"
+          candidate_url="$(cat candidate-api-url.txt)"
+          apply_started_epoch_ms="$(cat terraform-apply-start-ms.txt)"
+          [[ "${apply_started_epoch_ms}" =~ ^[0-9]{13}$ ]]
+          candidate_version="$(aws lambda get-alias \
+            --function-name "${function_name}" \
+            --name candidate \
+            --query FunctionVersion \
+            --output text)"
+          [[ "${candidate_version}" =~ ^[1-9][0-9]*$ ]]
+          previous_candidate_version="$(cat candidate-version-before.txt)"
+          if [[ "${previous_candidate_version}" != "absent" ]]; then
+            [[ "${previous_candidate_version}" =~ ^[1-9][0-9]*$ ]]
+            test "${candidate_version}" != "${previous_candidate_version}"
+          fi
+          aws lambda get-function \
+            --function-name "${function_name}" \
+            --qualifier candidate > candidate-function-private.json
+          expected_runtime_image="$(cat serving-image-uri.txt)"
+          jq -e \
+            --arg version "${GITHUB_SHA}" \
+            --arg nonce "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${RELEASE_ID}" \
+            --arg image "${expected_runtime_image}" \
+            '.Configuration.Environment.Variables.SEARCH_RANK_SERVICE_VERSION == $version and
+             .Configuration.Environment.Variables.SEARCH_RANK_DEPLOYMENT_NONCE == $nonce and
+             .Code.ResolvedImageUri == $image' \
+            candidate-function-private.json >/dev/null
+
+          for qualifier in candidate "${candidate_version}"; do
+            set +e
+            aws lambda get-provisioned-concurrency-config \
+              --function-name "${function_name}" \
+              --qualifier "${qualifier}" \
+              > "candidate-provisioned-${qualifier}.json" \
+              2> "candidate-provisioned-${qualifier}.error"
+            provisioned_status=$?
+            set -e
+            if [[ "${provisioned_status}" -eq 0 ]]; then
+              echo "Provisioned concurrency exists on ${qualifier}; refusing cold-start evidence." >&2
+              exit 1
+            fi
+            if ! grep -Eq \
+              'ResourceNotFoundException|ProvisionedConcurrencyConfigNotFoundException' \
+              "candidate-provisioned-${qualifier}.error"; then
+              cat "candidate-provisioned-${qualifier}.error" >&2
+              exit 1
+            fi
+          done
+
+          readarray -t cold_window < <(python - <<'PY'
+          import json
+          from datetime import datetime
+          from pathlib import Path
+
+          payload = json.loads(Path("candidate-function-private.json").read_text(encoding="utf-8"))
+          modified = payload.get("Configuration", {}).get("LastModified")
+          if not isinstance(modified, str):
+              raise SystemExit("candidate function LastModified is unavailable")
+          parsed = datetime.fromisoformat(modified.replace("Z", "+00:00"))
+          published_ms = int(parsed.timestamp() * 1000)
+          apply_started_ms = int(Path("terraform-apply-start-ms.txt").read_text(encoding="utf-8"))
+          if published_ms < apply_started_ms:
+              raise SystemExit("candidate version was not newly published by this deployment apply")
+          print(max(0, published_ms - 1000))
+          print(published_ms)
+          PY
+          )
+          cold_window_start_ms="${cold_window[0]}"
+          candidate_published_ms="${cold_window[1]}"
+          pre_request_boundary_ms="$(date -u +%s%3N)"
+          log_group="/aws/lambda/${function_name}"
+          aws logs filter-log-events \
+            --log-group-name "${log_group}" \
+            --start-time "${cold_window_start_ms}" \
+            --end-time "${pre_request_boundary_ms}" \
+            --no-interleaved > candidate-cold-prior-events-private.json
+
+          query_id="$(jq -er \
+            '.queries | map(select((.products | length) == 40)) | sort_by(.query_id) | .[0].query_id' \
+            .release/model/curated-queries.json)"
+          candidate_count=40
+          dataset_hash="$(jq -er '.dataset_manifest_hash' .release/model/release-manifest.json)"
+          model_checksum="$(jq -er --arg model "${MODEL_ID}" \
+            '.models[] | select(.model_id == $model) | .artifact_checksum' \
+            .release/model/release-manifest.json)"
+          cold_request_id="cold-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-v${candidate_version}"
+          ((${#cold_request_id} <= 128))
+          cold_payload="$(jq -cn \
+            --arg query "${query_id}" \
+            --arg model "${MODEL_ID}" \
+            --argjson top_k "${candidate_count}" \
+            '{query_id: $query, model_id: $model, top_k: $top_k}')"
+          cold_request_started_at="$(date -u +'%Y-%m-%dT%H:%M:%S.%3NZ')"
+          PYTHONPATH="${GITHUB_WORKSPACE}/src" \
+            uv run --project "${GITHUB_WORKSPACE}" --frozen --no-dev python \
+            "${GITHUB_WORKSPACE}/scripts/validate_financial_snapshot.py" emit \
+            --output /dev/null
+          cold_result="$(curl \
+            --silent --show-error --connect-timeout 10 --max-time 30 \
+            --aws-sigv4 "aws:amz:${AWS_REGION}:execute-api" \
+            --user "${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}" \
+            --header "x-amz-security-token: ${AWS_SESSION_TOKEN}" \
+            --header "x-request-id: ${cold_request_id}" \
+            --header "accept: application/json" \
+            --header "content-type: application/json" \
+            --request POST \
+            --data-binary "${cold_payload}" \
+            --output candidate-cold-response.json \
+            --write-out $'%{http_code}\t%{time_total}' \
+            "${candidate_url%/}/api/v1/rank")"
+          test "${cold_result%%$'\t'*}" = "200"
+          cold_seconds="${cold_result#*$'\t'}"
+          cold_end_to_end_ms="$(python -c \
+            'import sys; value=float(sys.argv[1]); assert value > 0; print(value * 1000.0)' \
+            "${cold_seconds}")"
+          jq -e \
+            --arg request "${cold_request_id}" \
+            --arg query "${query_id}" \
+            --arg model "${MODEL_ID}" \
+            --arg dataset "${dataset_hash}" \
+            --arg checksum "${model_checksum}" \
+            --argjson count "${candidate_count}" \
+            '.request_id == $request and .query_id == $query and .model_id == $model and
+             .dataset_manifest_hash == $dataset and .model_artifact_checksum == $checksum and
+             .candidate_count == $count and .top_k == $count and (.results | length) == $count' \
+            candidate-cold-response.json >/dev/null
+
+          evidence_ready=0
+          for _ in $(seq 1 20); do
+            post_request_boundary_ms="$(date -u +%s%3N)"
+            aws logs filter-log-events \
+              --log-group-name "${log_group}" \
+              --start-time "${cold_window_start_ms}" \
+              --end-time "${post_request_boundary_ms}" \
+              --no-interleaved > candidate-cold-observed-events-private.json
+            if python scripts/cold_start_evidence.py \
+              --function-metadata candidate-function-private.json \
+              --prior-events candidate-cold-prior-events-private.json \
+              --observed-events candidate-cold-observed-events-private.json \
+              --response candidate-cold-response.json \
+              --function-name "${function_name}" \
+              --alias candidate \
+              --version "${candidate_version}" \
+              --previous-version "${previous_candidate_version}" \
+              --release-id "${RELEASE_ID}" \
+              --model-id "${MODEL_ID}" \
+              --dataset-manifest-hash "${dataset_hash}" \
+              --model-artifact-checksum "${model_checksum}" \
+              --request-id "${cold_request_id}" \
+              --request-started-at "${cold_request_started_at}" \
+              --end-to-end-ms "${cold_end_to_end_ms}" \
+              --candidate-count "${candidate_count}" \
+              --apply-started-epoch-ms "${apply_started_epoch_ms}" \
+              --output candidate-cold-start.json; then
+              evidence_ready=1
+              break
+            fi
+            sleep 3
+          done
+          test "${evidence_ready}" -eq 1
+          jq -e \
+            --arg version "${candidate_version}" \
+            --argjson published "${candidate_published_ms}" \
+            '.controlled_cold_start == true and .sample_count == 1 and
+             .excluded_from_warm_samples == true and
+             .identifiers.function_version == $version and
+             .control_proof.provisioned_concurrency == 0 and
+             .lambda_report.init_duration_ms > 0 and
+             .structured_startup.model_load_duration_ms > 0 and
+             .lambda_report.max_memory_used_mb > 0 and
+             .structured_request.process_peak_memory_mb > 0 and $published > 0' \
+            candidate-cold-start.json >/dev/null
       - name: Run the candidate API contract, error-rate, and primary latency gates
         shell: bash
         run: |
@@ -326,25 +1046,36 @@ jobs:
             test "${result%%$'\t'*}" = "200"
           }
 
+          PYTHONPATH="${GITHUB_WORKSPACE}/src" \
+            uv run --project "${GITHUB_WORKSPACE}" --frozen --no-dev python \
+            "${GITHUB_WORKSPACE}/scripts/validate_financial_snapshot.py" emit \
+            --output /dev/null
           assert_200 /healthz candidate-health.json
           assert_200 /readyz candidate-ready.json
           assert_200 /api/v1/models candidate-models.json
           assert_200 '/api/v1/queries?limit=50' candidate-queries.json
-          jq -e '.status == "ok"' candidate-health.json >/dev/null
+          jq -e --arg version "${GITHUB_SHA}" \
+            '.status == "ok" and .service_version == $version' candidate-health.json >/dev/null
           jq -e --arg model "${MODEL_ID}" '.status == "ready" and .model_id == $model' candidate-ready.json >/dev/null
           jq -e --arg model "${MODEL_ID}" 'map(.model_id) | index($model) != null' candidate-models.json >/dev/null
           query_id="$(jq -er 'max_by(.candidate_count) | .query_id' candidate-queries.json)"
           candidate_count="$(jq -er 'max_by(.candidate_count) | .candidate_count' candidate-queries.json)"
           test "${candidate_count}" -eq 40
-          baseline_id="$(jq -er --arg promoted "${MODEL_ID}" '[.[] | select(.model_id != $promoted) | .model_id][0]' candidate-models.json)"
           public_run_id="$(jq -er '.run.run_id' .release/model/public-evidence.json)"
+          if [[ "${RELEASE_HAS_FINE_TUNED_CANDIDATE}" == "1" ]]; then
+            baseline_id="$(jq -er '.evaluation.strongest_baseline_model_id' .release/model/public-evidence.json)"
+            evaluated_candidate_id="$(jq -er '.evaluation.candidate_model_id' .release/model/public-evidence.json)"
+          else
+            baseline_id="$(jq -er --arg promoted "${MODEL_ID}" '[.[] | select(.model_id != $promoted) | .model_id][0]' candidate-models.json)"
+            evaluated_candidate_id="${MODEL_ID}"
+          fi
           encoded_query="$(jq -rn --arg value "${query_id}" '$value | @uri')"
           encoded_baseline="$(jq -rn --arg value "${baseline_id}" '$value | @uri')"
-          encoded_model="$(jq -rn --arg value "${MODEL_ID}" '$value | @uri')"
+          encoded_model="$(jq -rn --arg value "${evaluated_candidate_id}" '$value | @uri')"
           encoded_run="$(jq -rn --arg value "${public_run_id}" '$value | @uri')"
           assert_200 "/api/v1/comparisons/${encoded_query}?baseline=${encoded_baseline}&candidate=${encoded_model}&include_judgments=true" candidate-comparison.json
           assert_200 "/api/v1/runs/${encoded_run}" candidate-run.json
-          jq -e --arg baseline "${baseline_id}" --arg candidate "${MODEL_ID}" \
+          jq -e --arg baseline "${baseline_id}" --arg candidate "${evaluated_candidate_id}" \
             '.baseline_model_id == $baseline and .candidate_model_id == $candidate and
              (.benchmark_judgments | type == "array" and length > 0)' candidate-comparison.json >/dev/null
           expected_evidence_mode="validation_only"
@@ -358,6 +1089,10 @@ jobs:
 
           payload="$(jq -cn --arg query "${query_id}" --arg model "${MODEL_ID}" \
             '{query_id: $query, model_id: $model, top_k: 10}')"
+          PYTHONPATH="${GITHUB_WORKSPACE}/src" \
+            uv run --project "${GITHUB_WORKSPACE}" --frozen --no-dev python \
+            "${GITHUB_WORKSPACE}/scripts/validate_financial_snapshot.py" emit \
+            --output /dev/null
           for warmup in $(seq 1 10); do
             result="$(signed_call POST /api/v1/rank "candidate-warmup-${warmup}.json" "${payload}")"
             test "${result%%$'\t'*}" = "200"
@@ -451,7 +1186,9 @@ jobs:
               "region": "us-east-1",
               "reserved_concurrency": 2,
               "provisioned_concurrency": 0,
-              "cold_start_claim": None,
+              "measurement_phase": "warm_after_ten_explicit_warmups",
+              "controlled_cold_start_evidence_file": "candidate-cold-start.json",
+              "controlled_cold_sample_included": False,
               "limitations": [
                   "This primary gate measures concurrency one only.",
                   "The separate release benchmark records concurrency 1, 4, and 8.",
@@ -461,6 +1198,108 @@ jobs:
               json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
           )
           PY
+      - name: Publish the public route only after the private candidate gates pass
+        working-directory: infra/terraform/environments/prod
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          function_name="$(cat ../../../../lambda-function-name.txt)"
+          public_transition_started=0
+          fail_closed_first_publication() {
+            local original_status="$1"
+            trap - EXIT
+            trap '' INT TERM
+            if [[ "${original_status}" -ne 0 && "${public_transition_started}" -eq 1 ]]; then
+              if aws lambda put-function-concurrency \
+                --function-name "${function_name}" \
+                --reserved-concurrent-executions 0 >/dev/null 2>&1; then
+                touch ../../../../first-publication-service-disabled.txt
+                echo "First public publication was interrupted; Lambda traffic was disabled." >&2
+              else
+                echo "First public publication was interrupted and traffic disablement failed." >&2
+              fi
+            fi
+            exit "${original_status}"
+          }
+          trap 'fail_closed_first_publication "$?"' EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+
+          public_serving_existed="$(cat ../../../../public-serving-existed.txt)"
+          [[ "${public_serving_existed}" == "true" || "${public_serving_existed}" == "false" ]]
+          if [[ "${public_serving_existed}" == "false" ]]; then
+            public_transition_started=1
+            touch ../../../../public-serving-creation-started.txt
+            PYTHONPATH=../../../../src uv run --frozen --no-dev python \
+              ../../../../scripts/validate_financial_snapshot.py emit --output /dev/null
+            terraform plan -input=false -out=public.tfplan \
+              -var="owner_alias=${TF_OWNER_ALIAS}" \
+              -var="github_repository=${TF_GITHUB_REPOSITORY}" \
+              -var="github_repository_owner_id=${TF_GITHUB_REPOSITORY_OWNER_ID}" \
+              -var="github_repository_id=${TF_GITHUB_REPOSITORY_ID}" \
+              -var="create_github_oidc_provider=${TF_CREATE_GITHUB_OIDC_PROVIDER}" \
+              -var="existing_github_oidc_provider_arn=${TF_GITHUB_OIDC_PROVIDER_ARN}" \
+              -var="enable_budgets=${TF_ENABLE_BUDGETS}" \
+              -var="budget_notification_email=${TF_BUDGET_NOTIFICATION_EMAIL}" \
+              -var="alarm_notification_email=${TF_ALARM_NOTIFICATION_EMAIL}" \
+              -var="enable_serving=true" \
+              -var="enable_public_serving=true" \
+              -var="serving_image_uri=$(cat ../../../../serving-image-uri.txt)" \
+              -var="serving_git_sha=${GITHUB_SHA}" \
+              -var="serving_deployment_nonce=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${RELEASE_ID}"
+            terraform show -json public.tfplan > public-plan.private.json
+            python - <<'PY'
+          import json
+          from pathlib import Path
+
+          payload = json.loads(Path("public-plan.private.json").read_text(encoding="utf-8"))
+          changes = {
+              item.get("address"): item.get("change", {}).get("actions", [])
+              for item in payload.get("resource_changes", [])
+          }
+          destructive = [
+              {"address": address, "actions": actions}
+              for address, actions in changes.items()
+              if "delete" in actions
+          ]
+          if destructive:
+              raise SystemExit(
+                  "public-serving plan unexpectedly deletes or replaces resources: "
+                  + json.dumps(destructive, sort_keys=True)
+              )
+          private_addresses = {
+              "module.platform.aws_lambda_function.api[0]",
+              "module.platform.aws_lambda_alias.candidate[0]",
+              "module.platform.aws_lambda_alias.production[0]",
+              "module.platform.aws_apigatewayv2_api.candidate[0]",
+              "module.platform.aws_apigatewayv2_stage.candidate[0]",
+          }
+          changed_private = [
+              {"address": address, "actions": changes.get(address)}
+              for address in sorted(private_addresses)
+              if changes.get(address) != ["no-op"]
+          ]
+          if changed_private:
+              raise SystemExit(
+                  "public-serving plan would mutate already-gated private resources: "
+                  + json.dumps(changed_private, sort_keys=True)
+              )
+          PY
+            PYTHONPATH=../../../../src uv run --frozen --no-dev python \
+              ../../../../scripts/validate_financial_snapshot.py emit --output /dev/null
+            terraform apply -input=false -auto-approve public.tfplan
+            touch ../../../../public-serving-created-this-run.txt
+          fi
+
+          terraform output -raw production_api_url > ../../../../production-api-url.txt
+          terraform output -raw cloudfront_distribution_id \
+            > ../../../../cloudfront-distribution-id.txt
+          terraform output -raw cloudfront_url > ../../../../cloudfront-url.txt
+          grep -Eq '^https://[^/]+/?$' ../../../../production-api-url.txt
+          grep -Eq '^https://[^/]+/?$' ../../../../cloudfront-url.txt
+          test -s ../../../../cloudfront-distribution-id.txt
+          public_transition_started=0
+          trap - EXIT INT TERM
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
@@ -475,14 +1314,96 @@ jobs:
           set -euo pipefail
           npm ci
           npm run build
-          aws s3 sync dist/ "s3://${SITE_BUCKET}/releases/${RELEASE_ID}/" \
-            --cache-control "public,max-age=31536000,immutable" --no-progress
-          aws s3 sync dist/ "s3://${SITE_BUCKET}/" \
-            --exclude "index.html" \
-            --cache-control "public,max-age=31536000,immutable" --no-progress
+          publish_static_file_immutable() {
+            local source_file="$1"
+            local object_key="$2"
+            local content_type="$3"
+            local cache_control="public,max-age=31536000,immutable"
+            local status
+            set +e
+            aws s3api put-object \
+              --bucket "${SITE_BUCKET}" \
+              --key "${object_key}" \
+              --body "${source_file}" \
+              --content-type "${content_type}" \
+              --cache-control "${cache_control}" \
+              --checksum-algorithm SHA256 \
+              --if-none-match '*' \
+              >static-put-object.json 2>static-put-object-error.txt
+            status=$?
+            set -e
+            if [[ "${status}" -eq 0 ]]; then
+              return 0
+            fi
+            if ! grep -Eq 'PreconditionFailed|412' static-put-object-error.txt; then
+              cat static-put-object-error.txt >&2
+              return "${status}"
+            fi
+            aws s3api get-object \
+              --bucket "${SITE_BUCKET}" \
+              --key "${object_key}" \
+              existing-static-object.bin >existing-static-object-metadata.json
+            if ! cmp --silent "${source_file}" existing-static-object.bin; then
+              echo "Immutable static release object already exists with different bytes: ${object_key}" >&2
+              return 1
+            fi
+            aws s3api head-object \
+              --bucket "${SITE_BUCKET}" \
+              --key "${object_key}" >existing-static-object-head.json
+            jq -e --arg content_type "${content_type}" --arg cache_control "${cache_control}" \
+              '.ContentType == $content_type and .CacheControl == $cache_control' \
+              existing-static-object-head.json >/dev/null
+          }
+          : > expected-static-release-keys.txt
+          while IFS= read -r -d '' source_file; do
+            relative="${source_file#dist/}"
+            object_key="releases/${RELEASE_ID}/${relative}"
+            case "${relative}" in
+              *.html) content_type="text/html" ;;
+              *.css) content_type="text/css" ;;
+              *.js|*.mjs) content_type="text/javascript" ;;
+              *.json|*.map) content_type="application/json" ;;
+              *.svg) content_type="image/svg+xml" ;;
+              *.png) content_type="image/png" ;;
+              *.ico) content_type="image/x-icon" ;;
+              *.woff2) content_type="font/woff2" ;;
+              *) content_type="application/octet-stream" ;;
+            esac
+            publish_static_file_immutable "${source_file}" "${object_key}" "${content_type}"
+            printf '%s\n' "${object_key}" >> expected-static-release-keys.txt
+          done < <(find dist -type f -print0 | sort -z)
+          test -s expected-static-release-keys.txt
+          aws s3api list-objects-v2 \
+            --bucket "${SITE_BUCKET}" \
+            --prefix "releases/${RELEASE_ID}/" > static-release-objects.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          expected = set(
+              Path("expected-static-release-keys.txt").read_text(encoding="utf-8").splitlines()
+          )
+          response = json.loads(Path("static-release-objects.json").read_text(encoding="utf-8"))
+          if response.get("IsTruncated"):
+              raise SystemExit("static release object inventory was unexpectedly truncated")
+          observed = {
+              item["Key"]
+              for item in response.get("Contents", [])
+              if isinstance(item, dict) and isinstance(item.get("Key"), str)
+          }
+          if observed != expected:
+              raise SystemExit("immutable static release inventory differs from the local build")
+          PY
+          # Do not copy even stable-name assets into the live root before the
+          # candidate is accepted. The staged browser remaps static requests to
+          # this immutable release prefix while leaving API requests same-origin.
           distribution_id="$(cat ../cloudfront-distribution-id.txt)"
           aws cloudfront create-invalidation --distribution-id "${distribution_id}" --paths "/releases/${RELEASE_ID}/*" >/dev/null
           cloudfront_url="$(cat ../cloudfront-url.txt)"
+          PYTHONPATH="${GITHUB_WORKSPACE}/src" \
+            uv run --project "${GITHUB_WORKSPACE}" --frozen --no-dev python \
+            "${GITHUB_WORKSPACE}/scripts/validate_financial_snapshot.py" emit \
+            --output /dev/null
           curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 10 \
             "${cloudfront_url}/releases/${RELEASE_ID}/index.html" >/dev/null
       - name: Browser-smoke the staged static candidate through CloudFront
@@ -491,26 +1412,180 @@ jobs:
         run: |
           set -euo pipefail
           npx playwright install --with-deps chromium
-          export STAGED_URL="$(cat ../cloudfront-url.txt)/releases/${RELEASE_ID}/index.html"
+          STAGED_ORIGIN="$(cat ../cloudfront-url.txt)"
+          export STAGED_ORIGIN RELEASE_ID
+          function_name="$(cat ../lambda-function-name.txt)"
+          aws lambda get-alias --function-name "${function_name}" --name production \
+            > ../pre-staged-canary-alias.json
+          previous_version="$(jq -er '.FunctionVersion' ../pre-staged-canary-alias.json)"
+          previous_revision="$(jq -er '.RevisionId' ../pre-staged-canary-alias.json)"
+          candidate_version="$(aws lambda get-alias --function-name "${function_name}" --name candidate --query FunctionVersion --output text)"
+          [[ "${previous_version}" =~ ^[1-9][0-9]*$ ]]
+          [[ "${candidate_version}" =~ ^[1-9][0-9]*$ ]]
+          [[ "${previous_revision}" =~ ^[A-Za-z0-9-]{1,128}$ ]]
+          printf '%s' "${previous_version}" > ../pre-staged-canary-version.txt
+          printf '%s' "${previous_revision}" > ../pre-staged-canary-revision.txt
+          printf '%s' "${candidate_version}" > ../staged-canary-candidate-version.txt
+          canary_active=0
+          restore_canary_alias() {
+            local original_status="$1"
+            local restoration_failed=0
+            local current_version
+            local current_revision
+            local expected_canary_revision=""
+            local expected_restored_revision="${previous_revision}"
+            trap - EXIT
+            if [[ "${canary_active}" == "1" ]]; then
+              set +e
+              aws lambda get-alias --function-name "${function_name}" --name production \
+                > ../staged-canary-alias-before-restore.json
+              if [[ "$?" -ne 0 ]]; then
+                restoration_failed=1
+              else
+                current_version="$(jq -er '.FunctionVersion' ../staged-canary-alias-before-restore.json)" \
+                  || restoration_failed=1
+                current_revision="$(jq -er '.RevisionId' ../staged-canary-alias-before-restore.json)" \
+                  || restoration_failed=1
+                if [[ -f ../staged-canary-alias-active.json ]]; then
+                  expected_canary_revision="$(jq -er '.RevisionId' ../staged-canary-alias-active.json)" \
+                    || restoration_failed=1
+                fi
+                if [[ "${restoration_failed}" -eq 0 && \
+                  "${current_version}" == "${previous_version}" && \
+                  "${current_revision}" == "${previous_revision}" ]]; then
+                  :
+                elif [[ "${restoration_failed}" -eq 0 && \
+                  "${current_version}" == "${candidate_version}" && \
+                  -n "${expected_canary_revision}" && \
+                  "${current_revision}" == "${expected_canary_revision}" ]]; then
+                  aws lambda update-alias \
+                    --function-name "${function_name}" \
+                    --name production \
+                    --function-version "${previous_version}" \
+                    --revision-id "${current_revision}" \
+                    > ../staged-canary-alias-restored.json \
+                    || restoration_failed=1
+                  if [[ "${restoration_failed}" -eq 0 ]]; then
+                    test "$(jq -er '.FunctionVersion' ../staged-canary-alias-restored.json)" = \
+                      "${previous_version}" || restoration_failed=1
+                    expected_restored_revision="$(jq -er '.RevisionId' ../staged-canary-alias-restored.json)" \
+                      || restoration_failed=1
+                    printf '%s' "${expected_restored_revision}" \
+                      > ../staged-canary-restored-revision.txt
+                  fi
+                else
+                  echo "Production alias changed unexpectedly during staged canary; refusing to overwrite it." >&2
+                  restoration_failed=1
+                fi
+              fi
+              if [[ "${restoration_failed}" -eq 0 ]]; then
+                aws lambda get-alias --function-name "${function_name}" --name production \
+                  > ../staged-canary-alias-after-restore.json \
+                  || restoration_failed=1
+                test "$(jq -er '.FunctionVersion' ../staged-canary-alias-after-restore.json)" = \
+                  "${previous_version}" || restoration_failed=1
+                test "$(jq -er '.RevisionId' ../staged-canary-alias-after-restore.json)" = \
+                  "${expected_restored_revision}" || restoration_failed=1
+              fi
+              if [[ "${restoration_failed}" -ne 0 ]]; then
+                # A failed canary restoration must not leave unreviewed public
+                # traffic enabled. The final compensation step retries the CAS
+                # restore and re-enables the configured concurrency on success.
+                aws lambda put-function-concurrency \
+                  --function-name "${function_name}" \
+                  --reserved-concurrent-executions 0 >/dev/null 2>&1 || true
+                touch ../staged-canary-service-disabled.txt
+                exit 1
+              fi
+              touch ../staged-canary-restored.txt
+            fi
+            exit "${original_status}"
+          }
+          trap 'restore_canary_alias "$?"' EXIT
+          canary_active=1
+          touch ../staged-canary-transition-started.txt
+          aws lambda update-alias --function-name "${function_name}" --name production \
+            --function-version "${candidate_version}" \
+            --revision-id "${previous_revision}" > ../staged-canary-alias-active.json
+          test "$(jq -er '.FunctionVersion' ../staged-canary-alias-active.json)" = \
+            "${candidate_version}"
+          canary_revision="$(jq -er '.RevisionId' ../staged-canary-alias-active.json)"
+          [[ "${canary_revision}" =~ ^[A-Za-z0-9-]{1,128}$ ]]
+          printf '%s' "${canary_revision}" > ../staged-canary-active-revision.txt
+          PYTHONPATH="${GITHUB_WORKSPACE}/src" \
+            uv run --project "${GITHUB_WORKSPACE}" --frozen --no-dev python \
+            "${GITHUB_WORKSPACE}/scripts/validate_financial_snapshot.py" emit \
+            --output /dev/null
+          staged_health_verified=0
+          for _ in $(seq 1 12); do
+            if curl --fail --silent --show-error \
+              "$(cat ../cloudfront-url.txt)/healthz" > ../staged-candidate-health.json \
+              && jq -e --arg version "${GITHUB_SHA}" \
+                '.status == "ok" and .service_version == $version' \
+                ../staged-candidate-health.json >/dev/null; then
+              staged_health_verified=1
+              break
+            fi
+            sleep 5
+          done
+          test "${staged_health_verified}" = "1"
+          PYTHONPATH="${GITHUB_WORKSPACE}/src" \
+            uv run --project "${GITHUB_WORKSPACE}" --frozen --no-dev python \
+            "${GITHUB_WORKSPACE}/scripts/validate_financial_snapshot.py" emit \
+            --output /dev/null
           node - <<'JS'
           const { chromium } = require('playwright')
+
+          const expectedStatusByMode = {
+            verified: 'Verified release',
+            validation_only: 'Validation-only evidence',
+          }
+          const expectedStatus = expectedStatusByMode[process.env.RELEASE_EVIDENCE_MODE]
+          if (!expectedStatus) throw new Error('release evidence mode is absent or unsupported')
+
+          const origin = new URL(process.env.STAGED_ORIGIN)
+          const releasePrefix = `/releases/${process.env.RELEASE_ID}`
 
           async function verify(viewport, screenshot) {
             const browser = await chromium.launch({ headless: true })
             const page = await browser.newPage({ viewport })
             const pageErrors = []
+            const failedRequests = []
+            const failedResponses = []
             page.on('pageerror', (error) => pageErrors.push(String(error)))
-            const response = await page.goto(process.env.STAGED_URL, {
+            page.on('requestfailed', (request) => failedRequests.push(`${request.url()}: ${request.failure()?.errorText}`))
+            page.on('response', (response) => {
+              if (response.status() >= 400) failedResponses.push(`${response.url()}: ${response.status()}`)
+            })
+            await page.route(`${origin.origin}/**`, async (route) => {
+              const requested = new URL(route.request().url())
+              if (
+                requested.pathname.startsWith('/api/') ||
+                requested.pathname === '/healthz' ||
+                requested.pathname === '/readyz'
+              ) {
+                await route.continue()
+                return
+              }
+              const path = requested.pathname === '/' ? '/index.html' : requested.pathname
+              const mapped = `${origin.origin}${releasePrefix}${path}${requested.search}`
+              const staged = await route.fetch({ url: mapped })
+              if (!staged.ok()) throw new Error(`staged static asset failed: ${mapped} (${staged.status()})`)
+              await route.fulfill({ response: staged })
+            })
+            const response = await page.goto(origin.origin, {
               waitUntil: 'domcontentloaded',
               timeout: 120000,
             })
             if (!response || !response.ok()) throw new Error('staged CloudFront document was not successful')
             await page.getByRole('link', { name: /Product Search Ranking home/i }).waitFor()
-            await page.getByText('Verified evidence', { exact: true }).waitFor()
+            await page.getByText(expectedStatus, { exact: true }).waitFor()
             await page.locator('#main-content').waitFor()
             await page.keyboard.press('Tab')
             await page.screenshot({ path: screenshot, fullPage: true })
             if (pageErrors.length) throw new Error(`browser page errors: ${pageErrors.join('; ')}`)
+            if (failedRequests.length) throw new Error(`browser request failures: ${failedRequests.join('; ')}`)
+            if (failedResponses.length) throw new Error(`browser HTTP failures: ${failedResponses.join('; ')}`)
             await browser.close()
           }
 
@@ -525,47 +1600,225 @@ jobs:
       - name: Capture rollback state and activate the smoke-tested candidate
         shell: bash
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
           function_name="$(cat lambda-function-name.txt)"
-          previous_version="$(aws lambda get-alias --function-name "${function_name}" --name production --query FunctionVersion --output text)"
+          aws lambda get-alias --function-name "${function_name}" --name production \
+            > production-alias-before-activation.json
+          previous_version="$(jq -er '.FunctionVersion' production-alias-before-activation.json)"
+          previous_revision="$(jq -er '.RevisionId' production-alias-before-activation.json)"
           candidate_version="$(aws lambda get-alias --function-name "${function_name}" --name candidate --query FunctionVersion --output text)"
+          [[ "${previous_version}" =~ ^[1-9][0-9]*$ ]]
+          [[ "${candidate_version}" =~ ^[1-9][0-9]*$ ]]
+          [[ "${previous_revision}" =~ ^[A-Za-z0-9-]{1,128}$ ]]
           printf '%s' "${previous_version}" > previous-lambda-version.txt
+          printf '%s' "${previous_revision}" > previous-lambda-alias-revision.txt
           printf '%s' "${candidate_version}" > candidate-lambda-version.txt
-          if aws s3 cp "s3://${SITE_BUCKET}/index.html" previous-index.html --no-progress 2>/dev/null; then
+          previous_static_release_id="$(jq -er '.release_id' previous-promotion-pointer.json)"
+          [[ "${previous_static_release_id}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{2,99}$ ]]
+          printf '%s' "${previous_static_release_id}" > previous-static-release-id.txt
+          set +e
+          aws s3api get-object \
+            --bucket "${SITE_BUCKET}" \
+            --key index.html \
+            previous-index.html \
+            > previous-index-get.json 2>previous-index-get-error.txt
+          previous_index_status=$?
+          set -e
+          if [[ "${previous_index_status}" -eq 0 ]]; then
             printf '1' > previous-index-present.txt
           else
+            if ! grep -Eq 'NoSuchKey|Not Found|404' previous-index-get-error.txt; then
+              cat previous-index-get-error.txt >&2
+              exit "${previous_index_status}"
+            fi
             printf '0' > previous-index-present.txt
           fi
+          aws s3api head-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key promoted/current.json \
+            > current-pointer-before-activation-head.json
+          aws s3api get-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key promoted/current.json \
+            current-pointer-before-activation.json >/dev/null
+          cmp --silent previous-promotion-pointer.json current-pointer-before-activation.json
+          test "$(jq -er '.ETag' current-pointer-before-activation-head.json)" = \
+            "$(cat previous-promotion-pointer-etag.txt)"
+          test "$(jq -er '.VersionId' current-pointer-before-activation-head.json)" = \
+            "$(cat previous-promotion-pointer-version.txt)"
+
           activated=0
+          printf '0' > pointer-advanced.txt
+          touch activation-started.txt
           restore_partial_activation() {
+            local original_status="$1"
+            local restoration_failed=0
+            local alias_restoration_safe=0
+            local current_version
+            local current_revision
+            local expected_active_revision
+            local restored_revision
+            trap - EXIT
+            trap '' INT TERM
+            set +e
             if [[ "${activated}" == "1" ]]; then
-              aws lambda update-alias --function-name "${function_name}" --name production \
-                --function-version "${previous_version}" >/dev/null || true
-              if [[ "$(cat previous-index-present.txt)" == "1" ]]; then
-                aws s3 cp previous-index.html "s3://${SITE_BUCKET}/index.html" \
-                  --cache-control "no-cache, no-store, must-revalidate" \
-                  --content-type "text/html" --metadata-directive REPLACE --no-progress || true
+              if aws lambda get-alias --function-name "${function_name}" --name production \
+                > alias-during-partial-rollback.json; then
+                current_version="$(jq -er '.FunctionVersion' alias-during-partial-rollback.json)" \
+                  || restoration_failed=1
+                current_revision="$(jq -er '.RevisionId' alias-during-partial-rollback.json)" \
+                  || restoration_failed=1
+                expected_active_revision="$(cat activated-lambda-alias-revision.txt 2>/dev/null || true)"
+                if [[ "${restoration_failed}" -eq 0 && \
+                  "${current_version}" == "${previous_version}" && \
+                  "${current_revision}" == "${previous_revision}" ]]; then
+                  alias_restoration_safe=1
+                elif [[ "${restoration_failed}" -eq 0 && "${current_version}" == "${candidate_version}" && \
+                  -n "${expected_active_revision}" && \
+                  "${current_revision}" == "${expected_active_revision}" ]]; then
+                  aws lambda update-alias --function-name "${function_name}" --name production \
+                    --function-version "${previous_version}" \
+                    --revision-id "${current_revision}" \
+                    > alias-partial-rollback-result.json \
+                    || restoration_failed=1
+                  if [[ "${restoration_failed}" -eq 0 ]]; then
+                    test "$(jq -er '.FunctionVersion' alias-partial-rollback-result.json)" = \
+                      "${previous_version}" || restoration_failed=1
+                    restored_revision="$(jq -er '.RevisionId' alias-partial-rollback-result.json)" \
+                      || restoration_failed=1
+                    if [[ "${restoration_failed}" -eq 0 ]]; then
+                      printf '%s' "${restored_revision}" > workflow-restored-alias-revision.txt
+                      alias_restoration_safe=1
+                    fi
+                  fi
+                else
+                  echo "Production alias changed unexpectedly; refusing unsafe partial compensation." >&2
+                  restoration_failed=1
+                fi
               else
-                aws s3 rm "s3://${SITE_BUCKET}/index.html" --no-progress || true
-                aws lambda put-function-concurrency --function-name "${function_name}" \
-                  --reserved-concurrent-executions 0 >/dev/null || true
+                restoration_failed=1
               fi
             fi
+            if [[ "${alias_restoration_safe}" -eq 1 ]]; then
+              if [[ "$(cat previous-index-present.txt)" == "1" ]]; then
+                aws s3 sync \
+                  "s3://${SITE_BUCKET}/releases/${previous_static_release_id}/" \
+                  "s3://${SITE_BUCKET}/" \
+                  --delete --exclude "releases/*" --exclude "index.html" --no-progress \
+                  || restoration_failed=1
+                aws s3 cp previous-index.html "s3://${SITE_BUCKET}/index.html" \
+                  --cache-control "no-cache, no-store, must-revalidate" \
+                  --content-type "text/html" --metadata-directive REPLACE --no-progress \
+                  || restoration_failed=1
+              else
+                aws s3 rm "s3://${SITE_BUCKET}/index.html" --no-progress \
+                  || restoration_failed=1
+                aws lambda put-function-concurrency --function-name "${function_name}" \
+                  --reserved-concurrent-executions 0 >/dev/null \
+                  || restoration_failed=1
+              fi
+              aws s3api get-object \
+                --bucket "${ARTIFACT_BUCKET}" \
+                --key promoted/current.json \
+                pointer-during-partial-rollback.json >/dev/null \
+                || restoration_failed=1
+              if [[ "${restoration_failed}" -eq 0 ]] && \
+                ! cmp --silent previous-promotion-pointer.json pointer-during-partial-rollback.json; then
+                if cmp --silent promotion-pointer.json pointer-during-partial-rollback.json; then
+                  aws s3api head-object \
+                    --bucket "${ARTIFACT_BUCKET}" \
+                    --key promoted/current.json \
+                    > pointer-during-partial-rollback-head.json \
+                    || restoration_failed=1
+                  if [[ "${restoration_failed}" -eq 0 ]]; then
+                    aws s3api put-object \
+                      --bucket "${ARTIFACT_BUCKET}" \
+                      --key promoted/current.json \
+                      --body previous-promotion-pointer.json \
+                      --content-type application/json \
+                      --checksum-algorithm SHA256 \
+                      --tagging "RetentionClass=promoted" \
+                      --if-match "$(jq -er '.ETag' pointer-during-partial-rollback-head.json)" \
+                      > partial-pointer-restore.json \
+                      || restoration_failed=1
+                  fi
+                else
+                  echo "Live promotion pointer changed unexpectedly; refusing to overwrite it during compensation." >&2
+                  restoration_failed=1
+                fi
+              fi
+            else
+              if [[ "${activated}" == "1" ]]; then
+                restoration_failed=1
+              fi
+            fi
+            if [[ "${restoration_failed}" -ne 0 ]]; then
+              aws lambda put-function-concurrency --function-name "${function_name}" \
+                --reserved-concurrent-executions 0 >/dev/null 2>&1 || true
+              echo "Partial activation compensation was incomplete; public Lambda traffic was disabled." >&2
+            fi
+            exit "${original_status}"
           }
-          trap restore_partial_activation ERR
+          trap 'restore_partial_activation "$?"' EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          activated=1
           aws lambda update-alias \
             --function-name "${function_name}" \
             --name production \
-            --function-version "${candidate_version}" >/dev/null
-          activated=1
+            --function-version "${candidate_version}" \
+            --revision-id "${previous_revision}" > activated-lambda-alias.json
+          test "$(jq -er '.FunctionVersion' activated-lambda-alias.json)" = "${candidate_version}"
+          activated_revision="$(jq -er '.RevisionId' activated-lambda-alias.json)"
+          [[ "${activated_revision}" =~ ^[A-Za-z0-9-]{1,128}$ ]]
+          printf '%s' "${activated_revision}" > activated-lambda-alias-revision.txt
+          aws s3 sync \
+            "s3://${SITE_BUCKET}/releases/${RELEASE_ID}/" \
+            "s3://${SITE_BUCKET}/" \
+            --exclude "index.html" \
+            --cache-control "public,max-age=31536000,immutable" \
+            --no-progress
           aws s3 cp "s3://${SITE_BUCKET}/releases/${RELEASE_ID}/index.html" "s3://${SITE_BUCKET}/index.html" \
             --cache-control "no-cache, no-store, must-revalidate" \
             --content-type "text/html" \
             --metadata-directive REPLACE \
             --no-progress
+          active_root_readback="$(mktemp -d)"
+          while IFS= read -r -d '' source_file; do
+            relative="${source_file#web/dist/}"
+            [[ "${relative}" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,1023}$ ]]
+            [[ "${relative}" != releases/* && "${relative}" != *".."* ]]
+            mkdir -p "${active_root_readback}/$(dirname "${relative}")"
+            aws s3api get-object \
+              --bucket "${SITE_BUCKET}" \
+              --key "${relative}" \
+              --checksum-mode ENABLED \
+              "${active_root_readback}/${relative}" >/dev/null
+            cmp -s "${source_file}" "${active_root_readback}/${relative}"
+          done < <(find web/dist -type f -print0 | sort -z)
+          aws s3api list-objects-v2 \
+            --bucket "${SITE_BUCKET}" > active-root-before-cleanup.json
+          python scripts/static_root_manifest.py plan \
+            --source-root web/dist \
+            --inventory active-root-before-cleanup.json \
+            --output stale-active-root-keys.json
+          while IFS= read -r stale_key; do
+            [[ "${stale_key}" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,1023}$ ]]
+            [[ "${stale_key}" != releases/* && "${stale_key}" != *".."* ]]
+            aws s3api delete-object \
+              --bucket "${SITE_BUCKET}" \
+              --key "${stale_key}" >/dev/null
+          done < <(jq -r '.[]' stale-active-root-keys.json)
+          aws s3api list-objects-v2 \
+            --bucket "${SITE_BUCKET}" > active-root-after-cleanup.json
+          python scripts/static_root_manifest.py verify \
+            --source-root web/dist \
+            --inventory active-root-after-cleanup.json
+          rm -rf -- "${active_root_readback}"
           distribution_id="$(cat cloudfront-distribution-id.txt)"
-          aws cloudfront create-invalidation --distribution-id "${distribution_id}" --paths "/" "/index.html" "/healthz" "/readyz" >/dev/null
-          trap - ERR
+          aws cloudfront create-invalidation --distribution-id "${distribution_id}" --paths "/*" >/dev/null
+          touch activation-complete.txt
+          trap - EXIT INT TERM
       - name: Verify the activated API and complete browser flow through CloudFront
         id: production_verification
         continue-on-error: true
@@ -574,11 +1827,117 @@ jobs:
         run: |
           set -euo pipefail
           cloudfront_url="$(cat ../cloudfront-url.txt)"
+          export CLOUDFRONT_ORIGIN="${cloudfront_url}" RELEASE_ID
+          PYTHONPATH="${GITHUB_WORKSPACE}/src" \
+            uv run --project "${GITHUB_WORKSPACE}" --frozen --no-dev python \
+            "${GITHUB_WORKSPACE}/scripts/validate_financial_snapshot.py" emit \
+            --output /dev/null
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import time
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+          from pathlib import Path
+
+          root = Path("dist")
+          files = sorted(path for path in root.rglob("*") if path.is_file())
+          if not files:
+              raise SystemExit("production static verification found no local build files")
+          index_path = root / "index.html"
+          if not index_path.is_file():
+              raise SystemExit("production static verification found no index.html")
+          targets = [
+              (path.relative_to(root).as_posix(), path)
+              for path in files
+          ] + [("<root>", index_path)]
+          failures: list[str] = []
+          for attempt in range(1, 13):
+              failures = []
+              for relative, path in targets:
+                  suffix = "" if relative == "<root>" else urllib.parse.quote(relative, safe="/")
+                  url = os.environ["CLOUDFRONT_ORIGIN"].rstrip("/") + "/" + suffix
+                  request = urllib.request.Request(
+                      url,
+                      headers={"Cache-Control": "no-cache", "User-Agent": "deploy-static-verify/1.0"},
+                  )
+                  try:
+                      with urllib.request.urlopen(request, timeout=30) as response:
+                          observed = response.read(len(path.read_bytes()) + 1)
+                  except (OSError, urllib.error.URLError) as error:
+                      failures.append(f"{relative}: {error}")
+                      continue
+                  if observed != path.read_bytes():
+                      failures.append(f"{relative}: CloudFront bytes differ")
+              if not failures:
+                  break
+              if attempt < 12:
+                  time.sleep(10)
+          if failures:
+              raise SystemExit("production static verification failed: " + "; ".join(failures))
+
+          inventory = {
+              path.relative_to(root).as_posix(): "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+              for path in files
+          }
+          inventory_digest = hashlib.sha256(
+              json.dumps(inventory, sort_keys=True, separators=(",", ":")).encode("utf-8")
+          ).hexdigest()
+          Path("../production-static-verification.json").write_text(
+              json.dumps(
+                  {
+                      "schema_version": "1.0.0",
+                      "release_id": os.environ["RELEASE_ID"],
+                      "file_count": len(inventory),
+                      "inventory_sha256": "sha256:" + inventory_digest,
+                      "cloudfront_bytes_verified": True,
+                  },
+                  indent=2,
+                  sort_keys=True,
+              )
+              + "\n",
+              encoding="utf-8",
+          )
+          PY
+          PYTHONPATH="${GITHUB_WORKSPACE}/src" \
+            uv run --project "${GITHUB_WORKSPACE}" --frozen --no-dev python \
+            "${GITHUB_WORKSPACE}/scripts/validate_financial_snapshot.py" emit \
+            --output /dev/null
+          production_health_verified=0
+          for _ in $(seq 1 12); do
+            if curl --fail --silent --show-error \
+              "${cloudfront_url}/healthz" > ../production-health.json \
+              && jq -e --arg version "${GITHUB_SHA}" \
+                '.status == "ok" and .service_version == $version' \
+                ../production-health.json >/dev/null; then
+              production_health_verified=1
+              break
+            fi
+            sleep 5
+          done
+          test "${production_health_verified}" = "1"
+          PYTHONPATH="${GITHUB_WORKSPACE}/src" \
+            uv run --project "${GITHUB_WORKSPACE}" --frozen --no-dev python \
+            "${GITHUB_WORKSPACE}/scripts/validate_financial_snapshot.py" emit \
+            --output /dev/null
           python ../scripts/smoke_test.py "${cloudfront_url}" --repeat 20 --output ../production-api-smoke.json
           export PRODUCTION_URL="${cloudfront_url}"
           export RELEASE_HAS_FINE_TUNED_CANDIDATE
+          PYTHONPATH="${GITHUB_WORKSPACE}/src" \
+            uv run --project "${GITHUB_WORKSPACE}" --frozen --no-dev python \
+            "${GITHUB_WORKSPACE}/scripts/validate_financial_snapshot.py" emit \
+            --output /dev/null
           node - <<'JS'
           const { chromium } = require('playwright')
+
+          const expectedStatusByMode = {
+            verified: 'Verified release',
+            validation_only: 'Validation-only evidence',
+          }
+          const expectedStatus = expectedStatusByMode[process.env.RELEASE_EVIDENCE_MODE]
+          if (!expectedStatus) throw new Error('release evidence mode is absent or unsupported')
 
           async function requireNoFailurePanel(page) {
             const failure = page.locator('.status-panel.error, .status-panel.not-ready, .status-panel.conflict')
@@ -589,11 +1948,17 @@ jobs:
             const browser = await chromium.launch({ headless: true })
             const page = await browser.newPage({ viewport })
             const pageErrors = []
+            const failedRequests = []
+            const failedResponses = []
             page.on('pageerror', (error) => pageErrors.push(String(error)))
+            page.on('requestfailed', (request) => failedRequests.push(`${request.url()}: ${request.failure()?.errorText}`))
+            page.on('response', (response) => {
+              if (response.status() >= 400) failedResponses.push(`${response.url()}: ${response.status()}`)
+            })
             const response = await page.goto(process.env.PRODUCTION_URL, { waitUntil: 'networkidle', timeout: 120000 })
             if (!response || !response.ok()) throw new Error('CloudFront root did not load successfully')
             await page.getByRole('heading', { name: /Machine Learning Product Search Ranking Platform/i }).waitFor()
-            await page.getByText('Verified evidence', { exact: true }).waitFor()
+            await page.getByText(expectedStatus, { exact: true }).waitFor()
             await requireNoFailurePanel(page)
 
             await page.keyboard.press('Tab')
@@ -625,6 +1990,8 @@ jobs:
             }
             await page.screenshot({ path: screenshot, fullPage: true })
             if (pageErrors.length) throw new Error(`browser page errors: ${pageErrors.join('; ')}`)
+            if (failedRequests.length) throw new Error(`browser request failures: ${failedRequests.join('; ')}`)
+            if (failedResponses.length) throw new Error(`browser HTTP failures: ${failedResponses.join('; ')}`)
             await browser.close()
           }
 
@@ -642,11 +2009,36 @@ jobs:
         run: |
           set -euo pipefail
           function_name="$(cat lambda-function-name.txt)"
-          aws lambda update-alias \
-            --function-name "${function_name}" \
-            --name production \
-            --function-version "$(cat previous-lambda-version.txt)" >/dev/null
+          previous_version="$(cat previous-lambda-version.txt)"
+          candidate_version="$(cat candidate-lambda-version.txt)"
+          expected_active_revision="$(cat activated-lambda-alias-revision.txt)"
+          aws lambda get-alias --function-name "${function_name}" --name production \
+            > alias-before-automatic-rollback.json
+          current_version="$(jq -er '.FunctionVersion' alias-before-automatic-rollback.json)"
+          current_revision="$(jq -er '.RevisionId' alias-before-automatic-rollback.json)"
+          if [[ "${current_version}" == "${candidate_version}" && \
+            "${current_revision}" == "${expected_active_revision}" ]]; then
+            aws lambda update-alias \
+              --function-name "${function_name}" \
+              --name production \
+              --function-version "${previous_version}" \
+              --revision-id "${current_revision}" > alias-automatic-rollback-result.json
+            test "$(jq -er '.FunctionVersion' alias-automatic-rollback-result.json)" = \
+              "${previous_version}"
+            automatic_restored_revision="$(jq -er '.RevisionId' alias-automatic-rollback-result.json)"
+            [[ "${automatic_restored_revision}" =~ ^[A-Za-z0-9-]{1,128}$ ]]
+            printf '%s' "${automatic_restored_revision}" > workflow-restored-alias-revision.txt
+          else
+            aws lambda put-function-concurrency --function-name "${function_name}" \
+              --reserved-concurrent-executions 0 >/dev/null 2>&1 || true
+            echo "Production alias changed concurrently; refusing unsafe automatic rollback." >&2
+            exit 1
+          fi
           if [[ "$(cat previous-index-present.txt)" == "1" ]]; then
+            aws s3 sync \
+              "s3://${SITE_BUCKET}/releases/$(cat previous-static-release-id.txt)/" \
+              "s3://${SITE_BUCKET}/" \
+              --delete --exclude "releases/*" --exclude "index.html" --no-progress
             aws s3 cp previous-index.html "s3://${SITE_BUCKET}/index.html" \
               --cache-control "no-cache, no-store, must-revalidate" \
               --content-type "text/html" \
@@ -657,45 +2049,217 @@ jobs:
             aws lambda put-function-concurrency --function-name "${function_name}" \
               --reserved-concurrent-executions 0 >/dev/null
           fi
-          previous_pointer_version="$(jq -r '.previous.pointer_version_id // empty' promotion-pointer.json)"
-          if [[ -n "${previous_pointer_version}" ]]; then
-            aws s3api get-object \
+          aws s3api head-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key promoted/current.json \
+            > pointer-before-automatic-rollback-head.json
+          aws s3api get-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key promoted/current.json \
+            pointer-before-automatic-rollback.json >/dev/null
+          if cmp --silent previous-promotion-pointer.json pointer-before-automatic-rollback.json; then
+            restored_pointer_version="$(jq -er '.VersionId' pointer-before-automatic-rollback-head.json)"
+          else
+            cmp --silent promotion-pointer.json pointer-before-automatic-rollback.json
+            if [[ -f active-promotion-pointer-version.txt ]]; then
+              test "$(jq -er '.VersionId' pointer-before-automatic-rollback-head.json)" = \
+                "$(cat active-promotion-pointer-version.txt)"
+              test "$(jq -er '.ETag' pointer-before-automatic-rollback-head.json)" = \
+                "$(cat active-promotion-pointer-etag.txt)"
+            fi
+            docker run --rm -i \
+              --entrypoint /opt/search-rank-venv/bin/python \
+              --mount "type=bind,source=$(pwd),target=/evidence,readonly" \
+              "$(cat serving-image-uri.txt)" - <<'PY'
+          from pathlib import Path
+
+          from search_rank.schemas.release import PromotionPointer
+
+          PromotionPointer.model_validate_json(
+              Path("/evidence/previous-promotion-pointer.json").read_text(encoding="utf-8")
+          )
+          PY
+            aws s3api put-object \
               --bucket "${ARTIFACT_BUCKET}" \
               --key promoted/current.json \
-              --version-id "${previous_pointer_version}" \
-              restored-promotion-pointer.json >/dev/null
-            aws s3 cp restored-promotion-pointer.json "s3://${ARTIFACT_BUCKET}/promoted/current.json" \
-              --checksum-algorithm SHA256 --content-type application/json --no-progress
+              --body previous-promotion-pointer.json \
+              --content-type application/json \
+              --checksum-algorithm SHA256 \
+              --tagging "RetentionClass=promoted" \
+              --if-match "$(jq -er '.ETag' pointer-before-automatic-rollback-head.json)" \
+              > automatic-pointer-restore.json
+            restored_pointer_version="$(jq -er '.VersionId' automatic-pointer-restore.json)"
           fi
+          aws s3api get-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key promoted/current.json \
+            restored-promotion-pointer.json >/dev/null
+          cmp --silent previous-promotion-pointer.json restored-promotion-pointer.json
+          aws lambda get-alias --function-name "${function_name}" --name production \
+            > alias-after-automatic-rollback.json
+          test "$(jq -er '.FunctionVersion' alias-after-automatic-rollback.json)" = \
+            "$(cat previous-lambda-version.txt)"
+          test "$(jq -er '.RevisionId' alias-after-automatic-rollback.json)" = \
+            "$(cat workflow-restored-alias-revision.txt)"
           aws cloudfront create-invalidation \
             --distribution-id "$(cat cloudfront-distribution-id.txt)" \
-            --paths "/" "/index.html" "/api/*" "/healthz" "/readyz" >/dev/null
+            --paths "/*" >/dev/null
           jq -n \
             --arg failed_release "${RELEASE_ID}" \
             --arg restored_lambda_version "$(cat previous-lambda-version.txt)" \
-            --arg restored_pointer_version "${previous_pointer_version}" \
+            --arg restored_pointer_version "${restored_pointer_version}" \
             --arg service_disabled "$(if [[ "$(cat previous-index-present.txt)" == "1" ]]; then echo false; else echo true; fi)" \
-            '{schema_version: "1.0.0", status: "automatically_rolled_back", failed_release_id: $failed_release,
+            '{schema_version: "1.0.0", artifact_type: "automatic_deployment_rollback",
+              status: "automatically_rolled_back", rollback_trigger: "production_verification_failed",
+              failed_release_id: $failed_release,
               restored_lambda_version: $restored_lambda_version,
               restored_pointer_version_id: $restored_pointer_version,
               service_disabled: ($service_disabled == "true")}' > failed-deployment-rollback.json
+          docker run --rm -i \
+            --entrypoint /opt/search-rank-venv/bin/python \
+            --mount "type=bind,source=$(pwd),target=/evidence,readonly" \
+            "$(cat serving-image-uri.txt)" - <<'PY'
+          from pathlib import Path
+
+          from search_rank.schemas.workflow import AutomaticDeploymentRollback
+
+          AutomaticDeploymentRollback.model_validate_json(
+              Path("/evidence/failed-deployment-rollback.json").read_text(encoding="utf-8")
+          )
+          PY
+          touch rollback-complete.txt
       - name: Refuse a release that failed production verification
         if: steps.production_verification.outcome == 'failure'
         run: |
           echo "Production verification failed and the prior healthy alias/static index/pointer were restored." >&2
           exit 1
+      - name: Advance the live pointer only after production verification passes
+        if: steps.production_verification.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws s3api head-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key promoted/current.json \
+            > pointer-before-advance-head.json
+          aws s3api get-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key promoted/current.json \
+            pointer-before-advance.json >/dev/null
+          cmp --silent previous-promotion-pointer.json pointer-before-advance.json
+          test "$(jq -er '.ETag' pointer-before-advance-head.json)" = \
+            "$(cat previous-promotion-pointer-etag.txt)"
+          test "$(jq -er '.VersionId' pointer-before-advance-head.json)" = \
+            "$(cat previous-promotion-pointer-version.txt)"
+          if [[ -f promotion-decision-version.txt ]]; then
+            aws s3api head-object \
+              --bucket "${ARTIFACT_BUCKET}" \
+              --key "promoted/decisions/${RELEASE_ID}.json" \
+              > promotion-decision-before-advance-head.json
+            test "$(jq -er '.ETag' promotion-decision-before-advance-head.json)" = \
+              "$(cat promotion-decision-etag.txt)"
+            test "$(jq -er '.VersionId' promotion-decision-before-advance-head.json)" = \
+              "$(cat promotion-decision-version.txt)"
+          fi
+          docker run --rm -i \
+            --entrypoint /opt/search-rank-venv/bin/python \
+            --mount "type=bind,source=$(pwd),target=/evidence,readonly" \
+            "$(cat serving-image-uri.txt)" - <<'PY'
+          from pathlib import Path
+
+          from search_rank.schemas.release import PromotionPointer
+
+          root = Path("/evidence")
+          PromotionPointer.model_validate_json(
+              (root / "previous-promotion-pointer.json").read_text(encoding="utf-8")
+          )
+          PromotionPointer.model_validate_json(
+              (root / "promotion-pointer.json").read_text(encoding="utf-8")
+          )
+          PY
+          if [[ "$(cat pointer-requires-advance.txt)" == "1" ]]; then
+            aws s3api put-object \
+              --bucket "${ARTIFACT_BUCKET}" \
+              --key promoted/current.json \
+              --body promotion-pointer.json \
+              --content-type application/json \
+              --checksum-algorithm SHA256 \
+              --tagging "RetentionClass=promoted" \
+              --if-match "$(cat previous-promotion-pointer-etag.txt)" \
+              > active-pointer-put.json
+            printf '1' > pointer-advanced.txt
+          fi
+          aws s3api head-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key promoted/current.json \
+            > active-promotion-pointer-head.json
+          aws s3api get-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key promoted/current.json \
+            active-promotion-pointer.json >/dev/null
+          cmp --silent promotion-pointer.json active-promotion-pointer.json
+          active_pointer_etag="$(jq -er '.ETag' active-promotion-pointer-head.json)"
+          active_pointer_version="$(jq -er '.VersionId' active-promotion-pointer-head.json)"
+          [[ "${active_pointer_etag}" =~ ^\"[0-9a-f]{32}\"$ ]]
+          ((${#active_pointer_version} >= 1 && ${#active_pointer_version} <= 1024))
+          [[ "${active_pointer_version}" =~ ^[A-Za-z0-9._=+/-]+$ ]]
+          if [[ "$(cat pointer-advanced.txt)" == "1" ]]; then
+            test "$(jq -er '.ETag' active-pointer-put.json)" = "${active_pointer_etag}"
+            test "$(jq -er '.VersionId' active-pointer-put.json)" = "${active_pointer_version}"
+          else
+            test "${active_pointer_etag}" = "$(cat previous-promotion-pointer-etag.txt)"
+            test "${active_pointer_version}" = "$(cat previous-promotion-pointer-version.txt)"
+          fi
+          printf '%s' "${active_pointer_etag}" > active-promotion-pointer-etag.txt
+          printf '%s' "${active_pointer_version}" > active-promotion-pointer-version.txt
       - name: Publish deployment evidence only after production verification passes
         shell: bash
         run: |
           set -euo pipefail
           cloudfront_url="$(cat cloudfront-url.txt)"
+          PYTHONPATH="${GITHUB_WORKSPACE}/src" \
+            uv run --project "${GITHUB_WORKSPACE}" --frozen --no-dev python \
+            "${GITHUB_WORKSPACE}/scripts/validate_financial_snapshot.py" emit \
+            --output /dev/null
           curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 10 "${cloudfront_url}/readyz" > production-ready.json
           jq -e --arg model "${MODEL_ID}" '.status == "ready" and .model_id == $model' production-ready.json >/dev/null
           previous_version="$(cat previous-lambda-version.txt)"
           candidate_version="$(cat candidate-lambda-version.txt)"
           cloudfront_url="$(cat cloudfront-url.txt)"
+          aws lambda get-alias \
+            --function-name "$(cat lambda-function-name.txt)" \
+            --name production > deployment-production-alias.json
+          test "$(jq -er '.FunctionVersion' deployment-production-alias.json)" = \
+            "${candidate_version}"
+          test "$(jq -er '.RevisionId' deployment-production-alias.json)" = \
+            "$(cat activated-lambda-alias-revision.txt)"
+          aws lambda get-function \
+            --function-name "$(cat lambda-function-name.txt)" \
+            --qualifier "${candidate_version}" > deployment-production-function.json
+          jq -e \
+            --arg version "${candidate_version}" \
+            --arg commit "${GITHUB_SHA}" \
+            --arg nonce "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${RELEASE_ID}" \
+            --arg image "$(cat serving-image-uri.txt)" \
+            '.Configuration.Version == $version and
+             .Configuration.Environment.Variables.SEARCH_RANK_SERVICE_VERSION == $commit and
+             .Configuration.Environment.Variables.SEARCH_RANK_DEPLOYMENT_NONCE == $nonce and
+             .Code.ResolvedImageUri == $image' \
+            deployment-production-function.json >/dev/null
           serving_image_digest="$(cut -d@ -f2 serving-image-uri.txt)"
-          pointer_version="$(aws s3api head-object --bucket "${ARTIFACT_BUCKET}" --key promoted/current.json --query VersionId --output text)"
+          aws s3api head-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key promoted/current.json \
+            > deployment-pointer-head.json
+          aws s3api get-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key promoted/current.json \
+            deployment-pointer.json >/dev/null
+          cmp --silent promotion-pointer.json deployment-pointer.json
+          test "$(jq -er '.ETag' deployment-pointer-head.json)" = \
+            "$(cat active-promotion-pointer-etag.txt)"
+          pointer_version="$(jq -er '.VersionId' deployment-pointer-head.json)"
+          test "${pointer_version}" = "$(cat active-promotion-pointer-version.txt)"
           jq -n \
             --arg release "${RELEASE_ID}" \
             --arg model "${MODEL_ID}" \
@@ -704,17 +2268,317 @@ jobs:
             --arg previous "${previous_version}" \
             --arg current "${candidate_version}" \
             --arg pointer "${pointer_version}" \
+            --slurpfile controlled_cold_start candidate-cold-start.json \
             --slurpfile candidate_smoke candidate-smoke.json \
             --slurpfile production_smoke production-api-smoke.json \
-            '{release_id: $release, model_id: $model, code_commit: $commit,
+            '{schema_version: "1.0.0", artifact_type: "deployment_evidence",
+              release_id: $release, model_id: $model, code_commit: $commit,
               serving_image_digest: $image_digest,
               previous_lambda_version: $previous, production_lambda_version: $current,
               promoted_pointer_version_id: $pointer, smoke_tests_passed: true,
+              controlled_cold_start: $controlled_cold_start[0],
               candidate_api_gate: $candidate_smoke[0], production_api_smoke: $production_smoke[0],
               browser_smoke: {desktop: true, mobile: true, keyboard: true}}' \
             > deployment-evidence.json
-          aws s3 cp deployment-evidence.json "s3://${ARTIFACT_BUCKET}/public/${RELEASE_ID}/deployment-evidence.json" \
-            --checksum-algorithm SHA256 --no-progress
+          docker run --rm -i \
+            --entrypoint /opt/search-rank-venv/bin/python \
+            --mount "type=bind,source=$(pwd),target=/evidence,readonly" \
+            "$(cat serving-image-uri.txt)" - <<'PY'
+          from pathlib import Path
+
+          from pydantic import TypeAdapter
+
+          from search_rank.schemas.api import (
+              ComparisonResponse,
+              CuratedQuerySummary,
+              HealthResponse,
+              ModelSummary,
+              PublicEvidenceEnvelope,
+              RankResponse,
+              ReadyResponse,
+          )
+          from search_rank.schemas.performance import ColdStartEvidence
+          from search_rank.schemas.workflow import (
+              CandidateApiGate,
+              DeploymentEvidence,
+              SmokeTestEvidence,
+          )
+
+          root = Path("/evidence")
+          HealthResponse.model_validate_json((root / "candidate-health.json").read_text())
+          HealthResponse.model_validate_json((root / "staged-candidate-health.json").read_text())
+          HealthResponse.model_validate_json((root / "production-health.json").read_text())
+          ReadyResponse.model_validate_json((root / "candidate-ready.json").read_text())
+          ReadyResponse.model_validate_json((root / "production-ready.json").read_text())
+          TypeAdapter(list[ModelSummary]).validate_json(
+              (root / "candidate-models.json").read_text()
+          )
+          TypeAdapter(list[CuratedQuerySummary]).validate_json(
+              (root / "candidate-queries.json").read_text()
+          )
+          ComparisonResponse.model_validate_json(
+              (root / "candidate-comparison.json").read_text()
+          )
+          PublicEvidenceEnvelope.model_validate_json((root / "candidate-run.json").read_text())
+          RankResponse.model_validate_json((root / "candidate-cold-response.json").read_text())
+          ColdStartEvidence.model_validate_json((root / "candidate-cold-start.json").read_text())
+          CandidateApiGate.model_validate_json((root / "candidate-smoke.json").read_text())
+          SmokeTestEvidence.model_validate_json((root / "production-api-smoke.json").read_text())
+          DeploymentEvidence.model_validate_json((root / "deployment-evidence.json").read_text())
+          PY
+          deployment_key="public/${RELEASE_ID}/deployment-evidence.json"
+          if [[ -f prior-deployment-evidence-absent.txt ]]; then
+            aws s3api put-object \
+              --bucket "${ARTIFACT_BUCKET}" \
+              --key "${deployment_key}" \
+              --body deployment-evidence.json \
+              --content-type application/json \
+              --checksum-algorithm SHA256 \
+              --if-none-match '*' \
+              > deployment-evidence-put.json
+          else
+            aws s3api head-object \
+              --bucket "${ARTIFACT_BUCKET}" \
+              --key "${deployment_key}" \
+              > deployment-evidence-before-cas-head.json
+            test "$(jq -er '.ETag' deployment-evidence-before-cas-head.json)" = \
+              "$(cat prior-deployment-evidence-etag.txt)"
+            test "$(jq -er '.VersionId' deployment-evidence-before-cas-head.json)" = \
+              "$(cat prior-deployment-evidence-version.txt)"
+            aws s3api put-object \
+              --bucket "${ARTIFACT_BUCKET}" \
+              --key "${deployment_key}" \
+              --body deployment-evidence.json \
+              --content-type application/json \
+              --checksum-algorithm SHA256 \
+              --if-match "$(cat prior-deployment-evidence-etag.txt)" \
+              > deployment-evidence-put.json
+          fi
+          # A successful conditional PutObject is the commit boundary. All
+          # validation happened before it, and no fallible command follows it;
+          # S3 versioning preserves every prior successful deployment record.
+      - name: Compensate any failure or cancellation after a production mutation
+        if: failure() || cancelled()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          function_name=""
+          fail_closed_on_compensation_error() {
+            local status=$?
+            if [[ "${status}" -ne 0 ]]; then
+              local target_function="${function_name}"
+              if [[ -z "${target_function}" && -s lambda-function-name.txt ]]; then
+                target_function="$(cat lambda-function-name.txt 2>/dev/null || true)"
+              fi
+              if [[ -n "${target_function}" ]]; then
+                aws lambda put-function-concurrency \
+                  --function-name "${target_function}" \
+                  --reserved-concurrent-executions 0 >/dev/null 2>&1 || true
+              fi
+            fi
+          }
+          trap fail_closed_on_compensation_error EXIT
+          disable_first_publication() {
+            if [[ -f public-serving-creation-started.txt ]]; then
+              function_name="$(cat lambda-function-name.txt)"
+              aws lambda put-function-concurrency \
+                --function-name "${function_name}" \
+                --reserved-concurrent-executions 0 >/dev/null
+              touch first-publication-service-disabled.txt
+            fi
+          }
+          if [[ -f rollback-complete.txt ]]; then
+            exit 0
+          fi
+          if [[ ! -f activation-started.txt ]]; then
+            if [[ ! -f staged-canary-transition-started.txt || -f staged-canary-restored.txt ]]; then
+              disable_first_publication
+              exit 0
+            fi
+            function_name="$(cat lambda-function-name.txt)"
+            previous_version="$(cat pre-staged-canary-version.txt)"
+            previous_revision="$(cat pre-staged-canary-revision.txt)"
+            candidate_version="$(cat staged-canary-candidate-version.txt)"
+            expected_revision="$(cat staged-canary-active-revision.txt 2>/dev/null || true)"
+            if [[ -z "${expected_revision}" && -f staged-canary-alias-active.json ]]; then
+              expected_revision="$(jq -er '.RevisionId' staged-canary-alias-active.json)"
+            fi
+            safe_previous_revision="${previous_revision}"
+            if [[ -f staged-canary-restored-revision.txt ]]; then
+              safe_previous_revision="$(cat staged-canary-restored-revision.txt)"
+            fi
+            aws lambda get-alias --function-name "${function_name}" --name production \
+              > canary-alias-before-final-compensation.json
+            current_version="$(jq -er '.FunctionVersion' canary-alias-before-final-compensation.json)"
+            current_revision="$(jq -er '.RevisionId' canary-alias-before-final-compensation.json)"
+            if [[ "${current_version}" == "${candidate_version}" && \
+              "${current_revision}" == "${expected_revision}" ]]; then
+              aws lambda update-alias \
+                --function-name "${function_name}" \
+                --name production \
+                --function-version "${previous_version}" \
+                --revision-id "${current_revision}" \
+                > canary-alias-final-compensation.json
+              test "$(jq -er '.FunctionVersion' canary-alias-final-compensation.json)" = \
+                "${previous_version}"
+              safe_previous_revision="$(jq -er '.RevisionId' canary-alias-final-compensation.json)"
+              printf '%s' "${safe_previous_revision}" > staged-canary-restored-revision.txt
+            elif [[ "${current_version}" == "${previous_version}" && \
+              "${current_revision}" == "${safe_previous_revision}" ]]; then
+              :
+            else
+              aws lambda put-function-concurrency --function-name "${function_name}" \
+                --reserved-concurrent-executions 0 >/dev/null 2>&1 || true
+              echo "Production alias changed concurrently; refusing unsafe canary compensation." >&2
+              exit 1
+            fi
+            aws lambda get-alias --function-name "${function_name}" --name production \
+              > canary-alias-after-final-compensation.json
+            test "$(jq -er '.FunctionVersion' canary-alias-after-final-compensation.json)" = \
+              "${previous_version}"
+            test "$(jq -er '.RevisionId' canary-alias-after-final-compensation.json)" = \
+              "${safe_previous_revision}"
+            if [[ -f staged-canary-service-disabled.txt ]]; then
+              aws lambda put-function-concurrency \
+                --function-name "${function_name}" \
+                --reserved-concurrent-executions 2 >/dev/null
+            fi
+            touch staged-canary-restored.txt
+            disable_first_publication
+            exit 0
+          fi
+          function_name="$(cat lambda-function-name.txt)"
+          previous_version="$(cat previous-lambda-version.txt)"
+          previous_revision="$(cat previous-lambda-alias-revision.txt)"
+          candidate_version="$(cat candidate-lambda-version.txt)"
+          expected_active_revision="$(cat activated-lambda-alias-revision.txt 2>/dev/null || true)"
+          if [[ -z "${expected_active_revision}" && -f activated-lambda-alias.json ]]; then
+            expected_active_revision="$(jq -er '.RevisionId' activated-lambda-alias.json)"
+          fi
+          safe_previous_revision="${previous_revision}"
+          if [[ -f workflow-restored-alias-revision.txt ]]; then
+            safe_previous_revision="$(cat workflow-restored-alias-revision.txt)"
+          fi
+          aws lambda get-alias --function-name "${function_name}" --name production \
+            > alias-before-final-compensation.json
+          current_version="$(jq -er '.FunctionVersion' alias-before-final-compensation.json)"
+          current_revision="$(jq -er '.RevisionId' alias-before-final-compensation.json)"
+          if [[ "${current_version}" == "${candidate_version}" && \
+            "${current_revision}" == "${expected_active_revision}" ]]; then
+            aws lambda update-alias \
+              --function-name "${function_name}" \
+              --name production \
+              --function-version "${previous_version}" \
+              --revision-id "${current_revision}" > alias-final-compensation-result.json
+            test "$(jq -er '.FunctionVersion' alias-final-compensation-result.json)" = \
+              "${previous_version}"
+            safe_previous_revision="$(jq -er '.RevisionId' alias-final-compensation-result.json)"
+            printf '%s' "${safe_previous_revision}" > workflow-restored-alias-revision.txt
+          elif [[ "${current_version}" == "${previous_version}" && \
+            "${current_revision}" == "${safe_previous_revision}" ]]; then
+            :
+          else
+            aws lambda put-function-concurrency --function-name "${function_name}" \
+              --reserved-concurrent-executions 0 >/dev/null 2>&1 || true
+            echo "Production alias changed concurrently; refusing unsafe final compensation." >&2
+            exit 1
+          fi
+          if [[ "$(cat previous-index-present.txt)" == "1" ]]; then
+            aws s3 sync \
+              "s3://${SITE_BUCKET}/releases/$(cat previous-static-release-id.txt)/" \
+              "s3://${SITE_BUCKET}/" \
+              --delete --exclude "releases/*" --exclude "index.html" --no-progress
+            aws s3 cp previous-index.html "s3://${SITE_BUCKET}/index.html" \
+              --cache-control "no-cache, no-store, must-revalidate" \
+              --content-type "text/html" \
+              --metadata-directive REPLACE \
+              --no-progress
+          else
+            aws s3 rm "s3://${SITE_BUCKET}/index.html" --no-progress
+            aws lambda put-function-concurrency \
+              --function-name "${function_name}" \
+              --reserved-concurrent-executions 0 >/dev/null
+          fi
+
+          aws s3api head-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key promoted/current.json \
+            > pointer-before-final-compensation-head.json
+          aws s3api get-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key promoted/current.json \
+            pointer-before-final-compensation.json >/dev/null
+          if cmp --silent previous-promotion-pointer.json pointer-before-final-compensation.json; then
+            restored_pointer_version="$(jq -er '.VersionId' pointer-before-final-compensation-head.json)"
+          else
+            if ! cmp --silent promotion-pointer.json pointer-before-final-compensation.json; then
+              echo "Live promotion pointer is neither the prior nor candidate pointer; refusing unsafe compensation." >&2
+              exit 1
+            fi
+            docker run --rm -i \
+              --entrypoint /opt/search-rank-venv/bin/python \
+              --mount "type=bind,source=$(pwd),target=/evidence,readonly" \
+              "$(cat serving-image-uri.txt)" - <<'PY'
+          from pathlib import Path
+
+          from search_rank.schemas.release import PromotionPointer
+
+          PromotionPointer.model_validate_json(
+              Path("/evidence/previous-promotion-pointer.json").read_text(encoding="utf-8")
+          )
+          PY
+            aws s3api put-object \
+              --bucket "${ARTIFACT_BUCKET}" \
+              --key promoted/current.json \
+              --body previous-promotion-pointer.json \
+              --content-type application/json \
+              --checksum-algorithm SHA256 \
+              --tagging "RetentionClass=promoted" \
+              --if-match "$(jq -er '.ETag' pointer-before-final-compensation-head.json)" \
+              > final-pointer-restore.json
+            restored_pointer_version="$(jq -er '.VersionId' final-pointer-restore.json)"
+          fi
+          aws s3api get-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key promoted/current.json \
+            pointer-after-final-compensation.json >/dev/null
+          cmp --silent previous-promotion-pointer.json pointer-after-final-compensation.json
+          aws lambda get-alias --function-name "${function_name}" --name production \
+            > alias-after-final-compensation.json
+          test "$(jq -er '.FunctionVersion' alias-after-final-compensation.json)" = \
+            "${previous_version}"
+          test "$(jq -er '.RevisionId' alias-after-final-compensation.json)" = \
+            "${safe_previous_revision}"
+          aws cloudfront create-invalidation \
+            --distribution-id "$(cat cloudfront-distribution-id.txt)" \
+            --paths "/*" >/dev/null
+          if [[ ! -f failed-deployment-rollback.json ]]; then
+            jq -n \
+              --arg failed_release "${RELEASE_ID}" \
+              --arg restored_lambda_version "${previous_version}" \
+              --arg restored_pointer_version "${restored_pointer_version}" \
+              --arg service_disabled "$(if [[ "$(cat previous-index-present.txt)" == "1" ]]; then echo false; else echo true; fi)" \
+              '{schema_version: "1.0.0", artifact_type: "automatic_deployment_rollback",
+                status: "automatically_rolled_back", rollback_trigger: "post_activation_failure",
+                failed_release_id: $failed_release,
+                restored_lambda_version: $restored_lambda_version,
+                restored_pointer_version_id: $restored_pointer_version,
+                service_disabled: ($service_disabled == "true")}' \
+              > failed-deployment-rollback.json
+          fi
+          docker run --rm -i \
+            --entrypoint /opt/search-rank-venv/bin/python \
+            --mount "type=bind,source=$(pwd),target=/evidence,readonly" \
+            "$(cat serving-image-uri.txt)" - <<'PY'
+          from pathlib import Path
+
+          from search_rank.schemas.workflow import AutomaticDeploymentRollback
+
+          AutomaticDeploymentRollback.model_validate_json(
+              Path("/evidence/failed-deployment-rollback.json").read_text(encoding="utf-8")
+          )
+          PY
+          touch rollback-complete.txt
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
@@ -726,23 +2590,31 @@ jobs:
             candidate-queries.json
             candidate-comparison.json
             candidate-run.json
+            candidate-cold-start.json
+            candidate-cold-response.json
             candidate-rank-samples.tsv
             candidate-smoke.json
             candidate-static-desktop.png
             candidate-static-mobile.png
+            staged-candidate-health.json
             production-api-smoke.json
+            production-health.json
             production-browser-desktop.png
             production-browser-mobile.png
+            production-static-verification.json
             production-ready.json
             deployment-evidence.json
             failed-deployment-rollback.json
+            promotion-pointer.json
+            previous-promotion-pointer.json
+            active-promotion-pointer.json
           if-no-files-found: warn
           retention-days: 90
 
   rollback:
     if: github.ref == 'refs/heads/main' && inputs.action == 'rollback'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     environment: production
     env:
       RELEASE_ID: ${{ inputs.release_id }}
@@ -751,13 +2623,51 @@ jobs:
       AUTHORIZATION: ${{ inputs.authorization }}
       ARTIFACT_BUCKET: ${{ vars.AWS_ARTIFACT_BUCKET }}
       SITE_BUCKET: ${{ vars.AWS_SITE_BUCKET }}
+      SERVE_REPOSITORY: ${{ vars.AWS_SERVE_ECR_REPOSITORY_URL }}
       LAMBDA_FUNCTION_NAME: ${{ vars.AWS_LAMBDA_FUNCTION_NAME }}
       CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.AWS_CLOUDFRONT_DISTRIBUTION_ID }}
       CLOUDFRONT_URL: ${{ vars.AWS_CLOUDFRONT_URL }}
       CAMPAIGN_SPEND_TO_DATE_USD: ${{ secrets.AWS_CAMPAIGN_SPEND_TO_DATE_USD }}
       REMAINING_APPLICABLE_CREDIT_USD: ${{ secrets.AWS_REMAINING_APPLICABLE_CREDIT_USD }}
+      FINANCIAL_SNAPSHOT_OBSERVED_AT: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_OBSERVED_AT }}
+      FINANCIAL_SNAPSHOT_RECEIPT_SHA256: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_RECEIPT_SHA256 }}
+      FINANCIAL_SNAPSHOT_HMAC_KEY: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_HMAC_KEY }}
+      FINANCIAL_RESERVATION_MAX_USD: ${{ secrets.AWS_FINANCIAL_RESERVATION_MAX_USD }}
+      FINANCIAL_RESERVATION_REMAINING_COMMITTED_USD: ${{ secrets.AWS_FINANCIAL_RESERVATION_REMAINING_COMMITTED_USD }}
+      FINANCIAL_RESERVATION_CPU_HOURS: ${{ secrets.AWS_FINANCIAL_RESERVATION_CPU_HOURS }}
+      FINANCIAL_RESERVATION_GPU_HOURS: ${{ secrets.AWS_FINANCIAL_RESERVATION_GPU_HOURS }}
+      FINANCIAL_CPU_HOURS_USED_TO_DATE: ${{ secrets.AWS_FINANCIAL_CPU_HOURS_USED_TO_DATE }}
+      FINANCIAL_GPU_HOURS_USED_TO_DATE: ${{ secrets.AWS_FINANCIAL_GPU_HOURS_USED_TO_DATE }}
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_WORKFLOW: deploy
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_INPUTS_JSON: ${{ toJSON(inputs) }}
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_COMMIT_SHA: ${{ github.sha }}
+      FINANCIAL_SNAPSHOT_SOURCE: "aws_billing_and_cost_management_console"
+      FINANCIAL_SNAPSHOT_MAX_AGE_SECONDS: "21600"
+      TF_STATE_BUCKET: ${{ vars.AWS_TERRAFORM_STATE_BUCKET }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install the protected AWS mutation gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          gate_dir="${RUNNER_TEMP}/financial-aws-gate"
+          mkdir -p "${gate_dir}"
+          install -m 0755 scripts/aws_financial_gate.sh "${gate_dir}/aws"
+          printf 'REAL_AWS_CLI=%s\n' "$(command -v aws)" >> "${GITHUB_ENV}"
+          printf '%s\n' "${gate_dir}" >> "${GITHUB_PATH}"
+      - name: Prepare rollback browser verification
+        working-directory: web
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npx playwright install --with-deps chromium
       - name: Validate explicit rollback target
         shell: bash
         run: |
@@ -766,9 +2676,14 @@ jobs:
           test "${ALLOW_HELDOUT_EVAL}" = "0"
           [[ "${RELEASE_ID}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{2,62}$ ]]
           [[ "${ROLLBACK_LAMBDA_VERSION}" =~ ^[1-9][0-9]*$ ]]
-          [[ "${ROLLBACK_POINTER_VERSION}" =~ ^[A-Za-z0-9._=-]+$ ]]
+          ((${#ROLLBACK_POINTER_VERSION} >= 1 && ${#ROLLBACK_POINTER_VERSION} <= 1024))
+          [[ "${ROLLBACK_POINTER_VERSION}" =~ ^[A-Za-z0-9._=+/-]+$ ]]
+          : "${ARTIFACT_BUCKET:?Missing AWS_ARTIFACT_BUCKET variable}"
+          : "${SITE_BUCKET:?Missing AWS_SITE_BUCKET variable}"
+          : "${SERVE_REPOSITORY:?Missing AWS_SERVE_ECR_REPOSITORY_URL variable}"
           : "${LAMBDA_FUNCTION_NAME:?Missing AWS_LAMBDA_FUNCTION_NAME variable}"
           : "${CLOUDFRONT_DISTRIBUTION_ID:?Missing AWS_CLOUDFRONT_DISTRIBUTION_ID variable}"
+          : "${CLOUDFRONT_URL:?Missing AWS_CLOUDFRONT_URL variable}"
           python - <<'PY'
           import os
           from decimal import Decimal, InvalidOperation
@@ -778,8 +2693,8 @@ jobs:
                   value = Decimal(os.environ[name])
               except (InvalidOperation, KeyError) as exc:
                   raise SystemExit(f"{name} must be a decimal number") from exc
-              if value < 0:
-                  raise SystemExit(f"{name} may not be negative")
+              if not value.is_finite() or value < 0:
+                  raise SystemExit(f"{name} must be finite and non-negative")
               return value
 
           rollback_allowance = Decimal("0.10")
@@ -797,54 +2712,666 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: gha-rollback-${{ github.run_id }}
           mask-aws-account-id: true
-      - name: Restore model pointer, Lambda alias, and static release
+      - name: Atomically reserve the signed campaign capacity
         shell: bash
         run: |
           set -euo pipefail
-          aws lambda get-function --function-name "${LAMBDA_FUNCTION_NAME}" --qualifier "${ROLLBACK_LAMBDA_VERSION}" >/dev/null
-          current_version="$(aws lambda get-alias --function-name "${LAMBDA_FUNCTION_NAME}" --name production --query FunctionVersion --output text)"
+          : "${TF_STATE_BUCKET:?Missing AWS_TERRAFORM_STATE_BUCKET variable}"
+          python -m pip install --disable-pip-version-check pydantic==2.13.5
+          PYTHONPATH=src python scripts/reserve_financial_capacity.py reserve \
+            --bucket "${TF_STATE_BUCKET}" \
+            --output financial-capacity-reservation.json
+      - name: Restore model pointer, Lambda alias, and static release
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          # Resolve and cross-bind every target object before changing any live state.
+          aws lambda get-function \
+            --function-name "${LAMBDA_FUNCTION_NAME}" \
+            --qualifier "${ROLLBACK_LAMBDA_VERSION}" \
+            > rollback-target-function.json
+          aws lambda get-alias \
+            --function-name "${LAMBDA_FUNCTION_NAME}" \
+            --name production > pre-manual-rollback-alias.json
+          current_version="$(jq -er '.FunctionVersion' pre-manual-rollback-alias.json)"
+          current_alias_revision="$(jq -er '.RevisionId' pre-manual-rollback-alias.json)"
+          [[ "${current_version}" =~ ^[1-9][0-9]*$ ]]
+          [[ "${current_alias_revision}" =~ ^[A-Za-z0-9-]{1,128}$ ]]
+          aws s3api head-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key promoted/current.json \
+            > pre-manual-rollback-pointer-head.json
+          previous_pointer_version="$(jq -er '.VersionId' pre-manual-rollback-pointer-head.json)"
+          previous_pointer_etag="$(jq -er '.ETag' pre-manual-rollback-pointer-head.json)"
+          ((${#previous_pointer_version} >= 1 && ${#previous_pointer_version} <= 1024))
+          [[ "${previous_pointer_version}" =~ ^[A-Za-z0-9._=+/-]+$ ]]
+          [[ "${previous_pointer_etag}" =~ ^\"[0-9a-f]{32}\"$ ]]
+          aws s3api get-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key promoted/current.json \
+            --version-id "${previous_pointer_version}" \
+            pre-manual-rollback-pointer.json \
+            > pre-manual-rollback-pointer-get.json
+          jq -e \
+            --arg version "${previous_pointer_version}" \
+            --arg etag "${previous_pointer_etag}" \
+            '.VersionId == $version and .ETag == $etag' \
+            pre-manual-rollback-pointer-get.json >/dev/null
           aws s3api get-object \
             --bucket "${ARTIFACT_BUCKET}" \
             --key promoted/current.json \
             --version-id "${ROLLBACK_POINTER_VERSION}" \
-            rollback-current.json >/dev/null
+            rollback-current.json > rollback-pointer-get.json
+          jq -e --arg version "${ROLLBACK_POINTER_VERSION}" \
+            '.VersionId == $version' rollback-pointer-get.json >/dev/null
+          aws s3api head-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key "public/${RELEASE_ID}/deployment-evidence.json" \
+            > rollback-deployment-evidence-head.json
+          rollback_deployment_version="$(jq -er '.VersionId' rollback-deployment-evidence-head.json)"
+          aws s3api get-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key "public/${RELEASE_ID}/deployment-evidence.json" \
+            --version-id "${rollback_deployment_version}" \
+            rollback-deployment-evidence.json \
+            > rollback-deployment-evidence-get.json
+          jq -e --arg version "${rollback_deployment_version}" \
+            '.VersionId == $version' rollback-deployment-evidence-get.json >/dev/null
           jq -e --arg release "${RELEASE_ID}" \
             '.release_id == $release and (.model_id | type == "string" and length > 0) and
-             .bundle_s3_key == ("promoted/" + .model_id + "/")' rollback-current.json >/dev/null
+             ((.evidence_mode == "validation_only" and
+               .bundle_s3_key == ("promoted/" + .model_id + "/")) or
+              (.evidence_mode == "verified" and
+               .bundle_s3_key == ("promoted/releases/" + .release_id + "/")))' \
+            rollback-current.json >/dev/null
           rollback_model_id="$(jq -r '.model_id' rollback-current.json)"
-          aws s3 cp rollback-current.json "s3://${ARTIFACT_BUCKET}/promoted/current.json" \
-            --checksum-algorithm SHA256 --content-type application/json --no-progress
+          rollback_bundle_key="$(jq -er '.bundle_s3_key' rollback-current.json)"
+          [[ "${rollback_bundle_key}" =~ ^promoted/[A-Za-z0-9._@/-]+/$ ]]
+          [[ "${rollback_bundle_key}" != *".."* ]]
+          aws s3api get-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key "${rollback_bundle_key}release-manifest.json" \
+            rollback-target-release-manifest.json >/dev/null
+          previous_release_id="$(jq -er '.release_id' pre-manual-rollback-pointer.json)"
+          aws s3api head-object \
+            --bucket "${SITE_BUCKET}" \
+            --key "releases/${RELEASE_ID}/index.html" \
+            > rollback-target-index-head.json
+          aws s3api head-object \
+            --bucket "${SITE_BUCKET}" \
+            --key "releases/${previous_release_id}/index.html" \
+            > pre-manual-rollback-index-head.json
+          mkdir rollback-target-static
+          aws s3 sync \
+            "s3://${SITE_BUCKET}/releases/${RELEASE_ID}/" \
+            rollback-target-static/ --no-progress
+          test -f rollback-target-static/index.html
+          cp rollback-target-static/index.html rollback-target-index.html
+          aws s3api list-objects-v2 \
+            --bucket "${SITE_BUCKET}" \
+            --prefix "releases/${RELEASE_ID}/" > rollback-target-static-objects.json
+          aws s3 cp \
+            "s3://${SITE_BUCKET}/index.html" \
+            pre-manual-rollback-index.html --no-progress
+          uv run --frozen --no-dev python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from search_rank.schemas.evidence import ReleaseManifest
+          from search_rank.schemas.release import PromotionPointer
+          from search_rank.schemas.workflow import DeploymentEvidence
+
+          previous = PromotionPointer.model_validate_json(
+              Path("pre-manual-rollback-pointer.json").read_text(encoding="utf-8")
+          )
+          target = PromotionPointer.model_validate_json(
+              Path("rollback-current.json").read_text(encoding="utf-8")
+          )
+          deployment = DeploymentEvidence.model_validate_json(
+              Path("rollback-deployment-evidence.json").read_text(encoding="utf-8")
+          )
+          release = ReleaseManifest.model_validate_json(
+              Path("rollback-target-release-manifest.json").read_text(encoding="utf-8")
+          )
+          static_response = json.loads(
+              Path("rollback-target-static-objects.json").read_text(encoding="utf-8")
+          )
+          if static_response.get("IsTruncated"):
+              raise SystemExit("manual rollback target static inventory was truncated")
+          expected_static = {
+              item["Key"].removeprefix(f"releases/{os.environ['RELEASE_ID']}/")
+              for item in static_response.get("Contents", [])
+              if isinstance(item, dict) and isinstance(item.get("Key"), str)
+          }
+          static_root = Path("rollback-target-static")
+          observed_static = {
+              path.relative_to(static_root).as_posix()
+              for path in static_root.rglob("*")
+              if path.is_file()
+          }
+          if not expected_static or observed_static != expected_static:
+              raise SystemExit("manual rollback target static inventory differs from S3")
+          function = json.loads(Path("rollback-target-function.json").read_text(encoding="utf-8"))
+          configuration = function.get("Configuration", {})
+          code = function.get("Code", {})
+          environment = configuration.get("Environment", {}).get("Variables", {})
+          resolved_image = code.get("ResolvedImageUri")
+          expected_release = os.environ["RELEASE_ID"]
+          expected_version = os.environ["ROLLBACK_LAMBDA_VERSION"]
+          expected_pointer_version = os.environ["ROLLBACK_POINTER_VERSION"]
+          expected_function = os.environ["LAMBDA_FUNCTION_NAME"]
+          expected_image = os.environ["SERVE_REPOSITORY"] + "@" + deployment.serving_image_digest
+          bindings = {
+              "target pointer release": target.release_id == expected_release,
+              "deployment release": deployment.release_id == target.release_id,
+              "deployment model": deployment.model_id == target.model_id,
+              "release manifest release": release.release_id == target.release_id,
+              "release manifest model": release.promoted_model_id == target.model_id,
+              "release manifest evidence mode": release.evidence_mode == target.evidence_mode,
+              "release manifest evaluation": (
+                  release.evaluation_report_id == target.evaluation_report_id
+              ),
+              "deployment pointer version": (
+                  deployment.promoted_pointer_version_id == expected_pointer_version
+              ),
+              "deployment Lambda version": deployment.production_lambda_version == expected_version,
+              "queried Lambda version": configuration.get("Version") == expected_version,
+              "release bundle Git SHA": release.git_sha == target.git_sha,
+              "live service Git SHA": (
+                  environment.get("SEARCH_RANK_SERVICE_VERSION") == deployment.code_commit
+              ),
+              "resolved image URI": resolved_image == expected_image,
+              "cold-start function": (
+                  deployment.controlled_cold_start.identifiers.function_name == expected_function
+              ),
+              "previous pointer release is restorable": bool(previous.release_id),
+          }
+          failures = [name for name, matches in bindings.items() if not matches]
+          if failures:
+              raise SystemExit("manual rollback target binding failed: " + ", ".join(failures))
+          PY
+
+          transition_started=0
+          restore_previous_state() {
+            local original_status="$1"
+            local restoration_failed=0
+            local alias_restoration_safe=0
+            local active_pointer_version
+            local active_pointer_etag
+            local active_alias_version
+            local active_alias_revision
+            local expected_transition_revision
+            trap - EXIT
+            trap '' INT TERM
+            set +e
+            if [[ "${transition_started}" -eq 1 ]]; then
+              if aws lambda get-alias \
+                --function-name "${LAMBDA_FUNCTION_NAME}" \
+                --name production > manual-alias-before-compensation.json; then
+                active_alias_version="$(jq -er '.FunctionVersion' manual-alias-before-compensation.json)" \
+                  || restoration_failed=1
+                active_alias_revision="$(jq -er '.RevisionId' manual-alias-before-compensation.json)" \
+                  || restoration_failed=1
+                expected_transition_revision="$(cat manual-rollback-active-alias-revision.txt 2>/dev/null || true)"
+                if [[ -z "${expected_transition_revision}" && \
+                  -f manual-rollback-active-alias.json ]]; then
+                  expected_transition_revision="$(jq -er '.RevisionId' manual-rollback-active-alias.json)" \
+                    || restoration_failed=1
+                fi
+                if [[ "${restoration_failed}" -eq 0 && \
+                  "${active_alias_version}" == "${current_version}" && \
+                  "${active_alias_revision}" == "${current_alias_revision}" ]]; then
+                  alias_restoration_safe=1
+                elif [[ "${restoration_failed}" -eq 0 && \
+                  "${active_alias_version}" == "${ROLLBACK_LAMBDA_VERSION}" && \
+                  -n "${expected_transition_revision}" && \
+                  "${active_alias_revision}" == "${expected_transition_revision}" ]]; then
+                  aws lambda update-alias \
+                    --function-name "${LAMBDA_FUNCTION_NAME}" \
+                    --name production \
+                    --function-version "${current_version}" \
+                    --revision-id "${active_alias_revision}" \
+                    > manual-alias-compensation-result.json \
+                    || restoration_failed=1
+                  if [[ "${restoration_failed}" -eq 0 ]]; then
+                    test "$(jq -er '.FunctionVersion' manual-alias-compensation-result.json)" = \
+                      "${current_version}" || restoration_failed=1
+                    test -n "$(jq -er '.RevisionId' manual-alias-compensation-result.json)" \
+                      || restoration_failed=1
+                    if [[ "${restoration_failed}" -eq 0 ]]; then
+                      alias_restoration_safe=1
+                    fi
+                  fi
+                else
+                  echo "Production alias changed concurrently; compensation refused to overwrite it." >&2
+                  restoration_failed=1
+                fi
+              else
+                restoration_failed=1
+              fi
+              if [[ "${alias_restoration_safe}" -eq 1 ]]; then
+                aws s3 sync \
+                  "s3://${SITE_BUCKET}/releases/${previous_release_id}/" \
+                  "s3://${SITE_BUCKET}/" \
+                  --delete --exclude "releases/*" --exclude "index.html" --no-progress \
+                  || restoration_failed=1
+                aws s3 cp pre-manual-rollback-index.html \
+                  "s3://${SITE_BUCKET}/index.html" \
+                  --cache-control "no-cache, no-store, must-revalidate" \
+                  --content-type "text/html" \
+                  --metadata-directive REPLACE \
+                  --no-progress \
+                  || restoration_failed=1
+
+                if aws s3api head-object \
+                  --bucket "${ARTIFACT_BUCKET}" \
+                  --key promoted/current.json \
+                  > compensation-pointer-head.json; then
+                  active_pointer_version="$(jq -er '.VersionId' compensation-pointer-head.json)"
+                  active_pointer_etag="$(jq -er '.ETag' compensation-pointer-head.json)"
+                  if aws s3api get-object \
+                    --bucket "${ARTIFACT_BUCKET}" \
+                    --key promoted/current.json \
+                    --version-id "${active_pointer_version}" \
+                    compensation-active-pointer.json >/dev/null; then
+                    if cmp --silent rollback-current.json compensation-active-pointer.json; then
+                      aws s3api put-object \
+                        --bucket "${ARTIFACT_BUCKET}" \
+                        --key promoted/current.json \
+                        --body pre-manual-rollback-pointer.json \
+                        --content-type application/json \
+                        --checksum-algorithm SHA256 \
+                        --tagging "RetentionClass=promoted" \
+                        --if-match "${active_pointer_etag}" \
+                        > compensation-pointer-put.json \
+                        || restoration_failed=1
+                    elif ! cmp --silent \
+                      pre-manual-rollback-pointer.json compensation-active-pointer.json; then
+                      echo "Live promotion pointer changed concurrently; compensation refused to overwrite it." >&2
+                      restoration_failed=1
+                    fi
+                  else
+                    restoration_failed=1
+                  fi
+                else
+                  restoration_failed=1
+                fi
+                aws cloudfront create-invalidation \
+                  --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" \
+                  --paths "/*" >/dev/null \
+                  || restoration_failed=1
+              else
+                restoration_failed=1
+              fi
+            fi
+            if [[ "${restoration_failed}" -ne 0 ]]; then
+              aws lambda put-function-concurrency \
+                --function-name "${LAMBDA_FUNCTION_NAME}" \
+                --reserved-concurrent-executions 0 >/dev/null 2>&1 || true
+              echo "Manual rollback failed and compensating restoration was incomplete." >&2
+            fi
+            exit "${original_status}"
+          }
+          trap 'restore_previous_state "$?"' EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+
+          # The pointer remains unchanged until the target alias/static release pass smoke.
+          PYTHONPATH=src uv run --frozen --no-dev python \
+            scripts/validate_financial_snapshot.py emit --output /dev/null
+          transition_started=1
           aws lambda update-alias \
             --function-name "${LAMBDA_FUNCTION_NAME}" \
             --name production \
-            --function-version "${ROLLBACK_LAMBDA_VERSION}" >/dev/null
-          aws s3 sync "s3://${SITE_BUCKET}/releases/${RELEASE_ID}/" "s3://${SITE_BUCKET}/" --no-progress
+            --function-version "${ROLLBACK_LAMBDA_VERSION}" \
+            --revision-id "${current_alias_revision}" > manual-rollback-active-alias.json
+          test "$(jq -er '.FunctionVersion' manual-rollback-active-alias.json)" = \
+            "${ROLLBACK_LAMBDA_VERSION}"
+          manual_active_revision="$(jq -er '.RevisionId' manual-rollback-active-alias.json)"
+          [[ "${manual_active_revision}" =~ ^[A-Za-z0-9-]{1,128}$ ]]
+          printf '%s' "${manual_active_revision}" > manual-rollback-active-alias-revision.txt
+          aws s3 sync \
+            "s3://${SITE_BUCKET}/releases/${RELEASE_ID}/" \
+            "s3://${SITE_BUCKET}/" \
+            --exclude "index.html" --no-progress
           aws s3 cp "s3://${SITE_BUCKET}/releases/${RELEASE_ID}/index.html" "s3://${SITE_BUCKET}/index.html" \
             --cache-control "no-cache, no-store, must-revalidate" \
             --content-type "text/html" \
             --metadata-directive REPLACE \
             --no-progress
+          rollback_root_readback="$(mktemp -d)"
+          while IFS= read -r -d '' source_file; do
+            relative="${source_file#rollback-target-static/}"
+            [[ "${relative}" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,1023}$ ]]
+            [[ "${relative}" != releases/* && "${relative}" != *".."* ]]
+            mkdir -p "${rollback_root_readback}/$(dirname "${relative}")"
+            aws s3api get-object \
+              --bucket "${SITE_BUCKET}" \
+              --key "${relative}" \
+              --checksum-mode ENABLED \
+              "${rollback_root_readback}/${relative}" >/dev/null
+            cmp -s "${source_file}" "${rollback_root_readback}/${relative}"
+          done < <(find rollback-target-static -type f -print0 | sort -z)
+          aws s3api list-objects-v2 \
+            --bucket "${SITE_BUCKET}" > rollback-root-before-cleanup.json
+          python scripts/static_root_manifest.py plan \
+            --source-root rollback-target-static \
+            --inventory rollback-root-before-cleanup.json \
+            --output rollback-stale-root-keys.json
+          while IFS= read -r stale_key; do
+            [[ "${stale_key}" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,1023}$ ]]
+            [[ "${stale_key}" != releases/* && "${stale_key}" != *".."* ]]
+            aws s3api delete-object \
+              --bucket "${SITE_BUCKET}" \
+              --key "${stale_key}" >/dev/null
+          done < <(jq -r '.[]' rollback-stale-root-keys.json)
+          aws s3api list-objects-v2 \
+            --bucket "${SITE_BUCKET}" > rollback-root-after-cleanup.json
+          python scripts/static_root_manifest.py verify \
+            --source-root rollback-target-static \
+            --inventory rollback-root-after-cleanup.json
+          rm -rf -- "${rollback_root_readback}"
+          aws s3 cp "s3://${SITE_BUCKET}/index.html" active-manual-rollback-index.html --no-progress
+          cmp --silent rollback-target-index.html active-manual-rollback-index.html
           aws cloudfront create-invalidation \
             --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" \
             --paths "/*" >/dev/null
+          PYTHONPATH="${GITHUB_WORKSPACE}/src" \
+            uv run --project "${GITHUB_WORKSPACE}" --frozen --no-dev python \
+            "${GITHUB_WORKSPACE}/scripts/validate_financial_snapshot.py" emit \
+            --output /dev/null
+          public_index_ready=0
+          for _ in $(seq 1 12); do
+            if curl --fail --silent --show-error \
+              --header "Cache-Control: no-cache" \
+              "${CLOUDFRONT_URL}/index.html" > rollback-public-index.html \
+              && cmp --silent rollback-target-index.html rollback-public-index.html; then
+              public_index_ready=1
+              break
+            fi
+            sleep 10
+          done
+          test "${public_index_ready}" -eq 1
+          export ROLLBACK_STATIC_ORIGIN="${CLOUDFRONT_URL}" RELEASE_ID
+          PYTHONPATH="${GITHUB_WORKSPACE}/src" \
+            uv run --project "${GITHUB_WORKSPACE}" --frozen --no-dev python \
+            "${GITHUB_WORKSPACE}/scripts/validate_financial_snapshot.py" emit \
+            --output /dev/null
+          uv run --frozen --no-dev python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import time
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+          from pathlib import Path
+
+          root = Path("rollback-target-static")
+          files = sorted(path for path in root.rglob("*") if path.is_file())
+          if not files:
+              raise SystemExit("rollback static verification found no target files")
+          index_path = root / "index.html"
+          if not index_path.is_file():
+              raise SystemExit("rollback static verification found no index.html")
+          targets = [
+              (path.relative_to(root).as_posix(), path)
+              for path in files
+          ] + [("<root>", index_path)]
+          failures: list[str] = []
+          for attempt in range(1, 13):
+              failures = []
+              for relative, path in targets:
+                  suffix = "" if relative == "<root>" else urllib.parse.quote(relative, safe="/")
+                  url = os.environ["ROLLBACK_STATIC_ORIGIN"].rstrip("/") + "/" + suffix
+                  request = urllib.request.Request(
+                      url,
+                      headers={"Cache-Control": "no-cache", "User-Agent": "rollback-static-verify/1.0"},
+                  )
+                  expected = path.read_bytes()
+                  try:
+                      with urllib.request.urlopen(request, timeout=30) as response:
+                          observed = response.read(len(expected) + 1)
+                  except (OSError, urllib.error.URLError) as error:
+                      failures.append(f"{relative}: {error}")
+                      continue
+                  if observed != expected:
+                      failures.append(f"{relative}: CloudFront bytes differ")
+              if not failures:
+                  break
+              if attempt < 12:
+                  time.sleep(10)
+          if failures:
+              raise SystemExit("rollback static verification failed: " + "; ".join(failures))
+          inventory = {
+              path.relative_to(root).as_posix(): "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+              for path in files
+          }
+          digest = hashlib.sha256(
+              json.dumps(inventory, sort_keys=True, separators=(",", ":")).encode("utf-8")
+          ).hexdigest()
+          Path("rollback-static-verification.json").write_text(
+              json.dumps(
+                  {
+                      "schema_version": "1.0.0",
+                      "release_id": os.environ["RELEASE_ID"],
+                      "file_count": len(files),
+                      "inventory_sha256": "sha256:" + digest,
+                      "cloudfront_bytes_verified": True,
+                  },
+                  indent=2,
+                  sort_keys=True,
+              )
+              + "\n",
+              encoding="utf-8",
+          )
+          PY
+          PYTHONPATH="${GITHUB_WORKSPACE}/src" \
+            uv run --project "${GITHUB_WORKSPACE}" --frozen --no-dev python \
+            "${GITHUB_WORKSPACE}/scripts/validate_financial_snapshot.py" emit \
+            --output /dev/null
+          curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 10 \
+            "${CLOUDFRONT_URL}/healthz" > rollback-health.json
+          jq -e --arg version "$(jq -er '.code_commit' rollback-deployment-evidence.json)" \
+            '.status == "ok" and .service_version == $version' rollback-health.json >/dev/null
           curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 10 "${CLOUDFRONT_URL}/readyz" > rollback-ready.json
           jq -e --arg model "${rollback_model_id}" \
             '.status == "ready" and .model_id == $model' rollback-ready.json >/dev/null
-          python scripts/smoke_test.py "${CLOUDFRONT_URL}" --repeat 5 --output rollback-api-smoke.json
+          uv run --frozen --no-dev python scripts/smoke_test.py \
+            "${CLOUDFRONT_URL}" --repeat 5 --output rollback-api-smoke.json
+          jq -e \
+            --arg model "${rollback_model_id}" \
+            --arg candidate "$(jq -er '.production_api_smoke.evaluated_candidate_model_id' rollback-deployment-evidence.json)" \
+            '.status == "passed" and .model_id == $model and
+             .evaluated_candidate_model_id == $candidate and .error_count == 0' \
+            rollback-api-smoke.json >/dev/null
+          uv run --frozen --no-dev python - <<'PY'
+          from pathlib import Path
+
+          from search_rank.schemas.api import HealthResponse, ReadyResponse
+          from search_rank.schemas.workflow import SmokeTestEvidence
+
+          HealthResponse.model_validate_json(Path("rollback-health.json").read_text(encoding="utf-8"))
+          ReadyResponse.model_validate_json(Path("rollback-ready.json").read_text(encoding="utf-8"))
+          SmokeTestEvidence.model_validate_json(
+              Path("rollback-api-smoke.json").read_text(encoding="utf-8")
+          )
+          PY
+          ROLLBACK_EVIDENCE_MODE="$(jq -er '.evidence_mode' rollback-current.json)"
+          if jq -e 'any(.models[]; .kind == "fine_tuned")' \
+            rollback-target-release-manifest.json >/dev/null; then
+            ROLLBACK_HAS_FINE_TUNED_CANDIDATE=1
+          else
+            ROLLBACK_HAS_FINE_TUNED_CANDIDATE=0
+          fi
+          export ROLLBACK_EVIDENCE_MODE ROLLBACK_HAS_FINE_TUNED_CANDIDATE
+          PYTHONPATH="${GITHUB_WORKSPACE}/src" \
+            uv run --project "${GITHUB_WORKSPACE}" --frozen --no-dev python \
+            "${GITHUB_WORKSPACE}/scripts/validate_financial_snapshot.py" emit \
+            --output /dev/null
+          node - <<'JS'
+          const { chromium } = require('./web/node_modules/playwright')
+
+          const expectedStatusByMode = {
+            verified: 'Verified release',
+            validation_only: 'Validation-only evidence',
+          }
+          const expectedStatus = expectedStatusByMode[process.env.ROLLBACK_EVIDENCE_MODE]
+          if (!expectedStatus) throw new Error('rollback evidence mode is unsupported')
+
+          async function requireNoFailurePanel(page) {
+            const failure = page.locator('.status-panel.error, .status-panel.not-ready, .status-panel.conflict')
+            if (await failure.count()) throw new Error(`rollback page rendered an evidence failure: ${await failure.first().innerText()}`)
+          }
+
+          async function fullFlow(viewport, screenshot) {
+            const browser = await chromium.launch({ headless: true })
+            const page = await browser.newPage({ viewport })
+            const pageErrors = []
+            const failedRequests = []
+            const failedResponses = []
+            page.on('pageerror', (error) => pageErrors.push(String(error)))
+            page.on('requestfailed', (request) => failedRequests.push(`${request.url()}: ${request.failure()?.errorText}`))
+            page.on('response', (response) => {
+              if (response.status() >= 400) failedResponses.push(`${response.url()}: ${response.status()}`)
+            })
+            const response = await page.goto(process.env.CLOUDFRONT_URL, {
+              waitUntil: 'networkidle',
+              timeout: 120000,
+            })
+            if (!response || !response.ok()) throw new Error('rollback CloudFront root failed')
+            await page.getByRole('heading', { name: /Machine Learning Product Search Ranking Platform/i }).waitFor()
+            await page.getByText(expectedStatus, { exact: true }).waitFor()
+            await requireNoFailurePanel(page)
+            await page.keyboard.press('Tab')
+            const skipLink = page.getByRole('link', { name: /skip to content/i })
+            if (!(await skipLink.evaluate((node) => node === document.activeElement))) {
+              throw new Error('rollback browser did not focus the skip link')
+            }
+            await page.keyboard.press('Enter')
+            if (!(await page.locator('#main-content').evaluate((node) => node === document.activeElement))) {
+              throw new Error('rollback skip link did not focus main content')
+            }
+            const compare = page.getByRole('link', { name: /Compare a query/i })
+            if (process.env.ROLLBACK_HAS_FINE_TUNED_CANDIDATE === '1') {
+              await compare.waitFor()
+              await compare.click()
+              await page.locator('.comparison-summary').waitFor({ timeout: 120000 })
+              await page.locator('.rankings-grid').waitFor()
+              const labels = page.getByRole('checkbox', { name: /show benchmark labels/i })
+              await labels.uncheck()
+              await labels.check()
+              await page.getByRole('link', { name: 'Evaluation', exact: true }).click()
+              await page.locator('main h1, main h2').first().waitFor()
+              await requireNoFailurePanel(page)
+              await page.getByRole('link', { name: 'Failures', exact: true }).click()
+              await page.locator('main h1, main h2').first().waitFor()
+              await requireNoFailurePanel(page)
+              await page.getByRole('link', { name: 'Experiment', exact: true }).click()
+              await page.locator('main h1, main h2').first().waitFor()
+              await requireNoFailurePanel(page)
+            }
+            await page.screenshot({ path: screenshot, fullPage: true })
+            if (pageErrors.length) throw new Error(`rollback page errors: ${pageErrors.join('; ')}`)
+            if (failedRequests.length) throw new Error(`rollback request failures: ${failedRequests.join('; ')}`)
+            if (failedResponses.length) throw new Error(`rollback HTTP failures: ${failedResponses.join('; ')}`)
+            await browser.close()
+          }
+
+          ;(async () => {
+            await fullFlow({ width: 1440, height: 1000 }, 'rollback-browser-desktop.png')
+            await fullFlow({ width: 360, height: 800 }, 'rollback-browser-mobile.png')
+          })().catch((error) => {
+            console.error(error)
+            process.exit(1)
+          })
+          JS
+
+          # Recheck the captured ETag immediately before the only pointer mutation.
+          aws s3api head-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key promoted/current.json \
+            > pointer-before-manual-rollback-head.json
+          test "$(jq -er '.VersionId' pointer-before-manual-rollback-head.json)" = \
+            "${previous_pointer_version}"
+          test "$(jq -er '.ETag' pointer-before-manual-rollback-head.json)" = \
+            "${previous_pointer_etag}"
+          aws s3api put-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key promoted/current.json \
+            --body rollback-current.json \
+            --content-type application/json \
+            --checksum-algorithm SHA256 \
+            --tagging "RetentionClass=promoted" \
+            --if-match "${previous_pointer_etag}" \
+            > manual-rollback-pointer-put.json
+          restored_pointer_version="$(jq -er '.VersionId' manual-rollback-pointer-put.json)"
+          aws s3api head-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key promoted/current.json \
+            > active-manual-rollback-pointer-head.json
+          test "$(jq -er '.VersionId' active-manual-rollback-pointer-head.json)" = \
+            "${restored_pointer_version}"
+          aws s3api get-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key promoted/current.json \
+            --version-id "${restored_pointer_version}" \
+            active-manual-rollback-pointer.json >/dev/null
+          cmp --silent rollback-current.json active-manual-rollback-pointer.json
           jq -n \
             --arg restored_release "${RELEASE_ID}" \
             --arg from_version "${current_version}" \
             --arg to_version "${ROLLBACK_LAMBDA_VERSION}" \
-            --arg pointer "${ROLLBACK_POINTER_VERSION}" \
+            --arg pointer "${restored_pointer_version}" \
             --arg model "${rollback_model_id}" \
             --arg commit "${GITHUB_SHA}" \
-            '{restored_release_id: $restored_release, restored_model_id: $model,
+            '{schema_version: "1.0.0", artifact_type: "manual_rollback_evidence",
+              restored_release_id: $restored_release, restored_model_id: $model,
               from_lambda_version: $from_version, to_lambda_version: $to_version,
               restored_pointer_version_id: $pointer, workflow_commit: $commit,
               smoke_test_passed: true}' \
             > rollback-evidence.json
-          aws s3 cp rollback-evidence.json "s3://${ARTIFACT_BUCKET}/public/${RELEASE_ID}/rollback-evidence-${GITHUB_RUN_ID}.json" \
-            --checksum-algorithm SHA256 --no-progress
+          uv run --frozen --no-dev python - <<'PY'
+          from pathlib import Path
+
+          from search_rank.schemas.api import ReadyResponse
+          from search_rank.schemas.workflow import ManualRollbackEvidence, SmokeTestEvidence
+
+          ReadyResponse.model_validate_json(Path("rollback-ready.json").read_text(encoding="utf-8"))
+          SmokeTestEvidence.model_validate_json(
+              Path("rollback-api-smoke.json").read_text(encoding="utf-8")
+          )
+          ManualRollbackEvidence.model_validate_json(
+              Path("rollback-evidence.json").read_text(encoding="utf-8")
+          )
+          PY
+          rollback_evidence_key="public/${RELEASE_ID}/rollback-evidence-${GITHUB_RUN_ID}-attempt-${GITHUB_RUN_ATTEMPT}.json"
+          set +e
+          aws s3api put-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key "${rollback_evidence_key}" \
+            --body rollback-evidence.json \
+            --content-type application/json \
+            --checksum-algorithm SHA256 \
+            --if-none-match '*' \
+            > rollback-evidence-put.json 2>rollback-evidence-put-error.txt
+          rollback_evidence_status=$?
+          set -e
+          if [[ "${rollback_evidence_status}" -ne 0 ]]; then
+            if ! grep -Eq 'PreconditionFailed|412' rollback-evidence-put-error.txt; then
+              cat rollback-evidence-put-error.txt >&2
+              false
+            fi
+            aws s3api get-object \
+              --bucket "${ARTIFACT_BUCKET}" \
+              --key "${rollback_evidence_key}" \
+              existing-rollback-evidence.json >/dev/null
+            cmp --silent rollback-evidence.json existing-rollback-evidence.json
+          fi
+          transition_started=0
+          trap - EXIT INT TERM
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
@@ -852,6 +3379,9 @@ jobs:
           path: |
             rollback-ready.json
             rollback-api-smoke.json
+            rollback-static-verification.json
+            rollback-browser-desktop.png
+            rollback-browser-mobile.png
             rollback-evidence.json
           if-no-files-found: warn
           retention-days: 90

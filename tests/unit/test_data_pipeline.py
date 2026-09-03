@@ -76,6 +76,62 @@ def test_conflicting_duplicate_labels_fail() -> None:
         validate_examples(frame)
 
 
+def _example_row(
+    *,
+    example_id: int,
+    product_id: str,
+    query: str = "travel mug",
+    split: str = "train",
+) -> dict[str, object]:
+    return {
+        "example_id": example_id,
+        "query": query,
+        "query_id": 10,
+        "product_id": product_id,
+        "product_locale": "us",
+        "esci_label": "E",
+        "small_version": 1,
+        "split": split,
+    }
+
+
+def test_query_id_with_conflicting_normalized_text_fails() -> None:
+    frame = pd.DataFrame(
+        [
+            _example_row(example_id=1, product_id="A"),
+            _example_row(example_id=2, product_id="B", query="coffee grinder"),
+        ]
+    )
+
+    with pytest.raises(DataQualityError, match="conflicting normalized query text"):
+        validate_examples(frame)
+
+
+def test_query_id_with_equivalent_normalized_text_is_allowed() -> None:
+    frame = pd.DataFrame(
+        [
+            _example_row(example_id=1, product_id="A", query="  travel\tmug "),
+            _example_row(example_id=2, product_id="B", query="travel mug"),
+        ]
+    )
+
+    quality = validate_examples(frame)
+
+    assert quality.duplicate_rows == 0
+
+
+def test_query_id_spanning_official_splits_fails() -> None:
+    frame = pd.DataFrame(
+        [
+            _example_row(example_id=1, product_id="A", split="train"),
+            _example_row(example_id=2, product_id="B", split="test"),
+        ]
+    )
+
+    with pytest.raises(DataQualityError, match="conflicting official splits"):
+        validate_examples(frame)
+
+
 def test_query_overlap_fails() -> None:
     frame = pd.DataFrame({"query_id": ["q1", "q1"], "project_split": ["train", "validation"]})
     with pytest.raises(DataQualityError, match="query leakage"):

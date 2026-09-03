@@ -1,0 +1,322 @@
+{
+  "$defs": {
+    "PairedDifference": {
+      "additionalProperties": false,
+      "properties": {
+        "metric_name": {
+          "minLength": 1,
+          "title": "Metric Name",
+          "type": "string"
+        },
+        "candidate_model_id": {
+          "minLength": 1,
+          "title": "Candidate Model Id",
+          "type": "string"
+        },
+        "baseline_model_id": {
+          "minLength": 1,
+          "title": "Baseline Model Id",
+          "type": "string"
+        },
+        "point_estimate": {
+          "title": "Point Estimate",
+          "type": "number"
+        },
+        "ci_lower": {
+          "title": "Ci Lower",
+          "type": "number"
+        },
+        "ci_upper": {
+          "title": "Ci Upper",
+          "type": "number"
+        },
+        "confidence_level": {
+          "exclusiveMaximum": 1,
+          "exclusiveMinimum": 0,
+          "title": "Confidence Level",
+          "type": "number"
+        },
+        "query_count": {
+          "minimum": 1,
+          "title": "Query Count",
+          "type": "integer"
+        },
+        "excluded_query_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Excluded Query Count",
+          "type": "integer"
+        },
+        "bootstrap_seed": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "title": "Bootstrap Seed",
+          "type": "integer"
+        },
+        "bootstrap_resamples": {
+          "minimum": 1,
+          "title": "Bootstrap Resamples",
+          "type": "integer"
+        },
+        "resampling_unit": {
+          "const": "query",
+          "default": "query",
+          "title": "Resampling Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "metric_name",
+        "candidate_model_id",
+        "baseline_model_id",
+        "point_estimate",
+        "ci_lower",
+        "ci_upper",
+        "confidence_level",
+        "query_count",
+        "bootstrap_seed",
+        "bootstrap_resamples"
+      ],
+      "title": "PairedDifference",
+      "type": "object"
+    },
+    "PrimaryMetricResult": {
+      "additionalProperties": false,
+      "properties": {
+        "metric_name": {
+          "const": "graded_ndcg@10",
+          "default": "graded_ndcg@10",
+          "title": "Metric Name",
+          "type": "string"
+        },
+        "candidate_value": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Candidate Value",
+          "type": "number"
+        },
+        "baseline_values": {
+          "additionalProperties": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "propertyNames": {
+            "minLength": 1
+          },
+          "title": "Baseline Values",
+          "type": "object"
+        },
+        "strongest_baseline_id": {
+          "minLength": 1,
+          "title": "Strongest Baseline Id",
+          "type": "string"
+        },
+        "strongest_baseline_value": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Strongest Baseline Value",
+          "type": "number"
+        },
+        "candidate_minus_baseline": {
+          "title": "Candidate Minus Baseline",
+          "type": "number"
+        }
+      },
+      "required": [
+        "candidate_value",
+        "baseline_values",
+        "strongest_baseline_id",
+        "strongest_baseline_value",
+        "candidate_minus_baseline"
+      ],
+      "title": "PrimaryMetricResult",
+      "type": "object"
+    },
+    "SourceEvaluation": {
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "report_id": {
+          "minLength": 1,
+          "title": "Report Id",
+          "type": "string"
+        },
+        "report_checksum": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Report Checksum",
+          "type": "string"
+        },
+        "provenance_checksum": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Provenance Checksum",
+          "type": "string"
+        },
+        "test_access_count": {
+          "minimum": 1,
+          "title": "Test Access Count",
+          "type": "integer"
+        },
+        "candidate_metric": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Candidate Metric",
+          "type": "number"
+        },
+        "candidate_ranking_hash": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Candidate Ranking Hash",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "report_id",
+        "report_checksum",
+        "provenance_checksum",
+        "test_access_count",
+        "candidate_metric",
+        "candidate_ranking_hash"
+      ],
+      "title": "SourceEvaluation",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "artifact_type": {
+      "const": "heldout_release_summary",
+      "title": "Artifact Type",
+      "type": "string"
+    },
+    "report_id": {
+      "minLength": 1,
+      "title": "Report Id",
+      "type": "string"
+    },
+    "run_id": {
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    },
+    "candidate_model_id": {
+      "minLength": 1,
+      "title": "Candidate Model Id",
+      "type": "string"
+    },
+    "baseline_model_ids": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Baseline Model Ids",
+      "type": "array"
+    },
+    "promoted_model_id": {
+      "minLength": 1,
+      "title": "Promoted Model Id",
+      "type": "string"
+    },
+    "promotion_decision": {
+      "enum": [
+        "promote_candidate",
+        "retain_baseline"
+      ],
+      "title": "Promotion Decision",
+      "type": "string"
+    },
+    "gate_passed": {
+      "title": "Gate Passed",
+      "type": "boolean"
+    },
+    "test_access_count": {
+      "minimum": 1,
+      "title": "Test Access Count",
+      "type": "integer"
+    },
+    "clean_evaluation_count": {
+      "const": 2,
+      "title": "Clean Evaluation Count",
+      "type": "integer"
+    },
+    "source_evaluations": {
+      "items": {
+        "$ref": "#/$defs/SourceEvaluation"
+      },
+      "maxItems": 2,
+      "minItems": 2,
+      "title": "Source Evaluations",
+      "type": "array"
+    },
+    "primary_metric": {
+      "$ref": "#/$defs/PrimaryMetricResult"
+    },
+    "paired_differences": {
+      "items": {
+        "$ref": "#/$defs/PairedDifference"
+      },
+      "title": "Paired Differences",
+      "type": "array"
+    },
+    "code_commit": {
+      "pattern": "^[0-9a-f]{40}$",
+      "title": "Code Commit",
+      "type": "string"
+    },
+    "evaluation_image_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Evaluation Image Digest",
+      "type": "string"
+    },
+    "evaluation_config_hash": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Evaluation Config Hash",
+      "type": "string"
+    },
+    "trial_selection_id": {
+      "pattern": "^trial-selection-[0-9a-f]{20}$",
+      "title": "Trial Selection Id",
+      "type": "string"
+    },
+    "trial_selection_sha256": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Trial Selection Sha256",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "report_id",
+    "run_id",
+    "candidate_model_id",
+    "baseline_model_ids",
+    "promoted_model_id",
+    "promotion_decision",
+    "gate_passed",
+    "test_access_count",
+    "clean_evaluation_count",
+    "source_evaluations",
+    "primary_metric",
+    "paired_differences",
+    "code_commit",
+    "evaluation_image_digest",
+    "evaluation_config_hash",
+    "trial_selection_id",
+    "trial_selection_sha256"
+  ],
+  "title": "ReleaseSummary",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.example.invalid/search-rank/release_summary.schema.json"
+}

@@ -11,9 +11,10 @@ data "aws_iam_policy_document" "sagemaker_assume_role" {
 }
 
 resource "aws_iam_role" "sagemaker_training" {
-  name               = "${local.name}-sagemaker-training"
-  assume_role_policy = data.aws_iam_policy_document.sagemaker_assume_role.json
-  tags               = local.common_tags
+  name                 = "${local.name}-sagemaker-training"
+  assume_role_policy   = data.aws_iam_policy_document.sagemaker_assume_role.json
+  permissions_boundary = local.project_permissions_boundary_arn
+  tags                 = local.common_tags
 }
 
 data "aws_iam_policy_document" "sagemaker_training" {
@@ -122,9 +123,10 @@ resource "aws_iam_role_policy" "sagemaker_training" {
 }
 
 resource "aws_iam_role" "sagemaker_processing" {
-  name               = "${local.name}-sagemaker-processing"
-  assume_role_policy = data.aws_iam_policy_document.sagemaker_assume_role.json
-  tags               = local.common_tags
+  name                 = "${local.name}-sagemaker-processing"
+  assume_role_policy   = data.aws_iam_policy_document.sagemaker_assume_role.json
+  permissions_boundary = local.project_permissions_boundary_arn
+  tags                 = local.common_tags
 }
 
 data "aws_iam_policy_document" "sagemaker_processing" {
@@ -150,7 +152,6 @@ data "aws_iam_policy_document" "sagemaker_processing" {
         "data/processed/*",
         "runs/*",
         "promoted/*",
-        "public/*",
       ]
     }
   }
@@ -180,7 +181,6 @@ data "aws_iam_policy_document" "sagemaker_processing" {
     ]
     resources = [
       "${aws_s3_bucket.artifacts.arn}/runs/*/reports/*",
-      "${aws_s3_bucket.artifacts.arn}/public/*",
     ]
   }
 
@@ -241,9 +241,10 @@ data "aws_iam_policy_document" "lambda_assume_role" {
 }
 
 resource "aws_iam_role" "lambda" {
-  name               = "${local.name}-lambda"
-  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
-  tags               = local.common_tags
+  name                 = "${local.name}-lambda"
+  assume_role_policy   = data.aws_iam_policy_document.lambda_assume_role.json
+  permissions_boundary = local.project_permissions_boundary_arn
+  tags                 = local.common_tags
 }
 
 data "aws_iam_policy_document" "lambda" {
@@ -308,7 +309,31 @@ data "aws_iam_policy_document" "github_assume_role" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repository}:environment:production"]
+      values   = ["${local.github_immutable_subject_prefix}:environment:production:job_workflow_ref:${var.github_repository}/.github/workflows/${local.github_environment_workflow_files["production"]}@refs/heads/main"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:repository_id"
+      values   = [var.github_repository_id]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:repository"
+      values   = [var.github_repository]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:repository_owner_id"
+      values   = [var.github_repository_owner_id]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:ref"
+      values   = ["refs/heads/main"]
     }
   }
 }
@@ -317,7 +342,18 @@ resource "aws_iam_role" "github_deployment" {
   name                 = "${local.name}-github-production"
   assume_role_policy   = data.aws_iam_policy_document.github_assume_role.json
   max_session_duration = 3600
+  permissions_boundary = local.project_permissions_boundary_arn
   tags                 = local.common_tags
+
+  lifecycle {
+    precondition {
+      condition = (
+        var.create_github_oidc_provider ||
+        var.existing_github_oidc_provider_arn == local.github_oidc_provider_arn
+      )
+      error_message = "The existing GitHub OIDC provider must belong to this exact AWS account."
+    }
+  }
 }
 
 locals {
@@ -346,7 +382,31 @@ data "aws_iam_policy_document" "github_workflow_assume_role" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repository}:environment:${each.key}"]
+      values   = ["${local.github_immutable_subject_prefix}:environment:${each.key}:job_workflow_ref:${var.github_repository}/.github/workflows/${local.github_environment_workflow_files[each.key]}@refs/heads/main"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:repository_id"
+      values   = [var.github_repository_id]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:repository"
+      values   = [var.github_repository]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:repository_owner_id"
+      values   = [var.github_repository_owner_id]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:ref"
+      values   = ["refs/heads/main"]
     }
   }
 }
@@ -357,7 +417,61 @@ resource "aws_iam_role" "github_workflow" {
   name                 = "${local.name}-github-${each.key}"
   assume_role_policy   = data.aws_iam_policy_document.github_workflow_assume_role[each.key].json
   max_session_duration = 3600
+  permissions_boundary = local.project_permissions_boundary_arn
   tags                 = local.common_tags
+}
+
+# Every AWS-mutating workflow receives only GetObject plus conditional PutObject on the one
+# private campaign ledger. The If-Match/If-None-Match conditions prevent a workflow from
+# bypassing the compare-and-swap protocol even if its application code is modified.
+data "aws_iam_policy_document" "github_financial_ledger" {
+  statement {
+    sid       = "ReadExactFinancialLedger"
+    effect    = "Allow"
+    actions   = ["s3:GetObject"]
+    resources = ["arn:${local.partition}:s3:::${local.state_bucket_name}/cost-control/ledger.json"]
+  }
+
+  statement {
+    sid       = "CreateExactFinancialLedgerWithCas"
+    effect    = "Allow"
+    actions   = ["s3:PutObject"]
+    resources = ["arn:${local.partition}:s3:::${local.state_bucket_name}/cost-control/ledger.json"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "s3:if-none-match"
+      values   = ["*"]
+    }
+  }
+
+  statement {
+    sid       = "UpdateExactFinancialLedgerWithCas"
+    effect    = "Allow"
+    actions   = ["s3:PutObject"]
+    resources = ["arn:${local.partition}:s3:::${local.state_bucket_name}/cost-control/ledger.json"]
+
+    condition {
+      test     = "Null"
+      variable = "s3:if-match"
+      values   = ["false"]
+    }
+  }
+}
+
+locals {
+  github_financial_ledger_roles = merge(
+    { production = aws_iam_role.github_deployment.id },
+    { for environment, role in aws_iam_role.github_workflow : environment => role.id },
+  )
+}
+
+resource "aws_iam_role_policy" "github_financial_ledger" {
+  for_each = local.github_financial_ledger_roles
+
+  name   = "atomic-financial-ledger-only"
+  role   = each.value
+  policy = data.aws_iam_policy_document.github_financial_ledger.minified_json
 }
 
 data "aws_iam_policy_document" "github_deployment" {
@@ -376,8 +490,8 @@ data "aws_iam_policy_document" "github_deployment" {
       "s3:GetBucketVersioning",
     ]
     resources = [
-      aws_s3_bucket.artifacts.arn,
-      aws_s3_bucket.site.arn,
+      local.artifact_bucket_arn,
+      local.site_bucket_arn,
     ]
   }
 
@@ -389,8 +503,8 @@ data "aws_iam_policy_document" "github_deployment" {
       "s3:ListBucketVersions",
     ]
     resources = [
-      aws_s3_bucket.artifacts.arn,
-      aws_s3_bucket.site.arn,
+      local.artifact_bucket_arn,
+      local.site_bucket_arn,
     ]
 
     condition {
@@ -414,8 +528,8 @@ data "aws_iam_policy_document" "github_deployment" {
       "s3:GetObjectVersion",
     ]
     resources = [
-      "${aws_s3_bucket.artifacts.arn}/promoted/*",
-      "${aws_s3_bucket.artifacts.arn}/public/*",
+      "${local.artifact_bucket_arn}/promoted/*",
+      "${local.artifact_bucket_arn}/public/*",
     ]
   }
 
@@ -428,8 +542,8 @@ data "aws_iam_policy_document" "github_deployment" {
       "s3:PutObjectTagging",
     ]
     resources = [
-      "${aws_s3_bucket.artifacts.arn}/promoted/current.json",
-      "${aws_s3_bucket.artifacts.arn}/public/*",
+      "${local.artifact_bucket_arn}/promoted/current.json",
+      "${local.artifact_bucket_arn}/public/*",
     ]
   }
 
@@ -446,8 +560,15 @@ data "aws_iam_policy_document" "github_deployment" {
       "s3:PutObjectTagging",
     ]
     resources = [
-      "${aws_s3_bucket.site.arn}/*",
+      "${local.site_bucket_arn}/*",
     ]
+  }
+
+  statement {
+    sid       = "NeverDeleteImmutableStaticReleaseArchives"
+    effect    = "Deny"
+    actions   = ["s3:DeleteObject"]
+    resources = ["${local.site_bucket_arn}/releases/*"]
   }
 
   statement {
@@ -471,7 +592,7 @@ data "aws_iam_policy_document" "github_deployment" {
       "ecr:PutImage",
       "ecr:UploadLayerPart",
     ]
-    resources = [aws_ecr_repository.images["serve"].arn]
+    resources = [local.image_repository_arns["serve"]]
   }
 
   statement {
@@ -479,7 +600,8 @@ data "aws_iam_policy_document" "github_deployment" {
     effect  = "Allow"
     actions = ["iam:PassRole"]
     resources = [
-      aws_iam_role.lambda.arn,
+      local.lambda_role_arn,
+      local.budget_kill_switch_role_arn,
     ]
 
     condition {
@@ -502,6 +624,7 @@ data "aws_iam_policy_document" "github_deployment" {
       "lambda:ListAliases",
       "lambda:ListVersionsByFunction",
       "lambda:PublishVersion",
+      "lambda:PutFunctionConcurrency",
       "lambda:UpdateAlias",
       "lambda:UpdateFunctionCode",
       "lambda:UpdateFunctionConfiguration",
@@ -510,14 +633,26 @@ data "aws_iam_policy_document" "github_deployment" {
   }
 
   statement {
-    sid       = "InvalidateOneDistribution"
+    sid       = "InvalidateOnlyTaggedProjectDistribution"
     effect    = "Allow"
     actions   = ["cloudfront:CreateInvalidation", "cloudfront:GetDistribution"]
     resources = ["arn:${local.partition}:cloudfront::${local.account_id}:distribution/*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/Project"
+      values   = [var.project_name]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/Environment"
+      values   = [var.environment]
+    }
   }
 
   statement {
-    sid       = "InvokeCandidateSmokeApi"
+    sid       = "InvokeOnlyRegionalProjectCandidate"
     effect    = "Allow"
     actions   = ["execute-api:Invoke"]
     resources = ["arn:${local.partition}:execute-api:${var.aws_region}:${local.account_id}:*/*/*/*"]
@@ -529,12 +664,6 @@ data "aws_iam_policy_document" "github_deployment" {
     actions   = ["logs:GetLogEvents", "logs:FilterLogEvents"]
     resources = ["arn:${local.partition}:logs:${var.aws_region}:${local.account_id}:log-group:/aws/*/${local.name}-*:*"]
   }
-}
-
-resource "aws_iam_role_policy" "github_deployment" {
-  name   = "project-release-operations"
-  role   = aws_iam_role.github_deployment.id
-  policy = data.aws_iam_policy_document.github_deployment.json
 }
 
 data "aws_iam_policy_document" "github_images" {
@@ -630,9 +759,23 @@ resource "aws_iam_role_policy" "github_data" {
 
 data "aws_iam_policy_document" "github_training" {
   statement {
+    sid       = "VerifyExactTrainingImageDigest"
+    effect    = "Allow"
+    actions   = ["ecr:DescribeImages"]
+    resources = [aws_ecr_repository.images["train"].arn]
+  }
+
+  statement {
     sid       = "ReadCurrentPricing"
     effect    = "Allow"
     actions   = ["pricing:GetProducts"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "ReadManagedSpotTrainingQuota"
+    effect    = "Allow"
+    actions   = ["servicequotas:GetServiceQuota"]
     resources = ["*"]
   }
 
@@ -719,6 +862,188 @@ resource "aws_iam_role_policy" "github_training" {
   policy = data.aws_iam_policy_document.github_training.json
 }
 
+data "aws_iam_policy_document" "github_baseline" {
+  statement {
+    sid       = "LocateBaselineArtifactBucket"
+    effect    = "Allow"
+    actions   = ["s3:GetBucketLocation"]
+    resources = [aws_s3_bucket.artifacts.arn]
+  }
+
+  statement {
+    sid       = "ListOnlyValidationInputsAndBaselineRuns"
+    effect    = "Allow"
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.artifacts.arn]
+
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["data/processed/*", "runs/baseline-run-*/*"]
+    }
+  }
+
+  statement {
+    sid    = "ReadOnlyValidationInputs"
+    effect = "Allow"
+    actions = [
+      "s3:GetObject",
+      "s3:GetObjectAttributes",
+      "s3:GetObjectVersion",
+    ]
+    resources = [
+      "${aws_s3_bucket.artifacts.arn}/data/processed/*/artifact-checksums.json",
+      "${aws_s3_bucket.artifacts.arn}/data/processed/*/manifest.json",
+      "${aws_s3_bucket.artifacts.arn}/data/processed/*/validation.parquet",
+    ]
+  }
+
+  statement {
+    sid    = "PublishOnlyValidationBaselineRuns"
+    effect = "Allow"
+    actions = [
+      "s3:AbortMultipartUpload",
+      "s3:PutObject",
+      "s3:PutObjectTagging",
+    ]
+    resources = ["${aws_s3_bucket.artifacts.arn}/runs/baseline-run-*/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "github_baseline" {
+  name   = "validation-baseline-runs-only"
+  role   = aws_iam_role.github_workflow["aws-baseline"].id
+  policy = data.aws_iam_policy_document.github_baseline.json
+}
+
+data "aws_iam_policy_document" "github_trial_selection" {
+  statement {
+    sid       = "LocateTrialArtifactBucket"
+    effect    = "Allow"
+    actions   = ["s3:GetBucketLocation"]
+    resources = [aws_s3_bucket.artifacts.arn]
+  }
+
+  statement {
+    sid       = "ListOnlyTrainingRunsAndTrialSelection"
+    effect    = "Allow"
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.artifacts.arn]
+
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["runs/*"]
+    }
+  }
+
+  statement {
+    sid    = "ReadOnlyTrainingDeclarationsAndArtifacts"
+    effect = "Allow"
+    actions = [
+      "s3:GetObject",
+      "s3:GetObjectAttributes",
+      "s3:GetObjectVersion",
+    ]
+    resources = ["${aws_s3_bucket.artifacts.arn}/runs/*"]
+  }
+
+  statement {
+    sid    = "PublishOnlyImmutableTrialSelection"
+    effect = "Allow"
+    actions = [
+      "s3:AbortMultipartUpload",
+      "s3:PutObject",
+      "s3:PutObjectTagging",
+    ]
+    resources = [
+      "${aws_s3_bucket.artifacts.arn}/runs/trial-selection/trial-selection-*/*",
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "github_trial_selection" {
+  name   = "validation-trial-selection-only"
+  role   = aws_iam_role.github_workflow["aws-trial-selection"].id
+  policy = data.aws_iam_policy_document.github_trial_selection.json
+}
+
+data "aws_iam_policy_document" "github_benchmark" {
+  statement {
+    sid    = "LocateBenchmarkArtifactBucket"
+    effect = "Allow"
+    actions = [
+      "s3:GetBucketLocation",
+      "s3:GetBucketVersioning",
+    ]
+    resources = [aws_s3_bucket.artifacts.arn]
+  }
+
+  statement {
+    sid    = "ListOnlyBenchmarkEvidence"
+    effect = "Allow"
+    actions = [
+      "s3:ListBucket",
+    ]
+    resources = [aws_s3_bucket.artifacts.arn]
+
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["promoted/*", "public/*"]
+    }
+  }
+
+  statement {
+    sid    = "ReadOnlyPromotedAndDeploymentEvidence"
+    effect = "Allow"
+    actions = [
+      "s3:GetObject",
+      "s3:GetObjectAttributes",
+      "s3:GetObjectVersion",
+    ]
+    resources = [
+      "${aws_s3_bucket.artifacts.arn}/promoted/*",
+      "${aws_s3_bucket.artifacts.arn}/public/*/deployment-evidence.json",
+    ]
+  }
+
+  statement {
+    sid    = "PublishOnlyImmutablePerformanceEvidence"
+    effect = "Allow"
+    actions = [
+      "s3:AbortMultipartUpload",
+      "s3:PutObject",
+      "s3:PutObjectTagging",
+    ]
+    resources = [
+      "${aws_s3_bucket.artifacts.arn}/public/*/performance/runs/github-*-attempt-*/sha256-*/*",
+    ]
+  }
+
+  statement {
+    sid    = "ReadOnlyBoundedRankerConfiguration"
+    effect = "Allow"
+    actions = [
+      "lambda:GetAlias",
+      "lambda:GetFunction",
+      "lambda:GetFunctionConfiguration",
+      "lambda:GetFunctionConcurrency",
+      "lambda:GetProvisionedConcurrencyConfig",
+    ]
+    resources = [
+      "arn:${local.partition}:lambda:${var.aws_region}:${local.account_id}:function:${local.name}-api",
+      "arn:${local.partition}:lambda:${var.aws_region}:${local.account_id}:function:${local.name}-api:*",
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "github_benchmark" {
+  name   = "read-serving-publish-performance-only"
+  role   = aws_iam_role.github_workflow["production-benchmark"].id
+  policy = data.aws_iam_policy_document.github_benchmark.json
+}
+
 data "aws_iam_policy_document" "github_baseline_release" {
   statement {
     sid       = "VerifyEvaluationImageDigest"
@@ -761,6 +1086,7 @@ data "aws_iam_policy_document" "github_baseline_release" {
     actions = [
       "s3:GetObject",
       "s3:GetObjectAttributes",
+      "s3:GetObjectTagging",
       "s3:GetObjectVersion",
     ]
     resources = [
@@ -768,7 +1094,7 @@ data "aws_iam_policy_document" "github_baseline_release" {
       "${aws_s3_bucket.artifacts.arn}/runs/*/curated-queries.json",
       "${aws_s3_bucket.artifacts.arn}/runs/*/manifest.json",
       "${aws_s3_bucket.artifacts.arn}/runs/*/summary.json",
-      "${aws_s3_bucket.artifacts.arn}/promoted/current.json",
+      "${aws_s3_bucket.artifacts.arn}/promoted/*",
     ]
   }
 
@@ -804,6 +1130,13 @@ data "aws_iam_policy_document" "github_heldout_release" {
     sid       = "ReadCurrentPricing"
     effect    = "Allow"
     actions   = ["pricing:GetProducts"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "ReadProcessingJobQuota"
+    effect    = "Allow"
+    actions   = ["servicequotas:GetServiceQuota"]
     resources = ["*"]
   }
 
@@ -887,20 +1220,37 @@ resource "aws_iam_role_policy" "github_heldout_release" {
 
 data "aws_iam_policy_document" "github_terraform" {
   statement {
-    sid    = "UseOnlyProjectTerraformState"
+    sid    = "ListOnlyProductionTerraformState"
     effect = "Allow"
     actions = [
-      "s3:DeleteObject",
       "s3:GetBucketLocation",
       "s3:GetBucketVersioning",
-      "s3:GetObject",
       "s3:ListBucket",
-      "s3:PutObject",
     ]
-    resources = [
-      "arn:${local.partition}:s3:::${local.state_bucket_name}",
-      "arn:${local.partition}:s3:::${local.state_bucket_name}/${var.project_name}/*",
-    ]
+    resources = ["arn:${local.partition}:s3:::${local.state_bucket_name}"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "s3:prefix"
+      values = [
+        "${var.project_name}/prod/terraform.tfstate",
+        "${var.project_name}/prod/terraform.tfstate.tflock",
+      ]
+    }
+  }
+
+  statement {
+    sid       = "ReadWriteOnlyProductionTerraformState"
+    effect    = "Allow"
+    actions   = ["s3:GetObject", "s3:PutObject"]
+    resources = ["arn:${local.partition}:s3:::${local.state_bucket_name}/${var.project_name}/prod/terraform.tfstate"]
+  }
+
+  statement {
+    sid       = "ManageOnlyProductionTerraformLock"
+    effect    = "Allow"
+    actions   = ["s3:DeleteObject", "s3:GetObject", "s3:PutObject"]
+    resources = ["arn:${local.partition}:s3:::${local.state_bucket_name}/${var.project_name}/prod/terraform.tfstate.tflock"]
   }
 
   statement {
@@ -911,75 +1261,27 @@ data "aws_iam_policy_document" "github_terraform" {
       "iam:GetRole",
       "iam:GetRolePolicy",
       "iam:ListAttachedRolePolicies",
-      "iam:ListRolePolicies",
-      "iam:ListRoleTags",
-    ]
-    resources = concat(
-      [
-        aws_iam_role.sagemaker_training.arn,
-        aws_iam_role.sagemaker_processing.arn,
-        aws_iam_role.lambda.arn,
-        aws_iam_role.github_deployment.arn,
-      ],
-      values(aws_iam_role.github_workflow)[*].arn,
-      var.create_github_oidc_provider ? [aws_iam_openid_connect_provider.github[0].arn] : [var.existing_github_oidc_provider_arn],
-    )
-  }
-
-  statement {
-    sid    = "ManageOnlyProjectRolesAndInlinePolicies"
-    effect = "Allow"
-    actions = [
-      "iam:CreateRole",
-      "iam:DeleteRole",
-      "iam:DeleteRolePolicy",
-      "iam:GetRole",
-      "iam:GetRolePolicy",
       "iam:ListInstanceProfilesForRole",
       "iam:ListRolePolicies",
       "iam:ListRoleTags",
-      "iam:PutRolePolicy",
-      "iam:TagRole",
-      "iam:UntagRole",
-      "iam:UpdateAssumeRolePolicy",
-      "iam:UpdateRole",
-      "iam:UpdateRoleDescription",
     ]
     resources = concat(
       [
-        aws_iam_role.sagemaker_training.arn,
-        aws_iam_role.sagemaker_processing.arn,
-        aws_iam_role.lambda.arn,
-        aws_iam_role.github_deployment.arn,
+        local.sagemaker_training_role_arn,
+        local.sagemaker_processing_role_arn,
+        local.lambda_role_arn,
+        local.budget_kill_switch_role_arn,
+        local.github_deployment_role_arn,
       ],
-      values(aws_iam_role.github_workflow)[*].arn,
+      values(local.github_workflow_role_arns),
+      [local.github_oidc_provider_arn],
     )
-  }
-
-  dynamic "statement" {
-    for_each = var.create_github_oidc_provider ? [1] : []
-    content {
-      sid    = "ManageProjectCreatedGithubOidcProvider"
-      effect = "Allow"
-      actions = [
-        "iam:AddClientIDToOpenIDConnectProvider",
-        "iam:CreateOpenIDConnectProvider",
-        "iam:DeleteOpenIDConnectProvider",
-        "iam:RemoveClientIDFromOpenIDConnectProvider",
-        "iam:TagOpenIDConnectProvider",
-        "iam:UntagOpenIDConnectProvider",
-        "iam:UpdateOpenIDConnectProviderThumbprint",
-      ]
-      resources = [aws_iam_openid_connect_provider.github[0].arn]
-    }
   }
 
   statement {
     sid    = "ManageProjectBuckets"
     effect = "Allow"
     actions = [
-      "s3:DeleteBucketPolicy",
-      "s3:DeleteBucket",
       "s3:CreateBucket",
       "s3:GetAccelerateConfiguration",
       "s3:GetBucketAcl",
@@ -998,15 +1300,14 @@ data "aws_iam_policy_document" "github_terraform" {
       "s3:GetReplicationConfiguration",
       "s3:PutLifecycleConfiguration",
       "s3:PutBucketOwnershipControls",
-      "s3:PutBucketPolicy",
       "s3:PutBucketPublicAccessBlock",
       "s3:PutBucketTagging",
       "s3:PutBucketVersioning",
       "s3:PutEncryptionConfiguration",
     ]
     resources = [
-      aws_s3_bucket.artifacts.arn,
-      aws_s3_bucket.site.arn,
+      local.artifact_bucket_arn,
+      local.site_bucket_arn,
     ]
   }
 
@@ -1014,9 +1315,6 @@ data "aws_iam_policy_document" "github_terraform" {
     sid    = "ManageProjectRepositoryConfiguration"
     effect = "Allow"
     actions = [
-      "ecr:DeleteLifecyclePolicy",
-      "ecr:DeleteRepositoryPolicy",
-      "ecr:DeleteRepository",
       "ecr:CreateRepository",
       "ecr:DescribeRepositories",
       "ecr:GetLifecyclePolicy",
@@ -1030,34 +1328,59 @@ data "aws_iam_policy_document" "github_terraform" {
       "ecr:TagResource",
       "ecr:UntagResource",
     ]
-    resources = values(aws_ecr_repository.images)[*].arn
+    resources = values(local.image_repository_arns)
   }
 
   statement {
-    sid    = "ManageProjectApiGateway"
-    effect = "Allow"
-    actions = [
-      "apigateway:DELETE",
-      "apigateway:GET",
-      "apigateway:PATCH",
-      "apigateway:POST",
-      "apigateway:PUT",
-    ]
+    sid       = "ReadApiGatewayInventory"
+    effect    = "Allow"
+    actions   = ["apigateway:GET"]
     resources = ["arn:${local.partition}:apigateway:${var.aws_region}::/apis*"]
   }
 
   statement {
-    sid    = "ManageProjectCloudFront"
+    sid       = "CreateTaggedProjectApis"
+    effect    = "Allow"
+    actions   = ["apigateway:POST"]
+    resources = ["arn:${local.partition}:apigateway:${var.aws_region}::/apis"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/Project"
+      values   = [var.project_name]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/Environment"
+      values   = [var.environment]
+    }
+  }
+
+  statement {
+    sid       = "ReconcileTaggedProjectApis"
+    effect    = "Allow"
+    actions   = ["apigateway:PATCH", "apigateway:POST", "apigateway:PUT"]
+    resources = ["arn:${local.partition}:apigateway:${var.aws_region}::/apis*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/Project"
+      values   = [var.project_name]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/Environment"
+      values   = [var.environment]
+    }
+  }
+
+  statement {
+    sid    = "ReadCloudFrontInventory"
     effect = "Allow"
     actions = [
-      "cloudfront:CreateFunction",
-      "cloudfront:CreateDistribution",
-      "cloudfront:CreateOriginAccessControl",
-      "cloudfront:CreateResponseHeadersPolicy",
-      "cloudfront:DeleteFunction",
-      "cloudfront:DeleteDistribution",
-      "cloudfront:DeleteOriginAccessControl",
-      "cloudfront:DeleteResponseHeadersPolicy",
+      "cloudfront:DescribeFunction",
       "cloudfront:GetCachePolicy",
       "cloudfront:GetDistribution",
       "cloudfront:GetDistributionConfig",
@@ -1065,16 +1388,64 @@ data "aws_iam_policy_document" "github_terraform" {
       "cloudfront:GetOriginAccessControl",
       "cloudfront:GetOriginRequestPolicy",
       "cloudfront:GetResponseHeadersPolicy",
-      "cloudfront:DescribeFunction",
       "cloudfront:ListTagsForResource",
-      "cloudfront:PublishFunction",
-      "cloudfront:TagResource",
-      "cloudfront:UpdateDistribution",
-      "cloudfront:UpdateFunction",
-      "cloudfront:UpdateOriginAccessControl",
-      "cloudfront:UpdateResponseHeadersPolicy",
     ]
     resources = ["*"]
+  }
+
+  statement {
+    sid       = "CreateUntaggedCloudFrontPrimitives"
+    effect    = "Allow"
+    actions   = ["cloudfront:CreateOriginAccessControl", "cloudfront:CreateResponseHeadersPolicy"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "CreateTaggedCloudFrontResources"
+    effect    = "Allow"
+    actions   = ["cloudfront:CreateDistribution", "cloudfront:CreateFunction", "cloudfront:TagResource"]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/Project"
+      values   = [var.project_name]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/Environment"
+      values   = [var.environment]
+    }
+  }
+
+  statement {
+    sid    = "ReconcileTaggedCloudFrontResources"
+    effect = "Allow"
+    actions = [
+      "cloudfront:CreateInvalidation",
+      "cloudfront:PublishFunction",
+      "cloudfront:TagResource",
+      "cloudfront:UntagResource",
+      "cloudfront:UpdateDistribution",
+      "cloudfront:UpdateFunction",
+    ]
+    resources = [
+      "arn:${local.partition}:cloudfront::${local.account_id}:distribution/*",
+      "arn:${local.partition}:cloudfront::${local.account_id}:function/${local.name}-spa-rewrite",
+    ]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/Project"
+      values   = [var.project_name]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/Environment"
+      values   = [var.environment]
+    }
   }
 
   statement {
@@ -1084,9 +1455,6 @@ data "aws_iam_policy_document" "github_terraform" {
       "lambda:AddPermission",
       "lambda:CreateAlias",
       "lambda:CreateFunction",
-      "lambda:DeleteAlias",
-      "lambda:DeleteFunction",
-      "lambda:DeleteFunctionConcurrency",
       "lambda:GetAlias",
       "lambda:GetFunction",
       "lambda:GetFunctionConfiguration",
@@ -1097,7 +1465,6 @@ data "aws_iam_policy_document" "github_terraform" {
       "lambda:ListTags",
       "lambda:PublishVersion",
       "lambda:PutFunctionConcurrency",
-      "lambda:RemovePermission",
       "lambda:TagResource",
       "lambda:UntagResource",
       "lambda:UpdateAlias",
@@ -1112,9 +1479,10 @@ data "aws_iam_policy_document" "github_terraform" {
     effect  = "Allow"
     actions = ["iam:PassRole"]
     resources = [
-      aws_iam_role.sagemaker_training.arn,
-      aws_iam_role.sagemaker_processing.arn,
-      aws_iam_role.lambda.arn,
+      local.sagemaker_training_role_arn,
+      local.sagemaker_processing_role_arn,
+      local.lambda_role_arn,
+      local.budget_kill_switch_role_arn,
     ]
 
     condition {
@@ -1128,47 +1496,73 @@ data "aws_iam_policy_document" "github_terraform" {
   }
 
   statement {
-    sid    = "ManageObservability"
+    sid       = "ReadGlobalObservabilityInventory"
+    effect    = "Allow"
+    actions   = ["cloudwatch:DescribeAlarms", "logs:DescribeLogGroups"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid    = "ManageProjectAlarms"
     effect = "Allow"
     actions = [
-      "cloudwatch:DeleteAlarms",
-      "cloudwatch:DescribeAlarms",
       "cloudwatch:ListTagsForResource",
       "cloudwatch:PutMetricAlarm",
       "cloudwatch:TagResource",
       "cloudwatch:UntagResource",
-      "events:DeleteRule",
+    ]
+    resources = local.project_alarm_arns
+  }
+
+  statement {
+    sid    = "ManageProjectEvents"
+    effect = "Allow"
+    actions = [
       "events:DescribeRule",
       "events:ListTagsForResource",
       "events:ListTargetsByRule",
       "events:PutRule",
       "events:PutTargets",
-      "events:RemoveTargets",
       "events:TagResource",
       "events:UntagResource",
+    ]
+    resources = local.project_event_rule_arns
+  }
+
+  statement {
+    sid    = "ManageProjectLogs"
+    effect = "Allow"
+    actions = [
       "logs:CreateLogGroup",
-      "logs:DeleteLogGroup",
-      "logs:DeleteMetricFilter",
-      "logs:DescribeLogGroups",
       "logs:DescribeMetricFilters",
       "logs:ListTagsForResource",
       "logs:PutMetricFilter",
       "logs:PutRetentionPolicy",
       "logs:TagResource",
       "logs:UntagResource",
+    ]
+    resources = local.project_log_resource_arns
+  }
+
+  statement {
+    sid    = "ManageProjectNotification"
+    effect = "Allow"
+    actions = [
+      "sns:CreateTopic",
       "sns:GetSubscriptionAttributes",
       "sns:GetTopicAttributes",
-      "sns:CreateTopic",
-      "sns:DeleteTopic",
       "sns:ListSubscriptionsByTopic",
       "sns:ListTagsForResource",
       "sns:SetTopicAttributes",
       "sns:Subscribe",
       "sns:TagResource",
-      "sns:Unsubscribe",
       "sns:UntagResource",
     ]
-    resources = ["*"]
+    resources = [
+      local.notification_topic_arn,
+      local.budget_kill_switch_topic_arn,
+      "${local.budget_kill_switch_topic_arn}:*",
+    ]
   }
 
   statement {
@@ -1178,9 +1572,6 @@ data "aws_iam_policy_document" "github_terraform" {
       "budgets:CreateBudget",
       "budgets:CreateNotification",
       "budgets:CreateSubscriber",
-      "budgets:DeleteBudget",
-      "budgets:DeleteNotification",
-      "budgets:DeleteSubscriber",
       "budgets:DescribeBudget",
       "budgets:DescribeNotificationsForBudget",
       "budgets:DescribeSubscribersForNotification",
@@ -1194,12 +1585,277 @@ data "aws_iam_policy_document" "github_terraform" {
 }
 
 resource "aws_iam_role_policy" "github_terraform" {
-  for_each = {
-    aws-infrastructure = aws_iam_role.github_workflow["aws-infrastructure"].id
-    production         = aws_iam_role.github_deployment.id
+  name   = "project-terraform-reconciliation"
+  role   = aws_iam_role.github_workflow["aws-infrastructure"].id
+  policy = data.aws_iam_policy_document.github_terraform.minified_json
+
+  lifecycle {
+    precondition {
+      condition     = length(data.aws_iam_policy_document.github_terraform.minified_json) <= 10240
+      error_message = "Infrastructure role inline policy exceeds the AWS per-role character quota."
+    }
+  }
+}
+
+# Production can refresh the complete Terraform state but can write only the serving
+# surface. It receives no identity-creation, trust, boundary, or inline-policy mutation.
+data "aws_iam_policy_document" "github_production_terraform" {
+  statement {
+    effect    = "Allow"
+    actions   = ["s3:GetBucketLocation", "s3:GetBucketVersioning", "s3:ListBucket"]
+    resources = ["arn:${local.partition}:s3:::${local.state_bucket_name}"]
+    condition {
+      test     = "StringEquals"
+      variable = "s3:prefix"
+      values = [
+        "${var.project_name}/prod/terraform.tfstate",
+        "${var.project_name}/prod/terraform.tfstate.tflock",
+      ]
+    }
   }
 
-  name   = "project-terraform-reconciliation"
-  role   = each.value
-  policy = data.aws_iam_policy_document.github_terraform.json
+  statement {
+    effect    = "Allow"
+    actions   = ["s3:GetObject", "s3:PutObject"]
+    resources = ["arn:${local.partition}:s3:::${local.state_bucket_name}/${var.project_name}/prod/terraform.tfstate"]
+  }
+
+  statement {
+    effect    = "Allow"
+    actions   = ["s3:DeleteObject", "s3:GetObject", "s3:PutObject"]
+    resources = ["arn:${local.partition}:s3:::${local.state_bucket_name}/${var.project_name}/prod/terraform.tfstate.tflock"]
+  }
+
+  statement {
+    effect = "Allow"
+    actions = [
+      "iam:GetOpenIDConnectProvider",
+      "iam:GetRole",
+      "iam:GetRolePolicy",
+      "iam:ListAttachedRolePolicies",
+      "iam:ListInstanceProfilesForRole",
+      "iam:ListRolePolicies",
+      "iam:ListRoleTags",
+    ]
+    resources = concat(
+      [
+        local.sagemaker_training_role_arn,
+        local.sagemaker_processing_role_arn,
+        local.lambda_role_arn,
+        local.budget_kill_switch_role_arn,
+        local.github_deployment_role_arn,
+      ],
+      values(local.github_workflow_role_arns),
+      [local.github_oidc_provider_arn],
+    )
+  }
+
+  statement {
+    effect = "Allow"
+    actions = [
+      "s3:GetAccelerateConfiguration",
+      "s3:GetBucketAcl",
+      "s3:GetBucketCORS",
+      "s3:GetBucketLogging",
+      "s3:GetBucketObjectLockConfiguration",
+      "s3:GetBucketOwnershipControls",
+      "s3:GetBucketPolicy",
+      "s3:GetBucketPublicAccessBlock",
+      "s3:GetBucketRequestPayment",
+      "s3:GetBucketTagging",
+      "s3:GetBucketWebsite",
+      "s3:GetEncryptionConfiguration",
+      "s3:GetLifecycleConfiguration",
+      "s3:GetReplicationConfiguration",
+    ]
+    resources = [local.artifact_bucket_arn, local.site_bucket_arn]
+  }
+
+  statement {
+    effect = "Allow"
+    actions = [
+      "ecr:DescribeRepositories",
+      "ecr:GetLifecyclePolicy",
+      "ecr:GetLifecyclePolicyPreview",
+      "ecr:GetRepositoryPolicy",
+      "ecr:ListTagsForResource",
+    ]
+    resources = values(local.image_repository_arns)
+  }
+
+  statement {
+    effect = "Allow"
+    actions = [
+      "apigateway:GET",
+      "cloudfront:DescribeFunction",
+      "cloudfront:GetCachePolicy",
+      "cloudfront:GetDistribution",
+      "cloudfront:GetDistributionConfig",
+      "cloudfront:GetFunction",
+      "cloudfront:GetOriginAccessControl",
+      "cloudfront:GetOriginRequestPolicy",
+      "cloudfront:GetResponseHeadersPolicy",
+      "cloudfront:ListTagsForResource",
+      "cloudwatch:DescribeAlarms",
+      "cloudwatch:ListTagsForResource",
+      "events:DescribeRule",
+      "events:ListTagsForResource",
+      "events:ListTargetsByRule",
+      "lambda:GetFunctionConcurrency",
+      "lambda:GetPolicy",
+      "lambda:ListTags",
+      "logs:DescribeLogGroups",
+      "logs:DescribeMetricFilters",
+      "logs:ListTagsForResource",
+      "sns:GetSubscriptionAttributes",
+      "sns:GetTopicAttributes",
+      "sns:ListSubscriptionsByTopic",
+      "sns:ListTagsForResource",
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    effect    = "Allow"
+    actions   = ["budgets:DescribeBudget", "budgets:DescribeNotificationsForBudget", "budgets:DescribeSubscribersForNotification", "budgets:ViewBudget"]
+    resources = ["arn:${local.partition}:budgets::${local.account_id}:budget/${local.name}-*"]
+  }
+
+  statement {
+    effect    = "Allow"
+    actions   = ["apigateway:POST"]
+    resources = ["arn:${local.partition}:apigateway:${var.aws_region}::/apis"]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/Project"
+      values   = [var.project_name]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/Environment"
+      values   = [var.environment]
+    }
+  }
+
+  statement {
+    effect    = "Allow"
+    actions   = ["apigateway:PATCH", "apigateway:POST", "apigateway:PUT"]
+    resources = ["arn:${local.partition}:apigateway:${var.aws_region}::/apis*"]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/Project"
+      values   = [var.project_name]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/Environment"
+      values   = [var.environment]
+    }
+  }
+
+  statement {
+    effect    = "Allow"
+    actions   = ["cloudfront:CreateOriginAccessControl", "cloudfront:CreateResponseHeadersPolicy"]
+    resources = ["*"]
+  }
+
+  statement {
+    effect    = "Allow"
+    actions   = ["cloudfront:CreateDistribution", "cloudfront:CreateFunction", "cloudfront:TagResource"]
+    resources = ["*"]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/Project"
+      values   = [var.project_name]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/Environment"
+      values   = [var.environment]
+    }
+  }
+
+  statement {
+    effect  = "Allow"
+    actions = ["cloudfront:PublishFunction", "cloudfront:TagResource", "cloudfront:UntagResource", "cloudfront:UpdateDistribution", "cloudfront:UpdateFunction"]
+    resources = [
+      "arn:${local.partition}:cloudfront::${local.account_id}:distribution/*",
+      "arn:${local.partition}:cloudfront::${local.account_id}:function/${local.name}-spa-rewrite",
+    ]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/Project"
+      values   = [var.project_name]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/Environment"
+      values   = [var.environment]
+    }
+  }
+
+  statement {
+    effect    = "Allow"
+    actions   = ["cloudwatch:PutMetricAlarm", "cloudwatch:TagResource", "cloudwatch:UntagResource"]
+    resources = ["arn:${local.partition}:cloudwatch:${var.aws_region}:${local.account_id}:alarm:${local.name}-*"]
+  }
+
+  statement {
+    effect = "Allow"
+    actions = [
+      "lambda:AddPermission",
+      "lambda:CreateAlias",
+      "lambda:CreateFunction",
+      "lambda:TagResource",
+      "lambda:UntagResource",
+    ]
+    resources = ["arn:${local.partition}:lambda:${var.aws_region}:${local.account_id}:function:${local.name}-api*"]
+  }
+
+  statement {
+    sid    = "ManageOnlyBudgetKillSwitchSubscription"
+    effect = "Allow"
+    actions = [
+      "sns:GetSubscriptionAttributes",
+      "sns:ListSubscriptionsByTopic",
+      "sns:Subscribe",
+    ]
+    resources = [
+      local.budget_kill_switch_topic_arn,
+      "${local.budget_kill_switch_topic_arn}:*",
+    ]
+  }
+
+  statement {
+    effect    = "Allow"
+    actions   = ["logs:CreateLogGroup", "logs:PutMetricFilter", "logs:PutRetentionPolicy", "logs:TagResource", "logs:UntagResource"]
+    resources = local.project_log_resource_arns
+  }
+
+  statement {
+    effect    = "Allow"
+    actions   = ["s3:PutBucketPolicy"]
+    resources = [local.site_bucket_arn]
+  }
+
+}
+
+data "aws_iam_policy_document" "github_production" {
+  source_policy_documents = [
+    data.aws_iam_policy_document.github_deployment.minified_json,
+    data.aws_iam_policy_document.github_production_terraform.minified_json,
+  ]
+}
+
+resource "aws_iam_role_policy" "github_deployment" {
+  name   = "project-production-serving-only"
+  role   = aws_iam_role.github_deployment.id
+  policy = data.aws_iam_policy_document.github_production.minified_json
+
+  lifecycle {
+    precondition {
+      condition     = length(data.aws_iam_policy_document.github_production.minified_json) <= 10240
+      error_message = "Production role inline policy exceeds the AWS per-role character quota."
+    }
+  }
 }

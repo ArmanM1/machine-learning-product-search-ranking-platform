@@ -19,7 +19,7 @@
     --ink: #181915;
     --ink-soft: #34352f;
     --muted: #6d6e65;
-    --quiet: #96968c;
+    --quiet: #686961;
     --rule: #d8d5cc;
     --rule-dark: #bcb9af;
     --accent: #a54831;
@@ -100,7 +100,8 @@
 }
 
 @layer components {
-  .app-shell { min-height: 100vh; }
+  .app-shell { min-width: 0; min-height: 100vh; }
+  #main-content { min-width: 0; }
   .site-header {
     position: sticky;
     z-index: 30;
@@ -203,6 +204,7 @@
 
   .page-container {
     width: min(100%, calc(var(--container) + var(--gutter) * 2));
+    min-width: 0;
     margin: 0 auto;
     padding: 0 var(--gutter) 6rem;
     animation: enter 380ms ease both;
@@ -297,7 +299,14 @@
   .metric-value { margin-top: 0.75rem; color: inherit; font-family: var(--display); font-size: clamp(2.8rem, 5vw, 4.8rem); line-height: 1; letter-spacing: -0.045em; }
   .metric-note { margin-top: 1.4rem; font-size: 0.76rem; }
 
-  .table-scroll { overflow-x: auto; scrollbar-width: thin; }
+  .table-scroll {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: thin;
+  }
   table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
   th, td { padding: 1rem 0.85rem; border-bottom: 1px solid var(--rule); text-align: left; vertical-align: middle; }
   th { color: var(--muted); font-size: 0.63rem; font-weight: 750; letter-spacing: 0.09em; text-transform: uppercase; white-space: nowrap; }
@@ -489,13 +498,14 @@
   .gate-card p { margin-top: 0.8rem; font-size: 0.76rem; }
   .evaluation-metrics { margin: 6rem 0; }
   .metric-grid.compact .metric-card { min-height: 230px; }
-  .report-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  .report-grid { min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+  .report-grid > *, .report-table-card { min-width: 0; max-width: 100%; }
   .report-table-card { padding: 2rem; border: 1px solid var(--rule); background: var(--paper); }
   .report-table-card header { min-height: 95px; }
   .report-table-card h2 { font-size: 1.8rem; }
-  .chart-card { margin-top: 1rem; padding: clamp(1.5rem, 4vw, 3rem); border: 1px solid var(--rule); background: var(--paper); }
+  .chart-card { min-width: 0; max-width: 100%; margin-top: 1rem; padding: clamp(1.5rem, 4vw, 3rem); border: 1px solid var(--rule); background: var(--paper); }
   .chart-card figcaption p:last-child { margin-top: 0.6rem; font-size: 0.78rem; }
-  .chart-wrap { margin-top: 2rem; }
+  .chart-wrap { min-width: 0; max-width: 100%; margin-top: 2rem; }
   .chart-wrap svg { width: 100%; overflow: visible; }
   .chart-grid { stroke: var(--rule); stroke-width: 1; }
   .chart-tick, .chart-axis-label { fill: var(--muted); font-family: var(--sans); font-size: 10px; }
@@ -506,6 +516,7 @@
   .chart-point text { fill: var(--ink); font-family: var(--sans); font-size: 10px; font-weight: 650; }
   .evaluation-notes { margin-top: 1rem; padding: 2rem; border: 1px solid var(--rule); display: grid; grid-template-columns: auto 1fr; gap: 1.2rem; }
   .evaluation-notes > svg { color: var(--accent); }
+  .evaluation-notes > div { min-width: 0; }
   .evaluation-notes h2 { font-size: 1.8rem; }
   .evaluation-notes dl { margin: 1.5rem 0; display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--rule); }
   .evaluation-notes dl div { padding: 1rem 0.8rem 0 0; }
@@ -536,7 +547,7 @@
   .outcome-label { padding: 0.23rem 0.45rem; background: #e8e7e2; font-size: 0.58rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; }
   .outcome-label.loss { background: var(--danger-pale); color: var(--danger); }
   .outcome-label.win { background: var(--sage-pale); color: var(--sage); }
-  .outcome-label.tie { background: var(--gold-pale); color: var(--gold); }
+  .outcome-label.tie { background: var(--gold-pale); color: #775510; }
   .example-delta { font-family: var(--mono); font-size: 0.72rem; font-weight: 750; }
   .example-type { margin-top: 2.2rem; color: var(--muted); font-size: 0.63rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
   .failure-card h3 { margin-top: 0.6rem; font-family: var(--display); font-size: clamp(1.8rem, 3vw, 2.5rem); font-weight: 500; }
@@ -652,9 +663,15 @@
     .brand-copy small { display: none; }
     .brand-mark { width: 29px; height: 29px; }
     .mode-badge { padding: 0.36rem 0.48rem; font-size: 0.57rem; }
-    .primary-nav { justify-content: flex-start; gap: 1.25rem; overflow-x: auto; scrollbar-width: none; }
-    .primary-nav::-webkit-scrollbar { display: none; }
-    .primary-nav a { flex: 0 0 auto; font-size: 0.69rem; }
+    .primary-nav {
+      width: 100%;
+      display: grid;
+      grid-template-columns: repeat(3, max-content);
+      justify-content: space-between;
+      gap: 0 1rem;
+      overflow: visible;
+    }
+    .primary-nav a { font-size: 0.69rem; }
     .evidence-banner { align-items: flex-start; justify-content: flex-start; padding-block: 0.7rem; }
     .page-container { padding-bottom: 4rem; }
     .page-intro { min-height: 310px; padding-top: 3.5rem; }

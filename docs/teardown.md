@@ -8,7 +8,12 @@ Teardown is destructive and requires exact environment selection plus owner auth
 
 ## Inventory
 
-The disposable environment contains the resources listed in `docs/cloud-deployment.md`: two data/site buckets, three ECR repositories, IAM workload/OIDC roles, optional OIDC provider, Lambda and two aliases, two HTTP APIs, CloudFront/OAC/header policy, logs/alarms, optional SNS/EventBridge, and optional budgets. SageMaker jobs are run resources, not Terraform resources. The state bucket is a separate protected bootstrap environment.
+The disposable environment contains the resources listed in `docs/cloud-deployment.md`: two data/site
+buckets, three ECR repositories, IAM workload/OIDC roles, optional OIDC provider, Lambda and two aliases,
+two HTTP APIs, CloudFront/OAC/header policy, logs/alarms, and—when public serving exists—the shutdown Lambda,
+dedicated role/log group, and recurring EventBridge expiry. The AWS Budget SNS trigger and budgets are
+optional and remain disabled under the owner waiver. SageMaker jobs are run resources, not Terraform
+resources. The state bucket and private campaign ledger are a separate protected bootstrap environment.
 
 ## Pre-destroy capture
 
@@ -21,13 +26,16 @@ The disposable environment contains the resources listed in `docs/cloud-deployme
 
 ## Ordered teardown
 
-1. Disable or remove public entry points using a reviewed Terraform plan: CloudFront, HTTP APIs, Lambda aliases/function, and alarms.
+1. Trip the public shutdown path and verify ranker concurrency is zero and CloudFront is disabled. Then remove
+   public entry points using a reviewed Terraform plan: CloudFront, HTTP APIs, Lambda aliases/function,
+   shutdown schedule/handler, and alarms.
 2. Delete non-retained ECR images only after recording the promoted and rollback image digests.
 3. Remove disposable S3 objects and every noncurrent version. Buckets use `force_destroy=false`, so Terraform refuses accidental deletion while data remains.
 4. Review a full `terraform plan -destroy`; confirm every address belongs to the exact project/environment.
 5. Run `terraform destroy` using temporary human credentials. GitHub CI is intentionally not granted broad identity teardown authority.
 6. Remove the repository-specific OIDC role last. Delete the account-wide GitHub OIDC provider only if inventory proves no other repository uses it.
-7. Retain the Terraform state bucket until all environment states and audit evidence have been archived and verified.
+7. Retain the Terraform state bucket and its campaign ledger until all environment states and audit evidence
+   have been archived and verified.
 
 Versioned S3 buckets cannot be emptied by deleting only current objects. Use an audited version-aware tool, list every target key/version first, and verify the bucket name equals the Terraform output. Do not paste a generic recursive deletion command into another account.
 
@@ -47,7 +55,8 @@ The bootstrap bucket has `prevent_destroy=true`. Retire it in a separate reviewe
 - [ ] No project SageMaker job or endpoint is running.
 - [ ] No project Lambda, HTTP API, CloudFront distribution, ECR repository, or non-state S3 bucket remains.
 - [ ] Project IAM roles are gone; shared OIDC provider decision is recorded.
-- [ ] Budgets/SNS subscriptions are removed if no longer wanted.
+- [ ] The public-expiry rule and shutdown handler are gone; optional budgets/SNS subscriptions are absent or
+  removed if no longer wanted.
 - [ ] Billing and applicable-credit views are checked after AWS’s normal reporting delay.
 - [ ] Sanitized teardown evidence records time, operator, account alias, region, plan hash, and residual resources.
 

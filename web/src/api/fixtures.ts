@@ -137,11 +137,30 @@ const queryProducts: Record<string, ProductSeed[]> = {
   ],
 }
 
-const baselineOrderByQuery: Record<string, string[]> = {
+const bm25OrderByQuery: Record<string, string[]> = {
   'query-fixture-001': ['kbd-03', 'kbd-01', 'kbd-04', 'kbd-02', 'kbd-06', 'kbd-05', 'kbd-10', 'kbd-07', 'kbd-08', 'kbd-09'],
   'query-fixture-002': ['run-01', 'run-03', 'run-04', 'run-02', 'run-05', 'run-06', 'run-08', 'run-09', 'run-07', 'run-10'],
   'query-fixture-003': ['watch-01', 'watch-02', 'watch-04', 'watch-03', 'watch-06', 'watch-05', 'watch-07', 'watch-10', 'watch-09', 'watch-08'],
   'query-fixture-004': ['mug-01', 'mug-02', 'mug-03', 'mug-04', 'mug-05', 'mug-06', 'mug-07', 'mug-08', 'mug-09', 'mug-10'],
+}
+
+const pretrainedRankingByQuery: Record<string, Array<readonly [string, number]>> = {
+  'query-fixture-001': [
+    ['kbd-01', 0.874], ['kbd-02', 0.842], ['kbd-08', 0.731], ['kbd-05', 0.704], ['kbd-06', 0.466],
+    ['kbd-03', 0.311], ['kbd-04', 0.188], ['kbd-07', 0.142], ['kbd-10', 0.091], ['kbd-09', 0.026],
+  ],
+  'query-fixture-002': [
+    ['run-01', 0.891], ['run-02', 0.824], ['run-03', 0.566], ['run-05', 0.541], ['run-06', 0.403],
+    ['run-08', 0.337], ['run-04', 0.204], ['run-07', 0.119], ['run-10', 0.076], ['run-09', 0.018],
+  ],
+  'query-fixture-003': [
+    ['watch-01', 0.861], ['watch-03', 0.817], ['watch-02', 0.789], ['watch-05', 0.776], ['watch-07', 0.741],
+    ['watch-04', 0.664], ['watch-06', 0.612], ['watch-10', 0.501], ['watch-08', 0.294], ['watch-09', 0.223],
+  ],
+  'query-fixture-004': [
+    ['mug-01', 0.887], ['mug-02', 0.862], ['mug-04', 0.819], ['mug-06', 0.783], ['mug-05', 0.601],
+    ['mug-03', 0.421], ['mug-08', 0.408], ['mug-07', 0.193], ['mug-09', 0.121], ['mug-10', 0.024],
+  ],
 }
 
 const candidateOrderByQuery: Record<string, string[]> = {
@@ -151,20 +170,38 @@ const candidateOrderByQuery: Record<string, string[]> = {
   'query-fixture-004': ['mug-01', 'mug-02', 'mug-04', 'mug-06', 'mug-05', 'mug-08', 'mug-03', 'mug-07', 'mug-09', 'mug-10'],
 }
 
-function rankedProducts(queryId: string, system: 'baseline' | 'candidate'): RankedProduct[] {
+type FixtureSystem = 'bm25' | 'pretrained' | 'candidate'
+
+function rankedProducts(queryId: string, system: FixtureSystem): RankedProduct[] {
   const products = queryProducts[queryId] ?? queryProducts['query-fixture-001']
   const byId = new Map(products.map((product) => [product.id, product]))
-  const order = system === 'baseline' ? baselineOrderByQuery[queryId] : candidateOrderByQuery[queryId]
-  return (order ?? baselineOrderByQuery['query-fixture-001']).map((id, index) => {
+  const pretrainedRanking = pretrainedRankingByQuery[queryId] ?? pretrainedRankingByQuery['query-fixture-001']
+  const order = system === 'bm25'
+    ? (bm25OrderByQuery[queryId] ?? bm25OrderByQuery['query-fixture-001'])
+    : system === 'pretrained'
+      ? pretrainedRanking.map(([id]) => id)
+      : (candidateOrderByQuery[queryId] ?? candidateOrderByQuery['query-fixture-001'])
+  const pretrainedScores = new Map(pretrainedRanking)
+
+  return order.map((id, index) => {
     const product = byId.get(id) ?? products[0]
     return {
       rank: index + 1,
       product_id: product.id,
       title: product.title,
-      score: system === 'baseline' ? product.baselineScore : product.candidateScore,
+      score: system === 'bm25'
+        ? product.baselineScore
+        : system === 'pretrained'
+          ? (pretrainedScores.get(id) ?? 0)
+          : product.candidateScore,
       benchmark_label: product.label,
     }
   })
+}
+
+const baselineFixtureByModelId: Record<string, { system: Exclude<FixtureSystem, 'candidate'>; latencyMs: number }> = {
+  'bm25-v1': { system: 'bm25', latencyMs: 18.6 },
+  'pretrained-v1': { system: 'pretrained', latencyMs: 394.1 },
 }
 
 export function makeFixtureComparison(
@@ -173,6 +210,10 @@ export function makeFixtureComparison(
   candidateModelId = 'candidate-v1',
 ): ComparisonResponse {
   const query = fixtureQueries.find((item) => item.query_id === queryId) ?? fixtureQueries[0]
+  const baselineFixture = baselineFixtureByModelId[baselineModelId]
+  if (!baselineFixture) {
+    throw new Error(`No illustrative fixture evidence is available for baseline ${baselineModelId}.`)
+  }
   return {
     evidence_mode: 'fixture',
     query_id: query.query_id,
@@ -180,8 +221,8 @@ export function makeFixtureComparison(
     candidate_count: query.candidate_count,
     baseline: {
       model_id: baselineModelId,
-      latency_ms: 18.6,
-      results: rankedProducts(query.query_id, 'baseline'),
+      latency_ms: baselineFixture.latencyMs,
+      results: rankedProducts(query.query_id, baselineFixture.system),
     },
     candidate: {
       model_id: candidateModelId,
@@ -229,6 +270,7 @@ export const fixtureOverview: OverviewData = {
   evaluation_scope: 'fixture',
   release_status: 'fixture',
   promoted_model: fixtureModels[2],
+  evaluated_candidate: fixtureModels[2],
   strongest_baseline: fixtureModels[1],
   evaluation_query_count: fixtureEvaluation.evaluation_query_count,
   primary_metric_name: 'Graded nDCG@10',
@@ -301,7 +343,7 @@ export const fixtureRun: PublicRunSummary = {
   status: 'fixture',
   configuration_hash: 'sha256:fixture-config-1f94fcd16f4c87c5',
   data_hash: DATASET_HASH,
-  split_manifest_hash: 'sha256:fixture-split-739cb260caa5bbd4',
+  split_manifest_hash: `sha256:${'7'.repeat(64)}`,
   code_commit: 'fixture-commit-not-a-real-sha',
   image_digest: 'sha256:fixture-image-04c87fb58d5aead2',
   model_artifact_checksum: MODEL_HASH,
@@ -316,6 +358,8 @@ export const fixtureRun: PublicRunSummary = {
   duration_seconds: null,
   cost_usd: null,
   cost_evidence: 'No cloud run has been recorded in fixture mode.',
+  training_provenance: null,
+  evaluation_provenance: null,
   test_access_count: 0,
   limitations: [
     'The platform reranks supplied query-specific candidates; it does not retrieve from a full catalog.',

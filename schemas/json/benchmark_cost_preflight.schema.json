@@ -1,0 +1,251 @@
+{
+  "$id": "https://schemas.example.invalid/search-rank/benchmark_cost_preflight.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "ProtectedFinancialSnapshot": {
+      "additionalProperties": false,
+      "description": "Sanitized provenance for protected spend and applicable-credit inputs.",
+      "properties": {
+        "age_seconds_at_validation": {
+          "maximum": 21600,
+          "minimum": 0,
+          "title": "Age Seconds At Validation",
+          "type": "integer"
+        },
+        "authorization_commit_sha": {
+          "pattern": "^[0-9a-f]{40}$",
+          "title": "Authorization Commit Sha",
+          "type": "string"
+        },
+        "authorization_input_sha256": {
+          "maxLength": 71,
+          "minLength": 71,
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Authorization Input Sha256",
+          "type": "string"
+        },
+        "authorization_operation_id": {
+          "maxLength": 71,
+          "minLength": 71,
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Authorization Operation Id",
+          "type": "string"
+        },
+        "authorization_reservation_sha256": {
+          "maxLength": 71,
+          "minLength": 71,
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Authorization Reservation Sha256",
+          "type": "string"
+        },
+        "authorization_workflow": {
+          "maxLength": 64,
+          "minLength": 2,
+          "pattern": "^[a-z0-9][a-z0-9-]*$",
+          "title": "Authorization Workflow",
+          "type": "string"
+        },
+        "campaign_spend_to_date_redacted": {
+          "const": true,
+          "title": "Campaign Spend To Date Redacted",
+          "type": "boolean"
+        },
+        "maximum_age_seconds": {
+          "const": 21600,
+          "title": "Maximum Age Seconds",
+          "type": "integer"
+        },
+        "observed_at": {
+          "format": "date-time",
+          "title": "Observed At",
+          "type": "string"
+        },
+        "receipt_binding_algorithm": {
+          "const": "hmac-sha256-v2",
+          "title": "Receipt Binding Algorithm",
+          "type": "string"
+        },
+        "receipt_sha256": {
+          "maxLength": 71,
+          "minLength": 71,
+          "pattern": "^sha256:[0-9a-f]*[1-9a-f][0-9a-f]*$",
+          "title": "Receipt Sha256",
+          "type": "string"
+        },
+        "remaining_applicable_credit_redacted": {
+          "const": true,
+          "title": "Remaining Applicable Credit Redacted",
+          "type": "boolean"
+        },
+        "schema_version": {
+          "const": "1.0.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source": {
+          "const": "aws_billing_and_cost_management_console",
+          "title": "Source",
+          "type": "string"
+        },
+        "validated_at": {
+          "format": "date-time",
+          "title": "Validated At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "observed_at",
+        "validated_at",
+        "maximum_age_seconds",
+        "age_seconds_at_validation",
+        "source",
+        "authorization_workflow",
+        "authorization_operation_id",
+        "authorization_input_sha256",
+        "authorization_commit_sha",
+        "authorization_reservation_sha256",
+        "receipt_binding_algorithm",
+        "receipt_sha256",
+        "campaign_spend_to_date_redacted",
+        "remaining_applicable_credit_redacted"
+      ],
+      "title": "ProtectedFinancialSnapshot",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "artifact_type": {
+      "const": "benchmark_cost_preflight",
+      "title": "Artifact Type",
+      "type": "string"
+    },
+    "benchmark_run_id": {
+      "pattern": "^github-[0-9]+-attempt-[1-9][0-9]*$",
+      "title": "Benchmark Run Id",
+      "type": "string"
+    },
+    "campaign_envelope_usd": {
+      "anyOf": [
+        {
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Campaign Envelope Usd"
+    },
+    "checked_at": {
+      "format": "date-time",
+      "title": "Checked At",
+      "type": "string"
+    },
+    "conservative_benchmark_allowance_usd": {
+      "anyOf": [
+        {
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Conservative Benchmark Allowance Usd"
+    },
+    "financial_snapshot": {
+      "$ref": "#/$defs/ProtectedFinancialSnapshot"
+    },
+    "heldout_access_enabled": {
+      "const": false,
+      "title": "Heldout Access Enabled",
+      "type": "boolean"
+    },
+    "maximum_out_of_pocket_usd": {
+      "anyOf": [
+        {
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Maximum Out Of Pocket Usd"
+    },
+    "model_id": {
+      "minLength": 1,
+      "title": "Model Id",
+      "type": "string"
+    },
+    "public_origin": {
+      "maxLength": 253,
+      "pattern": "^https://[a-z0-9-]+\\.cloudfront\\.net$",
+      "title": "Public Origin",
+      "type": "string"
+    },
+    "region": {
+      "const": "us-east-1",
+      "title": "Region",
+      "type": "string"
+    },
+    "release_id": {
+      "minLength": 1,
+      "title": "Release Id",
+      "type": "string"
+    },
+    "required_credit_reserve_usd": {
+      "anyOf": [
+        {
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Required Credit Reserve Usd"
+    },
+    "schema_version": {
+      "const": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "sensitive_balance_values_recorded": {
+      "const": false,
+      "title": "Sensitive Balance Values Recorded",
+      "type": "boolean"
+    },
+    "status": {
+      "const": "passed",
+      "title": "Status",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "status",
+    "checked_at",
+    "benchmark_run_id",
+    "release_id",
+    "model_id",
+    "region",
+    "public_origin",
+    "maximum_out_of_pocket_usd",
+    "campaign_envelope_usd",
+    "required_credit_reserve_usd",
+    "conservative_benchmark_allowance_usd",
+    "heldout_access_enabled",
+    "sensitive_balance_values_recorded",
+    "financial_snapshot"
+  ],
+  "title": "BenchmarkCostPreflight",
+  "type": "object"
+}

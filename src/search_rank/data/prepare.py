@@ -21,9 +21,10 @@ from search_rank.artifacts.checksums import sha256_file
 from search_rank.config import sha256_value
 from search_rank.features.product_text import render_product_text
 from search_rank.logging import log_event
-from search_rank.schemas.dataset import DatasetManifest, SplitCounts
+from search_rank.schemas.dataset import DatasetManifest, SplitCounts, SplitManifestIdentity
 
 from .download import acquire_dataset
+from .identity import dataset_processed_checksum
 from .normalize import NORMALIZATION_VERSION, normalize_text
 from .settings import DataPreparationConfig
 from .split import assign_train_validation, development_query_ids, sorted_id_hash
@@ -240,14 +241,31 @@ def prepare_dataset(config: DataPreparationConfig) -> tuple[DatasetManifest, Pat
             encoding="utf-8",
         )
         artifact_checksums[quality_path.name] = sha256_file(quality_path)
-        processed_hash = sha256_value(
-            {
-                "preprocessing_version": PREPROCESSING_VERSION,
-                "artifacts": artifact_checksums,
-            }
+        artifact_checksum_index = {
+            name: _prefixed(value) for name, value in artifact_checksums.items()
+        }
+        split_strategy = (
+            f"official train/test; training query SHA-256 split with "
+            f"{config.validation_fraction:.4f} validation fraction"
         )
-        destination = config.processed_dir / processed_hash
-        manifest = DatasetManifest(
+        raw_checksums = {name: _prefixed(source.sha256) for name, source in config.sources.items()}
+        split_salt_hash = _prefixed(sha256_value(config.validation_salt))
+        split_manifest_hash = SplitManifestIdentity(
+            dataset_name=config.dataset_name,
+            dataset_version=config.dataset_version,
+            source_revision=config.source_revision,
+            locale=config.locale,
+            raw_checksums=raw_checksums,
+            preprocessing_version=PREPROCESSING_VERSION,
+            split_strategy=split_strategy,
+            split_salt_hash=split_salt_hash,
+            split_counts=split_counts,
+            split_query_id_hashes=split_query_hashes,
+            row_count=len(frame),
+            query_count=int(frame["query_id"].nunique()),
+        ).checksum()
+        created_at = datetime.now(UTC)
+        provisional_manifest = DatasetManifest(
             schema_version="1.0.0",
             dataset_name=config.dataset_name,
             dataset_version=config.dataset_version,
@@ -257,15 +275,11 @@ def prepare_dataset(config: DataPreparationConfig) -> tuple[DatasetManifest, Pat
             license_notice_hash=_prefixed(config.license_notice_sha256),
             task="query-product-reranking",
             locale=config.locale,
-            raw_checksums={
-                name: _prefixed(source.sha256) for name, source in config.sources.items()
-            },
+            raw_checksums=raw_checksums,
             preprocessing_version=PREPROCESSING_VERSION,
-            split_strategy=(
-                f"official train/test; training query SHA-256 split with "
-                f"{config.validation_fraction:.4f} validation fraction"
-            ),
-            split_salt_hash=_prefixed(sha256_value(config.validation_salt)),
+            split_strategy=split_strategy,
+            split_salt_hash=split_salt_hash,
+            split_manifest_hash=split_manifest_hash,
             split_counts=split_counts,
             split_query_id_hashes=split_query_hashes,
             row_count=len(frame),
@@ -278,9 +292,20 @@ def prepare_dataset(config: DataPreparationConfig) -> tuple[DatasetManifest, Pat
                 str(key): int(value) for key, value in quality["missing_optional_fields"].items()
             },
             dropped_rows={"duplicate_rows": int(quality["duplicate_rows_dropped"])},
-            processed_artifact_uri=f"artifact://{config.dataset_name}/{processed_hash}",
-            processed_checksum=_prefixed(processed_hash),
-            created_at=datetime.now(UTC),
+            processed_artifact_uri="artifact://pending-semantic-identity",
+            processed_checksum=_prefixed("0" * 64),
+            created_at=created_at,
+        )
+        processed_checksum = dataset_processed_checksum(
+            provisional_manifest, artifact_checksum_index
+        )
+        processed_hash = processed_checksum.removeprefix("sha256:")
+        destination = config.processed_dir / processed_hash
+        manifest = provisional_manifest.model_copy(
+            update={
+                "processed_artifact_uri": (f"artifact://{config.dataset_name}/{processed_hash}"),
+                "processed_checksum": processed_checksum,
+            }
         )
         manifest_path = staging / "manifest.json"
         manifest_path.write_text(
@@ -289,7 +314,7 @@ def prepare_dataset(config: DataPreparationConfig) -> tuple[DatasetManifest, Pat
         )
         (staging / "artifact-checksums.json").write_text(
             json.dumps(
-                {name: _prefixed(value) for name, value in artifact_checksums.items()},
+                artifact_checksum_index,
                 indent=2,
                 sort_keys=True,
             )

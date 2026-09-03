@@ -70,8 +70,9 @@ Populate from `DatasetManifest`, never by hand:
 |---|---|
 | Source revision | `7916cdf6ab75a462e77f20ab40428a10923998d5` |
 | Source file SHA-256 values | examples `4a735b…4263a`; products `251244…5a265`; sources `a5fed8…778c50` (full values in the generated manifest) |
-| Semantic processed-dataset identity | `sha256:420735e9…e24f6` (`DatasetManifest.processed_checksum`) |
-| Serialized `manifest.json` transport SHA-256 | `sha256:3f6902e7…4cf09d`; this is not the semantic dataset identity |
+| Canonical split-manifest identity | Pending a new preparation run under the required `query-split-manifest-v1` contract; do not infer it from a historical dataset or transport hash |
+| Historical semantic processed-dataset identity | `sha256:420735e9…e24f6` (`DatasetManifest.processed_checksum` from the pre-split-identity evidence run) |
+| Historical serialized `manifest.json` transport SHA-256 | `sha256:3f6902e7…4cf09d`; this is not either semantic identity |
 | Train queries/rows/products | 18,831 / 378,153 / 320,610 |
 | Validation queries/rows/products | 2,057 / 41,500 / 40,431 |
 | Held-out queries/rows/products | 8,956 / 181,701 / 164,900; aggregate preparation counts only, not model-selection access |
@@ -81,7 +82,7 @@ Populate from `DatasetManifest`, never by hand:
 | Dropped rows and reasons | 0 duplicate rows |
 | Join cardinality delta | 0 missing product joins |
 
-The shortened hashes above are display aids only. Machine verification must use the complete values in the generated dataset manifest and `evidence/data/milestone-1-reproducibility.json`.
+The shortened hashes above are display aids only. The recorded processed and transport hashes are historical evidence and must not be edited to impersonate a run under the new required split contract. A fresh preparation run must publish the complete `split_manifest_hash`, refreshed `processed_checksum`, and transport checksum before those values can be reported as current.
 
 ## Limitations
 

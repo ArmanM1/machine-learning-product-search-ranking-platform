@@ -26,6 +26,22 @@ output "github_workflow_role_arns" {
   value = module.platform.github_workflow_role_arns
 }
 
+output "github_baseline_role_arn" {
+  value = module.platform.github_baseline_role_arn
+}
+
+output "github_trial_selection_role_arn" {
+  value = module.platform.github_trial_selection_role_arn
+}
+
+output "github_benchmark_role_arn" {
+  value = module.platform.github_benchmark_role_arn
+}
+
+output "project_permissions_boundary_arn" {
+  value = module.platform.project_permissions_boundary_arn
+}
+
 output "lambda_function_name" {
   value = module.platform.lambda_function_name
 }
@@ -44,6 +60,10 @@ output "cloudfront_distribution_id" {
 
 output "cloudfront_url" {
   value = module.platform.cloudfront_url
+}
+
+output "budget_kill_switch" {
+  value = module.platform.budget_kill_switch
 }
 
 output "cost_guard" {

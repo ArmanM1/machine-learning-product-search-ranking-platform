@@ -8,8 +8,10 @@ from search_rank.evaluation.gates import ReleaseGateInputs, evaluate_release_gat
 from search_rank.evaluation.latency import summarize_latency
 from search_rank.evaluation.report import build_primary_metric
 from search_rank.schemas.api import (
+    PublicEvaluationProvenance,
     PublicModelMetricRow,
     PublicRunSummary,
+    PublicTrainingProvenance,
     PublicValidationRunMetrics,
     PublicValidationRunSummary,
 )
@@ -22,6 +24,7 @@ from search_rank.schemas.evaluation import (
     PairedDifference,
     RuntimeResult,
 )
+from search_rank.serving.dependencies import ServiceState
 from search_rank.serving.public_evidence import (
     build_public_evidence,
     build_validation_public_evidence,
@@ -32,8 +35,68 @@ from search_rank.serving.query_store import CuratedProduct, CuratedQuery, QueryS
 
 SHA_A = "sha256:" + "a" * 64
 SHA_B = "sha256:" + "b" * 64
+SHA_C = "sha256:" + "c" * 64
 BASELINE_ID = "bm25-v1-text_enriched_v1"
 CANDIDATE_ID = "candidate-v1"
+GIT_SHA = "a" * 40
+
+
+def _heldout_examples() -> list[ExampleResult]:
+    examples = [
+        ExampleResult(
+            query_id=f"q{index}",
+            category="loss",
+            baseline_metric=0.70,
+            candidate_metric=0.60 - index * 0.001,
+            delta=-0.10 - index * 0.001,
+            selection_rule="largest negative primary-metric delta",
+            public_product_ids=["p1", "p2"] if index == 1 else [],
+        )
+        for index in range(1, 6)
+    ]
+    examples.extend(
+        ExampleResult(
+            query_id=f"q{index}",
+            category="win",
+            baseline_metric=0.60,
+            candidate_metric=0.70 + index * 0.001,
+            delta=0.10 + index * 0.001,
+            selection_rule="largest positive primary-metric delta",
+        )
+        for index in range(6, 11)
+    )
+    examples.extend(
+        ExampleResult(
+            query_id=f"q{index}",
+            category="tie_or_uncertain",
+            baseline_metric=0.65,
+            candidate_metric=0.65,
+            delta=0,
+            selection_rule="near-zero primary-metric delta",
+        )
+        for index in range(11, 14)
+    )
+    examples.extend(
+        [
+            ExampleResult(
+                query_id="q14",
+                category="lexical_preferred",
+                baseline_metric=0.75,
+                candidate_metric=0.60,
+                delta=-0.15,
+                selection_rule="lexical baseline outscored candidate",
+            ),
+            ExampleResult(
+                query_id="q15",
+                category="complement_exact_confusion",
+                baseline_metric=0.70,
+                candidate_metric=0.55,
+                delta=-0.15,
+                selection_rule="automatically detected Complement-versus-Exact inversion",
+            ),
+        ]
+    )
+    return examples
 
 
 def _report() -> EvaluationReport:
@@ -112,17 +175,7 @@ def _report() -> EvaluationReport:
         bootstrap_resamples=10_000,
         confidence_level=0.95,
         slice_results=[],
-        example_results=[
-            ExampleResult(
-                query_id="q1",
-                category="loss",
-                baseline_metric=0.70,
-                candidate_metric=0.60,
-                delta=-0.10,
-                selection_rule="largest negative primary-metric delta",
-                public_product_ids=["p1", "p2"],
-            )
-        ],
+        example_results=_heldout_examples(),
         latency_results=[
             summarize_latency(
                 [10],
@@ -170,8 +223,8 @@ def _run(report: EvaluationReport) -> PublicRunSummary:
         run_id=report.run_id,
         config_hash=SHA_A,
         dataset_manifest_hash=SHA_B,
-        git_sha="abcdef1",
-        image_digest=SHA_A,
+        split_manifest_hash=SHA_C,
+        git_sha=GIT_SHA,
         model_artifact_checksum=SHA_B,
         dataset_name="Amazon Shopping Queries ESCI",
         dataset_version="small-v1",
@@ -179,13 +232,41 @@ def _run(report: EvaluationReport) -> PublicRunSummary:
         base_model_id="cross-encoder/model",
         base_model_revision="233e41b",
         training_strategy="mixed difficult and seeded-random examples",
-        hardware_class="ml.g4dn.xlarge",
-        region="us-east-1",
+        training_provenance=PublicTrainingProvenance(
+            trial_selection_id="trial-selection-" + "1" * 20,
+            trial_selection_sha256=SHA_A,
+            run_id="training-run-1",
+            run_manifest_sha256=SHA_B,
+            selected_model_id=CANDIDATE_ID,
+            selected_model_artifact_checksum=SHA_A,
+            config_hash=SHA_A,
+            git_sha=GIT_SHA,
+            image_digest=SHA_A,
+            hardware_class="ml.g4dn.xlarge",
+            accelerator="gpu",
+            region="us-east-1",
+            runtime_seconds=60,
+            estimated_cost_usd=0.80,
+            actual_cost_usd=None,
+            cost_evidence="Training upper bound; final charge not reconciled.",
+        ),
+        evaluation_provenance=PublicEvaluationProvenance(
+            candidate_model_id=CANDIDATE_ID,
+            candidate_model_artifact_checksum=SHA_A,
+            evaluation_config_hash=SHA_B,
+            git_sha=GIT_SHA,
+            image_digest=SHA_B,
+            hardware_class="ml.m5.xlarge",
+            region="us-east-1",
+            clean_execution_count=2,
+            runtime_seconds=10,
+            runtime_basis="processing_job_wall_clock_sum",
+            estimated_cost_usd=0.20,
+            actual_cost_usd=None,
+            cost_evidence="Processing upper bound; final charge not reconciled.",
+        ),
         metrics=public_run_metrics(report),
         intervals=public_run_intervals(report),
-        duration_seconds=70,
-        actual_cost_usd=None,
-        cost_evidence="Billing reconciliation is pending.",
         test_access_count=1,
         limitations=["Reranks only supplied candidates."],
         prohibited_claims=["No claim of shopper impact."],
@@ -197,13 +278,24 @@ def _queries() -> QueryStore:
     return QueryStore(
         [
             CuratedQuery(
-                "q1",
-                "travel mug",
+                f"q{index}",
+                "travel mug" if index == 1 else f"fixture query {index}",
                 (
-                    CuratedProduct("p1", "Travel mug", "Travel mug", "Exact"),
-                    CuratedProduct("p2", "Mug rack", "Mug rack", "Complement"),
+                    CuratedProduct(
+                        "p1" if index == 1 else f"q{index}-p1",
+                        "Travel mug" if index == 1 else f"Product {index}",
+                        "Travel mug" if index == 1 else f"Product {index}",
+                        "Exact",
+                    ),
+                    CuratedProduct(
+                        "p2" if index == 1 else f"q{index}-p2",
+                        "Mug rack" if index == 1 else f"Alternative {index}",
+                        "Mug rack" if index == 1 else f"Alternative {index}",
+                        "Complement",
+                    ),
                 ),
             )
+            for index in range(1, 16)
         ]
     )
 
@@ -224,6 +316,89 @@ def test_builder_projects_only_measured_values_and_preserves_negative_result() -
     assert baseline.exact_mrr_at_10 == 0.65
     assert baseline.p95_inference_latency_ms == 2
     assert evidence.failure_analysis.examples[0].query.query == "travel mug"
+    manifest = {
+        "dataset_manifest_hash": SHA_B,
+        "split_manifest_hash": SHA_C,
+        "git_sha": GIT_SHA,
+        "schema_version": "1.0.0",
+        "release_id": report.report_id,
+        "evidence_mode": "verified",
+        "promoted_model_id": BASELINE_ID,
+        "evaluation_report_id": report.report_id,
+        "artifact_checksums": {
+            "candidate-model-artifact.json": SHA_A,
+            "evaluation-report.json": SHA_A,
+            "evaluation-provenance.json": SHA_A,
+            "curated-queries.json": SHA_A,
+            "public-evidence.json": SHA_A,
+            "LICENSE": SHA_A,
+            "NOTICE": SHA_A,
+        },
+        "provenance": {
+            "training": evidence.run.training_provenance.model_dump(mode="json"),
+            "evaluation": evidence.run.evaluation_provenance.model_dump(mode="json"),
+        },
+        "models": [
+            {
+                "model_id": BASELINE_ID,
+                "kind": "bm25",
+                "text_template": "enriched_v1",
+                "artifact_checksum": SHA_B,
+                "public_summary": {
+                    "model_id": BASELINE_ID,
+                    "display_name": "BM25 lexical baseline",
+                    "kind": "bm25",
+                    "base_model_id": None,
+                    "artifact_checksum": SHA_B,
+                    "evaluation_report_id": report.report_id,
+                    "promoted_at": "2026-09-02T00:00:00Z",
+                    "limitations_url": "/methodology#limitations",
+                },
+            },
+            {
+                "model_id": CANDIDATE_ID,
+                "kind": "fine_tuned",
+                "checkpoint": "models/candidate",
+                "text_template": "enriched_v1",
+                "artifact_checksum": SHA_A,
+                "batch_size": 32,
+                "public_summary": {
+                    "model_id": CANDIDATE_ID,
+                    "display_name": "Fine-tuned candidate",
+                    "kind": "fine_tuned",
+                    "base_model_id": "cross-encoder/model",
+                    "artifact_checksum": SHA_A,
+                    "evaluation_report_id": report.report_id,
+                    "promoted_at": None,
+                    "limitations_url": "/methodology#limitations",
+                },
+            },
+        ],
+    }
+    ServiceState._validate_evidence_binding(evidence, manifest)
+
+    falsely_promoted = {**manifest, "promoted_model_id": CANDIDATE_ID}
+    with pytest.raises(
+        ValueError,
+        match=r"model checksum differs|release decision differs|promoted model summary",
+    ):
+        ServiceState._validate_evidence_binding(evidence, falsely_promoted)
+
+    conflated = {
+        **manifest,
+        "provenance": {
+            **manifest["provenance"],
+            "training": {
+                **evidence.run.training_provenance.model_dump(mode="json"),
+                "hardware_class": "ml.m5.xlarge",
+            },
+        },
+    }
+    with pytest.raises(
+        ValueError,
+        match=r"execution provenance differs|training hardware and accelerator do not match",
+    ):
+        ServiceState._validate_evidence_binding(evidence, conflated)
 
 
 def test_builder_refuses_non_heldout_evidence() -> None:
@@ -246,6 +421,7 @@ def test_validation_builder_is_explicitly_non_heldout() -> None:
         selected_model_id=BASELINE_ID,
         config_hash=SHA_A,
         dataset_manifest_hash=SHA_B,
+        split_manifest_hash=SHA_C,
         git_sha="abcdef1",
         image_digest=SHA_A,
         model_artifact_checksum=SHA_B,

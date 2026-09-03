@@ -51,7 +51,7 @@ The primary metric is macro query-level project-defined graded nDCG@10. The prim
 
 ## Runtime boundary
 
-The public service accepts curated query IDs and up to 40 supplied candidates. The model and tokenizer are embedded in an immutable serving image. Warm and cold latency, memory, artifact size, architecture, Lambda memory, and model revision must be reported from measurements; all values are pending.
+The public service accepts curated query IDs and up to 40 supplied candidates. The model and tokenizer are embedded in an immutable serving image. Deployment captures one controlled on-demand cold observation for a newly published candidate version: first-request end-to-end and model latency, CloudWatch initialization duration and maximum memory, and structured model-load duration and process peak memory. The separately authorized warm matrix runs after explicit warmups and never mixes the cold sample into warm percentiles. Numeric values remain pending until those AWS protocols execute for the promoted release.
 
 ## Required trained-model fields
 
@@ -62,11 +62,22 @@ The public service accepts curated query IDs and up to 40 supplied candidates. T
 | Dataset/config/code hashes | Pending |
 | Training hardware/image digest | Pending |
 | Training duration/cost | Pending |
+| Evaluation image/hardware/region | Pending; reported separately from training |
+| Two-job Processing runtime/cost | Pending; wall-clock sum and Processing estimate only |
 | Validation checkpoint decision | Pending |
 | Mandatory ablation results | Pending |
 | Two clean held-out reports, consecutive access counts, and bound report | Pending |
 | Promotion decision | Pending |
 | Known regressions | Pending |
+
+Every cloud-trained candidate first emits an immutable, unevaluated `ModelArtifact` inside its
+training archive. A verified release publishes `candidate-model-artifact.json`, preserving the
+same run, dataset, configuration, Git, training-image, base-model, tokenizer, and checkpoint
+identities while adding the selected training `RunManifest` checksum and held-out report ID and
+checksum. Its `promoted` flag describes the candidate’s gate result: it is false with the explicit
+“prior baseline retained” reason when the gate fails, even though the negative-result bundle is
+still published. Unchanged BM25 and pretrained systems are not training outputs, so the
+validation-only baseline bundle does not fabricate a trained-model artifact for them.
 
 ## Limitations and risks
 
