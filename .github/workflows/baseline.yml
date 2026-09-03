@@ -133,7 +133,7 @@ jobs:
         run: |
           set -euo pipefail
           : "${TF_STATE_BUCKET:?Missing AWS_TERRAFORM_STATE_BUCKET variable}"
-          python -m pip install --disable-pip-version-check pydantic==2.13.5
+          python -m pip install --disable-pip-version-check pydantic==2.13.5 PyYAML==6.0.3
           PYTHONPATH=src python scripts/reserve_financial_capacity.py reserve \
             --bucket "${TF_STATE_BUCKET}" \
             --output financial-capacity-reservation.json
