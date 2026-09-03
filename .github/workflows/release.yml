@@ -144,15 +144,6 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: gha-heldout-${{ github.run_id }}
           mask-aws-account-id: true
-      - name: Atomically reserve the signed campaign capacity
-        shell: bash
-        run: |
-          set -euo pipefail
-          : "${TF_STATE_BUCKET:?Missing AWS_TERRAFORM_STATE_BUCKET variable}"
-          python -m pip install --disable-pip-version-check pydantic==2.13.5 PyYAML==6.0.3
-          PYTHONPATH=src python scripts/reserve_financial_capacity.py reserve \
-            --bucket "${TF_STATE_BUCKET}" \
-            --output financial-capacity-reservation.json
       - name: Prove one ml.m5.xlarge Processing instance is available
         shell: bash
         run: |
@@ -244,6 +235,8 @@ jobs:
           import os
           from decimal import Decimal, InvalidOperation, ROUND_UP
 
+          from scripts.validate_financial_reservation import validate_reservation_coverage
+
           with open("financial-snapshot.json", encoding="utf-8") as handle:
               financial_snapshot = json.load(handle)
 
@@ -290,6 +283,13 @@ jobs:
               raise SystemExit("Applicable credit cannot cover processing, the remaining plan, and reserve")
           if amount("CPU_HOURS_USED_TO_DATE") + total_hours > 10:
               raise SystemExit("Two clean Processing jobs would breach the 10 paid CPU-instance-hour campaign cap")
+          validate_reservation_coverage(
+              os.environ,
+              required_max_usd=estimate,
+              required_remaining_committed_usd=remaining,
+              required_cpu_hours=total_hours,
+              required_gpu_hours=0,
+          )
           evidence = {
               "schema_version": "1.0.0",
               "artifact_type": "evaluation_cost_preflight",
@@ -499,6 +499,15 @@ jobs:
             previous-pointer.json >/dev/null
           uv run python scripts/validate_release_artifacts.py file \
             --kind promotion-pointer previous-pointer.json
+      - name: Atomically reserve the signed campaign capacity
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${TF_STATE_BUCKET:?Missing AWS_TERRAFORM_STATE_BUCKET variable}"
+          python -m pip install --disable-pip-version-check pydantic==2.13.5 PyYAML==6.0.3
+          PYTHONPATH=src python scripts/reserve_financial_capacity.py reserve \
+            --bucket "${TF_STATE_BUCKET}" \
+            --output financial-capacity-reservation.json
       - name: Run two separately counted clean held-out Processing jobs
         shell: bash
         run: |

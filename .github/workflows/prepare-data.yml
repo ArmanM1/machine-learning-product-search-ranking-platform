@@ -73,6 +73,8 @@ jobs:
           import os
           from decimal import Decimal, InvalidOperation
 
+          from scripts.validate_financial_reservation import validate_reservation_coverage
+
           def amount(name: str) -> Decimal:
               try:
                   value = Decimal(os.environ[name])
@@ -97,6 +99,13 @@ jobs:
               raise SystemExit("Prepared-data publication would breach the USD 40 campaign envelope")
           if credit < reserve + allowance:
               raise SystemExit("Applicable credit cannot cover the S3 allowance and required reserve")
+          validate_reservation_coverage(
+              os.environ,
+              required_max_usd=allowance,
+              required_remaining_committed_usd=0,
+              required_cpu_hours=0,
+              required_gpu_hours=0,
+          )
           print("Prepared-data publication guard passed with the bounded USD 1 S3 allowance.")
           PY
       - name: Install the locked project environment

@@ -97,6 +97,8 @@ jobs:
           from decimal import Decimal, InvalidOperation
           from pathlib import Path
 
+          from scripts.validate_financial_reservation import validate_reservation_coverage
+
           financial_snapshot = json.loads(
               Path(".benchmark-evidence/financial-snapshot.json").read_text(encoding="utf-8")
           )
@@ -137,6 +139,13 @@ jobs:
               raise SystemExit("Benchmark allowance would breach the USD 40 campaign envelope")
           if credit < reserve + allowance:
               raise SystemExit("Applicable credit cannot cover both the benchmark and required reserve")
+          validate_reservation_coverage(
+              os.environ,
+              required_max_usd=allowance,
+              required_remaining_committed_usd=0,
+              required_cpu_hours=0,
+              required_gpu_hours=0,
+          )
 
           normalized = f"https://{host}"
           with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as handle:

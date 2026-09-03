@@ -131,15 +131,6 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: gha-train-${{ github.run_id }}
           mask-aws-account-id: true
-      - name: Atomically reserve the signed campaign capacity
-        shell: bash
-        run: |
-          set -euo pipefail
-          : "${TF_STATE_BUCKET:?Missing AWS_TERRAFORM_STATE_BUCKET variable}"
-          python -m pip install --disable-pip-version-check pydantic==2.13.5 PyYAML==6.0.3
-          PYTHONPATH=src python scripts/reserve_financial_capacity.py reserve \
-            --bucket "${TF_STATE_BUCKET}" \
-            --output financial-capacity-reservation.json
       - name: Bind the immutable training image to this exact commit
         shell: bash
         run: |
@@ -218,6 +209,8 @@ jobs:
           import os
           from decimal import Decimal, InvalidOperation, ROUND_UP
 
+          from scripts.validate_financial_reservation import validate_reservation_coverage
+
           with open("financial-snapshot.json", encoding="utf-8") as handle:
               financial_snapshot = json.load(handle)
 
@@ -264,6 +257,13 @@ jobs:
                   raise SystemExit("job would breach the 20 GPU-instance-hour campaign cap")
           elif amount("CPU_HOURS_USED_TO_DATE") + hours > 10:
               raise SystemExit("job would breach the 10 paid CPU-instance-hour campaign cap")
+          validate_reservation_coverage(
+              os.environ,
+              required_max_usd=estimate,
+              required_remaining_committed_usd=remaining,
+              required_cpu_hours=hours if accelerator == "cpu" else 0,
+              required_gpu_hours=hours if accelerator == "gpu" else 0,
+          )
 
           evidence = {
               "schema_version": "1.0.0",
@@ -375,6 +375,15 @@ jobs:
               json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8"
           )
           PY
+      - name: Atomically reserve the signed campaign capacity
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${TF_STATE_BUCKET:?Missing AWS_TERRAFORM_STATE_BUCKET variable}"
+          python -m pip install --disable-pip-version-check pydantic==2.13.5 PyYAML==6.0.3
+          PYTHONPATH=src python scripts/reserve_financial_capacity.py reserve \
+            --bucket "${TF_STATE_BUCKET}" \
+            --output financial-capacity-reservation.json
       - name: Upload frozen configuration and submit exactly one job
         shell: bash
         run: |

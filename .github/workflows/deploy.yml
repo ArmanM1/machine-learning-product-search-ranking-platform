@@ -117,6 +117,8 @@ jobs:
           import os
           from decimal import Decimal, InvalidOperation
 
+          from scripts.validate_financial_reservation import validate_reservation_coverage
+
           def amount(name: str) -> Decimal:
               try:
                   value = Decimal(os.environ[name])
@@ -138,6 +140,13 @@ jobs:
               raise SystemExit("Deployment would breach the USD 40 campaign envelope")
           if credit < conservative_serving_allowance + reserve:
               raise SystemExit("Applicable credit cannot cover serving allowance and required reserve")
+          validate_reservation_coverage(
+              os.environ,
+              required_max_usd=conservative_serving_allowance,
+              required_remaining_committed_usd=0,
+              required_cpu_hours=0,
+              required_gpu_hours=0,
+          )
           print("Zero-out-of-pocket deployment guard passed with the conservative USD 3 serving allowance.")
           PY
       - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
@@ -2691,6 +2700,8 @@ jobs:
           import os
           from decimal import Decimal, InvalidOperation
 
+          from scripts.validate_financial_reservation import validate_reservation_coverage
+
           def amount(name: str) -> Decimal:
               try:
                   value = Decimal(os.environ[name])
@@ -2707,6 +2718,13 @@ jobs:
               raise SystemExit("Rollback requests would breach the campaign envelope")
           if amount("REMAINING_APPLICABLE_CREDIT_USD") < rollback_allowance + amount("REQUIRED_CREDIT_RESERVE_USD"):
               raise SystemExit("Applicable credit cannot cover rollback requests and reserve")
+          validate_reservation_coverage(
+              os.environ,
+              required_max_usd=rollback_allowance,
+              required_remaining_committed_usd=0,
+              required_cpu_hours=0,
+              required_gpu_hours=0,
+          )
           print("Rollback cost guard passed with a conservative USD 0.10 request allowance.")
           PY
       - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
