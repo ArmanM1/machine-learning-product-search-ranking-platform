@@ -59,7 +59,8 @@ def validate_examples(examples: pd.DataFrame) -> DataQuality:
         raise DataQualityError(
             f"missing identifiers in {int(missing_identifier.sum())} example rows"
         )
-    empty_queries = examples["query"].map(normalize_text).eq("")
+    normalized_queries = examples["query"].map(normalize_text)
+    empty_queries = normalized_queries.eq("")
     if empty_queries.any():
         raise DataQualityError(f"empty normalized query in {int(empty_queries.sum())} rows")
     unknown_labels = sorted(set(examples["esci_label"].dropna().astype(str)) - VALID_LABELS)
@@ -68,6 +69,24 @@ def validate_examples(examples: pd.DataFrame) -> DataQuality:
     unknown_splits = sorted(set(examples["split"].dropna().astype(str)) - VALID_OFFICIAL_SPLITS)
     if unknown_splits or examples["split"].isna().any():
         raise DataQualityError(f"unknown or missing official splits: {unknown_splits}")
+
+    query_text_conflicts = (
+        normalized_queries.groupby(examples["query_id"], dropna=False).nunique(dropna=False).gt(1)
+    )
+    if query_text_conflicts.any():
+        raise DataQualityError(
+            "query_id has conflicting normalized query text for "
+            f"{int(query_text_conflicts.sum())} identifiers"
+        )
+
+    query_split_conflicts = (
+        examples.groupby("query_id", dropna=False)["split"].nunique(dropna=False).gt(1)
+    )
+    if query_split_conflicts.any():
+        raise DataQualityError(
+            "query_id spans conflicting official splits for "
+            f"{int(query_split_conflicts.sum())} identifiers"
+        )
 
     keys = ["query_id", "product_locale", "product_id"]
     conflicts = examples.groupby(keys, dropna=False)["esci_label"].nunique().gt(1)

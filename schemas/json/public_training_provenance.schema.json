@@ -1,0 +1,121 @@
+{
+  "additionalProperties": false,
+  "description": "Allowlisted provenance for the validation-selected training execution.",
+  "properties": {
+    "trial_selection_id": {
+      "pattern": "^trial-selection-[0-9a-f]{20}$",
+      "title": "Trial Selection Id",
+      "type": "string"
+    },
+    "trial_selection_sha256": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Trial Selection Sha256",
+      "type": "string"
+    },
+    "run_id": {
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    },
+    "run_manifest_sha256": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Run Manifest Sha256",
+      "type": "string"
+    },
+    "selected_model_id": {
+      "minLength": 1,
+      "title": "Selected Model Id",
+      "type": "string"
+    },
+    "selected_model_artifact_checksum": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Selected Model Artifact Checksum",
+      "type": "string"
+    },
+    "config_hash": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Config Hash",
+      "type": "string"
+    },
+    "git_sha": {
+      "pattern": "^[0-9a-f]{40}$",
+      "title": "Git Sha",
+      "type": "string"
+    },
+    "image_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Image Digest",
+      "type": "string"
+    },
+    "hardware_class": {
+      "enum": [
+        "ml.m5.xlarge",
+        "ml.g4dn.xlarge"
+      ],
+      "title": "Hardware Class",
+      "type": "string"
+    },
+    "accelerator": {
+      "enum": [
+        "cpu",
+        "gpu"
+      ],
+      "title": "Accelerator",
+      "type": "string"
+    },
+    "region": {
+      "const": "us-east-1",
+      "title": "Region",
+      "type": "string"
+    },
+    "runtime_seconds": {
+      "minimum": 0,
+      "title": "Runtime Seconds",
+      "type": "number"
+    },
+    "estimated_cost_usd": {
+      "minimum": 0,
+      "title": "Estimated Cost Usd",
+      "type": "number"
+    },
+    "actual_cost_usd": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Actual Cost Usd"
+    },
+    "cost_evidence": {
+      "minLength": 1,
+      "title": "Cost Evidence",
+      "type": "string"
+    }
+  },
+  "required": [
+    "trial_selection_id",
+    "trial_selection_sha256",
+    "run_id",
+    "run_manifest_sha256",
+    "selected_model_id",
+    "selected_model_artifact_checksum",
+    "config_hash",
+    "git_sha",
+    "image_digest",
+    "hardware_class",
+    "accelerator",
+    "region",
+    "runtime_seconds",
+    "estimated_cost_usd",
+    "cost_evidence"
+  ],
+  "title": "PublicTrainingProvenance",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.example.invalid/search-rank/public_training_provenance.schema.json"
+}

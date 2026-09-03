@@ -134,6 +134,7 @@ def test_tiny_fixture_prepares_ranks_builds_training_rows_and_reports(
         bootstrap_seed=42,
         confidence_level=0.95,
         training_runtime_seconds=0.0,
+        training_hardware="local-test-cpu",
         evaluation_hardware="local-test-cpu",
         model_artifact_size_bytes=0,
         clean_run_metric_values=(1.0,),
@@ -152,6 +153,15 @@ def test_tiny_fixture_prepares_ranks_builds_training_rows_and_reports(
     pointer_path.write_text(json.dumps(pointer), encoding="utf-8")
     with pytest.raises(ValueError, match="pointer checksum"):
         load_prepared_split(pointer_path, "train")
+
+    manifest_path = destination / "manifest.json"
+    original_manifest = manifest_path.read_text(encoding="utf-8")
+    semantic_tamper = json.loads(original_manifest)
+    semantic_tamper["source_revision"] = "d" * 40
+    manifest_path.write_text(json.dumps(semantic_tamper), encoding="utf-8")
+    with pytest.raises(ValueError, match=r"semantic manifest|split_manifest_hash"):
+        load_prepared_split(manifest_path, "train")
+    manifest_path.write_text(original_manifest, encoding="utf-8")
 
     artifact_path = destination / "train.parquet"
     artifact_path.write_bytes(artifact_path.read_bytes() + b"tamper")

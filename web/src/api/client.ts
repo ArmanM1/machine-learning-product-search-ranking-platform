@@ -114,6 +114,75 @@ export function buildComparisonPath(
   return `/api/v1/comparisons/${encodeURIComponent(queryId)}?${params.toString()}`
 }
 
+export function buildOverviewData(
+  models: ModelSummary[],
+  queries: CuratedQuery[],
+  evaluation: EvaluationData,
+  ids: { candidateId: string; baselineId: string; queryId: string },
+): OverviewData {
+  const promotedModels = models.filter((model) => model.promoted_at !== null)
+  const promotedModel = promotedModels[0]
+  const evaluatedCandidate = evaluation.release_status === 'validation_only'
+    ? null
+    : models.find((model) => model.model_id === ids.candidateId)
+  const strongestBaseline = models.find((model) => model.model_id === ids.baselineId)
+  const defaultQuery = queries.find((query) => query.query_id === ids.queryId) ?? queries[0]
+  if (promotedModels.length !== 1 || !promotedModel || !defaultQuery) {
+    throw new ApiClientError('The public release manifest is incomplete.', 409, 'manifest_not_ready')
+  }
+  if (evaluation.release_status === 'validation_only') {
+    const selectedMetrics = evaluation.models.find(
+      (model) => model.model_id === promotedModel.model_id,
+    )
+    return {
+      evidence_mode: 'validation_only',
+      evaluation_scope: 'validation',
+      release_status: 'validation_only',
+      promoted_model: promotedModel,
+      evaluated_candidate: null,
+      strongest_baseline: null,
+      evaluation_query_count: evaluation.evaluation_query_count,
+      primary_metric_name: evaluation.primary_metric.display_name,
+      primary_metric_delta: null,
+      primary_metric_interval: null,
+      p95_inference_latency_ms: selectedMetrics?.p95_inference_latency_ms ?? null,
+      measured_candidate_count: defaultQuery.candidate_count,
+      default_query: defaultQuery,
+    }
+  }
+  if (!evaluatedCandidate || !strongestBaseline || !evaluation.delta?.interval) {
+    throw new ApiClientError('The verified release evidence is incomplete.', 409, 'evidence_not_ready')
+  }
+  if (
+    (evaluation.release_status === 'passed' && promotedModel.model_id !== evaluatedCandidate.model_id)
+    || (evaluation.release_status === 'failed' && promotedModel.model_id !== strongestBaseline.model_id)
+  ) {
+    throw new ApiClientError(
+      'The public release decision conflicts with the active model.',
+      409,
+      'artifact_conflict',
+    )
+  }
+  const candidateMetrics = evaluation.models.find(
+    (model) => model.model_id === evaluatedCandidate.model_id,
+  )
+  return {
+    evidence_mode: 'verified',
+    evaluation_scope: 'held_out',
+    release_status: evaluation.release_status,
+    promoted_model: promotedModel,
+    evaluated_candidate: evaluatedCandidate,
+    strongest_baseline: strongestBaseline,
+    evaluation_query_count: evaluation.evaluation_query_count,
+    primary_metric_name: evaluation.primary_metric.display_name,
+    primary_metric_delta: evaluation.delta.value,
+    primary_metric_interval: evaluation.delta.interval,
+    p95_inference_latency_ms: candidateMetrics?.p95_inference_latency_ms ?? null,
+    measured_candidate_count: defaultQuery.candidate_count,
+    default_query: defaultQuery,
+  }
+}
+
 export const apiClient = {
   async getModels(signal?: AbortSignal): Promise<ModelSummary[]> {
     if (isFixtureMode) {
@@ -341,7 +410,7 @@ export const apiClient = {
         status: 'validation_only',
         configuration_hash: run.config_hash,
         data_hash: run.dataset_manifest_hash,
-        split_manifest_hash: null,
+        split_manifest_hash: run.split_manifest_hash,
         code_commit: run.git_sha,
         image_digest: run.image_digest,
         model_artifact_checksum: run.model_artifact_checksum,
@@ -356,6 +425,8 @@ export const apiClient = {
         duration_seconds: run.duration_seconds,
         cost_usd: run.actual_cost_usd,
         cost_evidence: run.cost_evidence,
+        training_provenance: null,
+        evaluation_provenance: null,
         test_access_count: 0,
         limitations: [run.validation_only_notice, ...run.limitations],
         prohibited_claims: run.prohibited_claims,
@@ -369,9 +440,9 @@ export const apiClient = {
       status: 'complete',
       configuration_hash: run.config_hash,
       data_hash: run.dataset_manifest_hash,
-      split_manifest_hash: null,
+      split_manifest_hash: run.split_manifest_hash,
       code_commit: run.git_sha,
-      image_digest: run.image_digest,
+      image_digest: null,
       model_artifact_checksum: run.model_artifact_checksum,
       dataset_source: run.dataset_name,
       dataset_version: run.dataset_version,
@@ -379,11 +450,13 @@ export const apiClient = {
       base_model_id: run.base_model_id,
       base_model_revision: run.base_model_revision,
       training_strategy: run.training_strategy,
-      hardware_class: run.hardware_class,
-      region: run.region,
-      duration_seconds: run.duration_seconds,
-      cost_usd: run.actual_cost_usd,
-      cost_evidence: run.cost_evidence,
+      hardware_class: null,
+      region: null,
+      duration_seconds: null,
+      cost_usd: null,
+      cost_evidence: 'Training and evaluation execution evidence is reported separately.',
+      training_provenance: run.training_provenance,
+      evaluation_provenance: run.evaluation_provenance,
       test_access_count: run.test_access_count,
       limitations: run.limitations,
       prohibited_claims: run.prohibited_claims,
@@ -402,45 +475,6 @@ export const apiClient = {
       apiClient.getQueries('', signal),
       apiClient.getEvaluation(config.runId, signal),
     ])
-    const promotedModel = models.find((model) => model.model_id === config.candidateId)
-    const strongestBaseline = models.find((model) => model.model_id === config.baselineId)
-    const defaultQuery = queries.find((query) => query.query_id === config.queryId) ?? queries[0]
-    if (!promotedModel || !defaultQuery) {
-      throw new ApiClientError('The public release manifest is incomplete.', 409, 'manifest_not_ready')
-    }
-    const candidateMetrics = evaluation.models.find((model) => model.model_id === promotedModel.model_id)
-    if (evaluation.release_status === 'validation_only') {
-      return {
-        evidence_mode: 'validation_only',
-        evaluation_scope: 'validation',
-        release_status: 'validation_only',
-        promoted_model: promotedModel,
-        strongest_baseline: null,
-        evaluation_query_count: evaluation.evaluation_query_count,
-        primary_metric_name: evaluation.primary_metric.display_name,
-        primary_metric_delta: null,
-        primary_metric_interval: null,
-        p95_inference_latency_ms: candidateMetrics?.p95_inference_latency_ms ?? null,
-        measured_candidate_count: defaultQuery.candidate_count,
-        default_query: defaultQuery,
-      }
-    }
-    if (!strongestBaseline || !evaluation.delta?.interval) {
-      throw new ApiClientError('The verified release evidence is incomplete.', 409, 'evidence_not_ready')
-    }
-    return {
-      evidence_mode: 'verified',
-      evaluation_scope: 'held_out',
-      release_status: evaluation.release_status,
-      promoted_model: promotedModel,
-      strongest_baseline: strongestBaseline,
-      evaluation_query_count: evaluation.evaluation_query_count,
-      primary_metric_name: evaluation.primary_metric.display_name,
-      primary_metric_delta: evaluation.delta.value,
-      primary_metric_interval: evaluation.delta.interval,
-      p95_inference_latency_ms: candidateMetrics?.p95_inference_latency_ms ?? null,
-      measured_candidate_count: defaultQuery.candidate_count,
-      default_query: defaultQuery,
-    }
+    return buildOverviewData(models, queries, evaluation, config)
   },
 }

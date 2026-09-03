@@ -8,7 +8,14 @@ from .bootstrap import (
     paired_bootstrap_difference,
     paired_bootstrap_metrics,
 )
-from .examples import ExampleCandidate, select_representative_examples
+from .examples import (
+    REQUIRED_LOSS_COUNT,
+    REQUIRED_UNCERTAIN_COUNT,
+    REQUIRED_WIN_COUNT,
+    ExampleCandidate,
+    RepresentativeExampleSelectionError,
+    select_representative_examples,
+)
 from .gates import (
     HeldoutAccessDenied,
     HeldoutAccessReceipt,
@@ -64,6 +71,9 @@ from .slices import (
 __all__ = [
     "RELEVANCE_GAINS",
     "RELEVANCE_MAPPING_VERSION",
+    "REQUIRED_LOSS_COUNT",
+    "REQUIRED_UNCERTAIN_COUNT",
+    "REQUIRED_WIN_COUNT",
     "AggregateMetric",
     "AggregateMetrics",
     "BootstrapAlignmentError",
@@ -78,6 +88,7 @@ __all__ = [
     "ReleaseGateConfig",
     "ReleaseGateInputs",
     "RelevanceLabel",
+    "RepresentativeExampleSelectionError",
     "SliceHighlights",
     "aggregate_query_metrics",
     "apply_release_gate",

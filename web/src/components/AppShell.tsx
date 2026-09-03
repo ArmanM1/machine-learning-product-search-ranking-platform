@@ -1,4 +1,5 @@
-import { NavLink, Outlet } from 'react-router-dom'
+import { useEffect, useRef } from 'react'
+import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { isFixtureMode, publicConfig } from '../api/client'
 import { EvidenceBanner } from './EvidenceBanner'
 
@@ -10,7 +11,54 @@ const navItems = [
   { to: `/experiments/${publicConfig.runId}`, label: 'Experiment' },
 ]
 
+function routeName(pathname: string) {
+  if (pathname === '/') return 'Evidence overview'
+  if (pathname === '/compare') return 'Query comparison'
+  if (pathname === '/evaluation') return 'Evaluation report'
+  if (pathname === '/failures') return 'Failure analysis'
+  if (pathname === '/experiment' || pathname.startsWith('/experiments/')) return 'Experiment provenance'
+  return 'Page not found'
+}
+
 export function AppShell() {
+  const location = useLocation()
+  const previousPath = useRef(location.pathname)
+  const pageName = routeName(location.pathname)
+
+  useEffect(() => {
+    document.title = `${pageName} | Rank / evidence`
+
+    if (previousPath.current === location.pathname) return
+    previousPath.current = location.pathname
+
+    const main = document.getElementById('main-content')
+    if (!main) return
+
+    let frame = 0
+    let observer: MutationObserver | undefined
+    const focusHeading = () => {
+      if (main.querySelector('[aria-busy="true"]')) return false
+      const heading = main.querySelector<HTMLElement>('h1')
+      if (!heading) return false
+      heading.setAttribute('tabindex', '-1')
+      heading.focus()
+      return true
+    }
+
+    frame = window.requestAnimationFrame(() => {
+      if (focusHeading()) return
+      observer = new MutationObserver(() => {
+        if (focusHeading()) observer?.disconnect()
+      })
+      observer.observe(main, { attributes: true, childList: true, subtree: true })
+    })
+
+    return () => {
+      window.cancelAnimationFrame(frame)
+      observer?.disconnect()
+    }
+  }, [location.pathname, pageName])
+
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main-content">Skip to content</a>
@@ -43,6 +91,10 @@ export function AppShell() {
       </header>
 
       <EvidenceBanner />
+
+      <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {pageName} page loaded
+      </p>
 
       <main id="main-content" tabIndex={-1}>
         <Outlet />

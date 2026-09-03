@@ -35,13 +35,17 @@ on:
         description: For apply, SHA-256 from the separately reviewed plan run
         required: false
         type: string
+      reviewed_commit_sha:
+        description: For apply, full commit SHA printed by the separately reviewed plan run
+        required: false
+        type: string
 
 permissions:
   contents: read
   id-token: write
 
 concurrency:
-  group: terraform-${{ inputs.environment }}
+  group: aws-financial-operations
   cancel-in-progress: false
 
 env:
@@ -65,25 +69,50 @@ jobs:
       SERVING_IMAGE_URI: ${{ inputs.serving_image_uri }}
       CAMPAIGN_SPEND_TO_DATE_USD: ${{ secrets.AWS_CAMPAIGN_SPEND_TO_DATE_USD }}
       REMAINING_APPLICABLE_CREDIT_USD: ${{ secrets.AWS_REMAINING_APPLICABLE_CREDIT_USD }}
+      FINANCIAL_SNAPSHOT_OBSERVED_AT: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_OBSERVED_AT }}
+      FINANCIAL_SNAPSHOT_RECEIPT_SHA256: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_RECEIPT_SHA256 }}
+      FINANCIAL_SNAPSHOT_HMAC_KEY: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_HMAC_KEY }}
+      FINANCIAL_RESERVATION_MAX_USD: ${{ secrets.AWS_FINANCIAL_RESERVATION_MAX_USD }}
+      FINANCIAL_RESERVATION_REMAINING_COMMITTED_USD: ${{ secrets.AWS_FINANCIAL_RESERVATION_REMAINING_COMMITTED_USD }}
+      FINANCIAL_RESERVATION_CPU_HOURS: ${{ secrets.AWS_FINANCIAL_RESERVATION_CPU_HOURS }}
+      FINANCIAL_RESERVATION_GPU_HOURS: ${{ secrets.AWS_FINANCIAL_RESERVATION_GPU_HOURS }}
+      FINANCIAL_CPU_HOURS_USED_TO_DATE: ${{ secrets.AWS_FINANCIAL_CPU_HOURS_USED_TO_DATE }}
+      FINANCIAL_GPU_HOURS_USED_TO_DATE: ${{ secrets.AWS_FINANCIAL_GPU_HOURS_USED_TO_DATE }}
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_WORKFLOW: infrastructure
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_INPUTS_JSON: ${{ toJSON(inputs) }}
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_COMMIT_SHA: ${{ github.sha }}
+      FINANCIAL_SNAPSHOT_SOURCE: "aws_billing_and_cost_management_console"
+      FINANCIAL_SNAPSHOT_MAX_AGE_SECONDS: "21600"
       AUTHORIZATION: ${{ inputs.authorization }}
       APPROVED_PLAN_SHA256: ${{ inputs.approved_plan_sha256 }}
+      REVIEWED_COMMIT_SHA: ${{ inputs.reviewed_commit_sha }}
       TF_STATE_BUCKET: ${{ vars.AWS_TERRAFORM_STATE_BUCKET }}
       TF_OWNER_ALIAS: ${{ vars.TF_OWNER_ALIAS }}
       TF_GITHUB_REPOSITORY: ${{ github.repository }}
+      TF_GITHUB_REPOSITORY_OWNER_ID: ${{ vars.TF_GITHUB_REPOSITORY_OWNER_ID }}
+      TF_GITHUB_REPOSITORY_ID: ${{ vars.TF_GITHUB_REPOSITORY_ID }}
       TF_GITHUB_OIDC_PROVIDER_ARN: ${{ vars.AWS_GITHUB_OIDC_PROVIDER_ARN }}
       TF_CREATE_GITHUB_OIDC_PROVIDER: ${{ vars.TF_CREATE_GITHUB_OIDC_PROVIDER || 'false' }}
-      TF_BUDGET_NOTIFICATION_EMAIL: ${{ vars.AWS_BUDGET_NOTIFICATION_EMAIL }}
-      TF_ALARM_NOTIFICATION_EMAIL: ${{ vars.AWS_ALARM_NOTIFICATION_EMAIL }}
+      DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+      TF_BUDGET_NOTIFICATION_EMAIL: ${{ secrets.AWS_BUDGET_NOTIFICATION_EMAIL }}
+      TF_ALARM_NOTIFICATION_EMAIL: ${{ secrets.AWS_ALARM_NOTIFICATION_EMAIL }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Validate authorization and zero-out-of-pocket boundary
         shell: bash
         run: |
           set -euo pipefail
           test "${ALLOW_HELDOUT_EVAL}" = "0"
+          [[ "${TF_GITHUB_REPOSITORY_OWNER_ID}" =~ ^[1-9][0-9]*$ ]]
+          [[ "${TF_GITHUB_REPOSITORY_ID}" =~ ^[1-9][0-9]*$ ]]
           if [[ "${OPERATION}" == "apply" ]]; then
             test "${AUTHORIZATION}" = "APPLY APPROVED AWS BOOTSTRAP"
             [[ "${APPROVED_PLAN_SHA256}" =~ ^[0-9a-f]{64}$ ]]
+            [[ "${REVIEWED_COMMIT_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          else
+            test "${OPERATION}" = "plan"
+            test -z "${AUTHORIZATION}"
+            test -z "${APPROVED_PLAN_SHA256}"
+            test -z "${REVIEWED_COMMIT_SHA}"
           fi
           if [[ "${ENABLE_SERVING}" == "true" ]]; then
             [[ "${SERVING_IMAGE_URI}" =~ @sha256:[0-9a-f]{64}$ ]]
@@ -102,8 +131,8 @@ jobs:
                   value = Decimal(os.environ[name])
               except (InvalidOperation, KeyError) as exc:
                   raise SystemExit(f"{name} must be a decimal number") from exc
-              if value < 0:
-                  raise SystemExit(f"{name} may not be negative")
+              if not value.is_finite() or value < 0:
+                  raise SystemExit(f"{name} must be finite and non-negative")
               return value
 
           bootstrap_allowance = Decimal("3.00")
@@ -117,12 +146,156 @@ jobs:
               raise SystemExit("Applicable credit cannot cover bootstrap allowance and reserve")
           print("Cost guard passed using a conservative USD 3 bootstrap allowance.")
           PY
+      - name: Select the exact reviewed source revision
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${OPERATION}" == "apply" ]]; then
+            target="${REVIEWED_COMMIT_SHA}"
+          else
+            target="${GITHUB_SHA}"
+          fi
+          echo "target=${target}" >> "${GITHUB_OUTPUT}"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.source.outputs.target }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - name: Install the protected financial snapshot validator dependency
+        run: python -m pip install --disable-pip-version-check pydantic==2.13.5
+      - name: Prove the selected revision belongs to main
+        shell: bash
+        env:
+          TARGET_COMMIT: ${{ steps.source.outputs.target }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${TARGET_COMMIT}"
+          git merge-base --is-ancestor "${TARGET_COMMIT}" "origin/main"
+          if [[ "${OPERATION}" == "plan" ]]; then
+            test "${TARGET_COMMIT}" = "${GITHUB_SHA}"
+          fi
       - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: gha-terraform-${{ github.run_id }}
           mask-aws-account-id: true
+      - name: Atomically reserve the signed campaign capacity
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${TF_STATE_BUCKET:?Missing AWS_TERRAFORM_STATE_BUCKET variable}"
+          python -m pip install --disable-pip-version-check pydantic==2.13.5
+          PYTHONPATH=src python scripts/reserve_financial_capacity.py reserve \
+            --bucket "${TF_STATE_BUCKET}" \
+            --output financial-capacity-reservation.json
+      - name: Attest the exact deployment identity and first-apply trust root
+        id: identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          account_id="$(aws sts get-caller-identity --query Account --output text)"
+          [[ "${account_id}" =~ ^[0-9]{12}$ ]]
+          seed_role_arn="arn:aws:iam::${account_id}:role/product-search-github-platform-seed-prod"
+          infrastructure_role_arn="arn:aws:iam::${account_id}:role/product-search-ranking-prod-github-aws-infrastructure"
+          caller_arn="$(aws sts get-caller-identity --query Arn --output text)"
+
+          if [[ "${DEPLOY_ROLE_ARN}" == "${seed_role_arn}" ]]; then
+            [[ "${caller_arn}" == "arn:aws:sts::${account_id}:assumed-role/product-search-github-platform-seed-prod/"* ]]
+            attestation_dir="$(mktemp -d)"
+            cleanup_attestation() {
+              rm -f "${attestation_dir}/role.json" "${attestation_dir}/inline-list.json"
+              rm -f "${attestation_dir}/attached-list.json" "${attestation_dir}/inline.json"
+              rm -f "${attestation_dir}/boundary.json" "${attestation_dir}/boundary-version.json"
+              rmdir "${attestation_dir}"
+            }
+            trap cleanup_attestation EXIT
+            aws iam get-role --role-name product-search-github-platform-seed-prod --output json \
+              > "${attestation_dir}/role.json"
+            aws iam list-role-policies --role-name product-search-github-platform-seed-prod \
+              --output json > "${attestation_dir}/inline-list.json"
+            aws iam list-attached-role-policies --role-name product-search-github-platform-seed-prod \
+              --output json > "${attestation_dir}/attached-list.json"
+            aws iam get-role-policy \
+              --role-name product-search-github-platform-seed-prod \
+              --policy-name first-platform-apply-only \
+              --output json > "${attestation_dir}/inline.json"
+            boundary_arn="arn:aws:iam::${account_id}:policy/product-search-ranking-prod-permissions-boundary"
+            aws iam get-policy --policy-arn "${boundary_arn}" --output json \
+              > "${attestation_dir}/boundary.json"
+            boundary_version="$(jq -er '.Policy.DefaultVersionId' "${attestation_dir}/boundary.json")"
+            aws iam get-policy-version --policy-arn "${boundary_arn}" \
+              --version-id "${boundary_version}" --output json \
+              > "${attestation_dir}/boundary-version.json"
+            ATTESTATION_DIR="${attestation_dir}" ACCOUNT_ID="${account_id}" python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          from urllib.parse import unquote
+
+          from scripts.render_bootstrap_iam import (
+              build_boundary,
+              build_platform_seed_policy,
+              build_trust,
+          )
+
+          root = Path(os.environ["ATTESTATION_DIR"])
+          account_id = os.environ["ACCOUNT_ID"]
+
+          def load(name: str) -> dict[str, object]:
+              return json.loads((root / name).read_text(encoding="utf-8"))
+
+          def policy_document(value: object) -> object:
+              if isinstance(value, str):
+                  return json.loads(unquote(value))
+              return value
+
+          role = load("role.json")["Role"]
+          inline_names = load("inline-list.json").get("PolicyNames")
+          attached = load("attached-list.json").get("AttachedPolicies")
+          inline = policy_document(load("inline.json")["PolicyDocument"])
+          boundary = policy_document(load("boundary-version.json")["PolicyVersion"]["Document"])
+          expected_role_arn = (
+              f"arn:aws:iam::{account_id}:role/product-search-github-platform-seed-prod"
+          )
+          if role.get("Arn") != expected_role_arn or role.get("RoleName") != expected_role_arn.rsplit("/", 1)[1]:
+              raise SystemExit("Live seed role identity differs from the exact production contract")
+          if role.get("PermissionsBoundary") is not None:
+              raise SystemExit("The external seed role must not have a permissions boundary")
+          if inline_names != ["first-platform-apply-only"] or attached != []:
+              raise SystemExit("Seed role must have exactly one expected inline policy and no attachments")
+          expected_trust = build_trust(
+              account_id,
+              os.environ["TF_GITHUB_REPOSITORY"].split("/", 1)[0],
+              os.environ["TF_GITHUB_REPOSITORY_OWNER_ID"],
+              os.environ["TF_GITHUB_REPOSITORY_ID"],
+          )
+          if policy_document(role.get("AssumeRolePolicyDocument")) != expected_trust:
+              raise SystemExit("Live seed trust differs from the immutable repository contract")
+          if inline != build_platform_seed_policy(account_id, "prod"):
+              raise SystemExit("Live seed policy differs from the generated exact contract")
+          expected_boundary = build_boundary(account_id, "prod")
+          if boundary != expected_boundary:
+              raise SystemExit("Live default boundary version differs from the generated exact contract")
+          canonical = json.dumps(expected_boundary, sort_keys=True, separators=(",", ":")).encode()
+          boundary_hash = hashlib.sha256(canonical).hexdigest()
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+              output.write("mode=seed\n")
+              output.write(f"boundary_sha256={boundary_hash}\n")
+          PY
+          else
+            test "${DEPLOY_ROLE_ARN}" = "${infrastructure_role_arn}"
+            [[ "${caller_arn}" == "arn:aws:sts::${account_id}:assumed-role/product-search-ranking-prod-github-aws-infrastructure/"* ]]
+            {
+              echo "mode=persistent"
+              echo "boundary_sha256=attested-only-by-exact-seed"
+            } >> "${GITHUB_OUTPUT}"
+          fi
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: "1.10.5"
@@ -132,46 +305,137 @@ jobs:
         shell: bash
         env:
           TF_IN_AUTOMATION: "true"
+          TARGET_COMMIT: ${{ steps.source.outputs.target }}
+          DEPLOYMENT_IDENTITY_MODE: ${{ steps.identity.outputs.mode }}
+          BOUNDARY_POLICY_SHA256: ${{ steps.identity.outputs.boundary_sha256 }}
         run: |
           set -euo pipefail
           terraform fmt -check -recursive ../../
+          lockfile_sha256_before="$(sha256sum .terraform.lock.hcl | cut -d' ' -f1)"
           terraform init -input=false \
+            -lockfile=readonly \
             -backend-config="bucket=${TF_STATE_BUCKET}" \
             -backend-config="key=product-search-ranking/${DEPLOYMENT_ENVIRONMENT}/terraform.tfstate" \
             -backend-config="region=${AWS_REGION}" \
             -backend-config="encrypt=true" \
             -backend-config="use_lockfile=true"
+          lockfile_sha256_after="$(sha256sum .terraform.lock.hcl | cut -d' ' -f1)"
+          test "${lockfile_sha256_before}" = "${lockfile_sha256_after}"
+          export TF_LOCKFILE_SHA256="${lockfile_sha256_after}"
+          terraform version -json > terraform-version.private.json
           terraform validate
+          terraform show -json > current-state.private.json
+          api_state="$(jq -c '[.. | objects | select(.address? == "module.platform.aws_lambda_function.api[0]")] | if length == 0 then null elif length == 1 then .[0] else error("duplicate Lambda state") end' current-state.private.json)"
+          serving_enabled=false
+          serving_image_uri=""
+          serving_git_sha=""
+          serving_deployment_nonce=""
+          if [[ "${api_state}" != "null" ]]; then
+            test "${ENABLE_SERVING}" = "true" || {
+              echo "Serving already exists; maintenance must preserve it with enable_serving=true." >&2
+              exit 1
+            }
+            serving_enabled=true
+            serving_image_uri="$(jq -er '.values.image_uri' <<<"${api_state}")"
+            serving_git_sha="$(jq -er '.values.environment[0].variables.SEARCH_RANK_SERVICE_VERSION' <<<"${api_state}")"
+            serving_deployment_nonce="$(jq -er '.values.environment[0].variables.SEARCH_RANK_DEPLOYMENT_NONCE' <<<"${api_state}")"
+            [[ "${serving_image_uri}" =~ ^[0-9]{12}\.dkr\.ecr\.us-east-1\.amazonaws\.com/[a-z0-9/_-]+@sha256:[0-9a-f]{64}$ ]]
+            [[ "${serving_git_sha}" =~ ^[0-9a-f]{40}$ ]]
+            [[ "${serving_deployment_nonce}" =~ ^[1-9][0-9]*-[1-9][0-9]*-[A-Za-z0-9][A-Za-z0-9._-]{2,62}$ ]]
+            if [[ -n "${SERVING_IMAGE_URI}" && "${SERVING_IMAGE_URI}" != "${serving_image_uri}" ]]; then
+              echo "Infrastructure maintenance cannot replace the deployed image; use deploy.yml." >&2
+              exit 1
+            fi
+          else
+            test "${ENABLE_SERVING}" = "false" || {
+              echo "Only deploy.yml may create the first serving deployment." >&2
+              exit 1
+            }
+            test -z "${SERVING_IMAGE_URI}"
+          fi
+          public_serving_enabled=false
+          if [[ "${serving_enabled}" == "true" ]]; then
+            terraform_state="$(terraform state list)"
+            for public_address in \
+              'module.platform.aws_apigatewayv2_api.production[0]' \
+              'module.platform.aws_cloudfront_distribution.site[0]' \
+              'module.platform.aws_lambda_permission.production_api[0]' \
+              'module.platform.aws_s3_bucket_policy.site[0]'; do
+              if grep -Fqx "${public_address}" <<<"${terraform_state}"; then
+                public_serving_enabled=true
+                break
+              fi
+            done
+          fi
+          PYTHONPATH=../../../../src python \
+            ../../../../scripts/validate_financial_snapshot.py emit --output /dev/null
           terraform plan -input=false -out=reviewed.tfplan \
             -var="owner_alias=${TF_OWNER_ALIAS}" \
             -var="github_repository=${TF_GITHUB_REPOSITORY}" \
+            -var="github_repository_owner_id=${TF_GITHUB_REPOSITORY_OWNER_ID}" \
+            -var="github_repository_id=${TF_GITHUB_REPOSITORY_ID}" \
             -var="create_github_oidc_provider=${TF_CREATE_GITHUB_OIDC_PROVIDER}" \
             -var="existing_github_oidc_provider_arn=${TF_GITHUB_OIDC_PROVIDER_ARN}" \
             -var="enable_budgets=${ENABLE_BUDGETS}" \
             -var="budget_notification_email=${TF_BUDGET_NOTIFICATION_EMAIL}" \
             -var="alarm_notification_email=${TF_ALARM_NOTIFICATION_EMAIL}" \
-            -var="enable_serving=${ENABLE_SERVING}" \
-            -var="serving_image_uri=${SERVING_IMAGE_URI}"
+            -var="enable_serving=${serving_enabled}" \
+            -var="enable_public_serving=${public_serving_enabled}" \
+            -var="serving_image_uri=${serving_image_uri}" \
+            -var="serving_git_sha=${serving_git_sha}" \
+            -var="serving_deployment_nonce=${serving_deployment_nonce}"
           terraform show -json reviewed.tfplan > reviewed-plan.private.json
           python - <<'PY'
           import json
+          import os
           from pathlib import Path
 
           source = Path("reviewed-plan.private.json")
           payload = json.loads(source.read_text(encoding="utf-8"))
+          version = json.loads(Path("terraform-version.private.json").read_text(encoding="utf-8"))
           destructive = []
+          protected_identity_changes = []
           for change in payload.get("resource_changes", []):
               actions = change.get("change", {}).get("actions", [])
               if "delete" in actions:
                   destructive.append({"address": change.get("address"), "actions": actions})
+              if (
+                  os.environ["DEPLOYMENT_IDENTITY_MODE"] == "persistent"
+                  and actions not in ([], ["no-op"])
+                  and change.get("type")
+                  in {
+                      "aws_iam_openid_connect_provider",
+                      "aws_iam_role",
+                      "aws_iam_role_policy",
+                      "aws_s3_bucket_policy",
+                  }
+              ):
+                  protected_identity_changes.append(
+                      {"address": change.get("address"), "actions": actions}
+                  )
           if destructive:
               raise SystemExit(
                   "infrastructure workflow refuses delete/replace actions; use the audited human teardown path: "
                   + json.dumps(destructive, sort_keys=True)
               )
+          if protected_identity_changes:
+              raise SystemExit(
+                  "persistent infrastructure role cannot change identities or bucket policies; "
+                  "recreate and attest the exact external seed: "
+                  + json.dumps(protected_identity_changes, sort_keys=True)
+              )
           payload.pop("timestamp", None)
+          canonical = {
+              "reviewed_commit_sha": os.environ["TARGET_COMMIT"],
+              "terraform_lock_sha256": os.environ["TF_LOCKFILE_SHA256"],
+              "terraform_version": version.get("terraform_version"),
+              "provider_selections": version.get("provider_selections", {}),
+              "deployment_identity_mode": os.environ["DEPLOYMENT_IDENTITY_MODE"],
+              "boundary_policy_sha256": os.environ["BOUNDARY_POLICY_SHA256"],
+              "plan": payload,
+          }
           Path("reviewed-plan.canonical.json").write_text(
-              json.dumps(payload, sort_keys=True, separators=(",", ":")), encoding="utf-8"
+              json.dumps(canonical, sort_keys=True, separators=(",", ":")), encoding="utf-8"
           )
           PY
           plan_hash="$(sha256sum reviewed-plan.canonical.json | cut -d' ' -f1)"
@@ -183,17 +447,28 @@ jobs:
             > reviewed-plan.txt
           {
             echo "Canonical reviewed plan SHA-256: \`${plan_hash}\`"
+            echo "Reviewed commit: \`${TARGET_COMMIT}\`"
+            echo "Production lockfile SHA-256: \`${TF_LOCKFILE_SHA256}\`"
+            echo "Provider selections: \`$(jq -c '.provider_selections' terraform-version.private.json)\`"
+            echo "Deployment identity mode: \`${DEPLOYMENT_IDENTITY_MODE}\`"
+            echo "Boundary policy SHA-256: \`${BOUNDARY_POLICY_SHA256}\`"
             echo "Apply requires this exact hash in a separate protected dispatch."
           } >> "${GITHUB_STEP_SUMMARY}"
           if [[ "${OPERATION}" == "apply" ]]; then
             test "${plan_hash}" = "${APPROVED_PLAN_SHA256}"
           fi
+          rm -f reviewed-plan.private.json reviewed-plan.canonical.json terraform-version.private.json
       - name: Apply the exact reviewed plan
         if: inputs.operation == 'apply'
         working-directory: infra/terraform/environments/${{ inputs.environment }}
         env:
           TF_IN_AUTOMATION: "true"
-        run: terraform apply -input=false -auto-approve reviewed.tfplan
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPATH=../../../../src python \
+            ../../../../scripts/validate_financial_snapshot.py emit --output /dev/null
+          terraform apply -input=false -auto-approve reviewed.tfplan
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: terraform-${{ inputs.environment }}-${{ inputs.operation }}-${{ github.run_id }}

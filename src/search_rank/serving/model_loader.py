@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,9 +10,11 @@ from typing import Any, Protocol, cast
 import numpy as np
 from sentence_transformers import CrossEncoder
 
-from search_rank.artifacts.checksums import sha256_directory
+from search_rank.artifacts.checksums import sha256_directory, sha256_file
 from search_rank.baselines.bm25 import tokenize
 from search_rank.evaluation.metrics import rank_by_score
+from search_rank.schemas.evidence import ReleaseManifest
+from search_rank.schemas.model import ModelArtifact
 
 from .query_store import CuratedQuery
 
@@ -140,10 +141,42 @@ def load_rankers(
     release_manifest_path: str | Path,
 ) -> tuple[dict[str, Ranker], dict[str, Any]]:
     manifest_path = Path(release_manifest_path)
-    manifest = cast(
-        dict[str, Any],
-        json.loads(manifest_path.read_text(encoding="utf-8")),
+    manifest = ReleaseManifest.model_validate_json(
+        manifest_path.read_text(encoding="utf-8")
+    ).model_dump(
+        mode="json",
+        exclude_none=True,
     )
+    if manifest["evidence_mode"] == "verified":
+        artifact_path = manifest_path.parent / "candidate-model-artifact.json"
+        artifact = ModelArtifact.model_validate_json(artifact_path.read_text(encoding="utf-8"))
+        artifact_file_checksum = "sha256:" + sha256_file(artifact_path)
+        expected_file_checksum = manifest["artifact_checksums"].get("candidate-model-artifact.json")
+        candidate = next(
+            (
+                model
+                for model in manifest["models"]
+                if model["model_id"] == artifact.model_id and model["kind"] == "fine_tuned"
+            ),
+            None,
+        )
+        if (
+            artifact_file_checksum != expected_file_checksum
+            or candidate is None
+            or artifact.artifact_checksum != candidate["artifact_checksum"]
+            or artifact.dataset_manifest_hash != manifest["dataset_manifest_hash"]
+            or artifact.evaluation_report_id != manifest["evaluation_report_id"]
+            or artifact.git_sha != manifest["provenance"]["training"]["git_sha"]
+            or artifact.image_digest != manifest["provenance"]["training"]["image_digest"]
+            or artifact.run_id != manifest["provenance"]["training"]["run_id"]
+            or artifact.config_hash != manifest["provenance"]["training"]["config_hash"]
+            or artifact.selected_training_run_manifest_sha256
+            != manifest["provenance"]["training"]["run_manifest_sha256"]
+            or artifact.evaluation_report_sha256
+            != manifest["artifact_checksums"]["evaluation-report.json"]
+            or artifact.promoted != (manifest["promoted_model_id"] == artifact.model_id)
+        ):
+            raise ValueError("candidate ModelArtifact differs from the verified release identity")
     rankers: dict[str, Ranker] = {}
     for model in manifest["models"]:
         kind = model["kind"]

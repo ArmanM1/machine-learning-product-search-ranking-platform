@@ -1,0 +1,177 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "config_hash": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Config Hash",
+      "type": "string"
+    },
+    "dataset_manifest_hash": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Dataset Manifest Hash",
+      "type": "string"
+    },
+    "dataset_name": {
+      "minLength": 1,
+      "title": "Dataset Name",
+      "type": "string"
+    },
+    "dataset_version": {
+      "minLength": 1,
+      "title": "Dataset Version",
+      "type": "string"
+    },
+    "dataset_locale": {
+      "const": "us",
+      "title": "Dataset Locale",
+      "type": "string"
+    },
+    "split": {
+      "const": "validation",
+      "title": "Split",
+      "type": "string"
+    },
+    "metrics": {
+      "additionalProperties": {
+        "type": "number"
+      },
+      "propertyNames": {
+        "minLength": 1
+      },
+      "title": "Metrics",
+      "type": "object"
+    },
+    "system_metrics": {
+      "additionalProperties": {
+        "additionalProperties": {
+          "type": "number"
+        },
+        "propertyNames": {
+          "minLength": 1
+        },
+        "type": "object"
+      },
+      "propertyNames": {
+        "minLength": 1
+      },
+      "title": "System Metrics",
+      "type": "object"
+    },
+    "system_metric_query_counts": {
+      "additionalProperties": {
+        "additionalProperties": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "propertyNames": {
+          "minLength": 1
+        },
+        "type": "object"
+      },
+      "propertyNames": {
+        "minLength": 1
+      },
+      "title": "System Metric Query Counts",
+      "type": "object"
+    },
+    "system_metric_excluded_query_counts": {
+      "additionalProperties": {
+        "additionalProperties": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "propertyNames": {
+          "minLength": 1
+        },
+        "type": "object"
+      },
+      "propertyNames": {
+        "minLength": 1
+      },
+      "title": "System Metric Excluded Query Counts",
+      "type": "object"
+    },
+    "p95_inference_latency_ms": {
+      "additionalProperties": {
+        "minimum": 0,
+        "type": "number"
+      },
+      "propertyNames": {
+        "minLength": 1
+      },
+      "title": "P95 Inference Latency Ms",
+      "type": "object"
+    },
+    "strongest_baseline_id": {
+      "minLength": 1,
+      "title": "Strongest Baseline Id",
+      "type": "string"
+    },
+    "strongest_baseline_value": {
+      "title": "Strongest Baseline Value",
+      "type": "number"
+    },
+    "validation_query_count": {
+      "minimum": 1,
+      "title": "Validation Query Count",
+      "type": "integer"
+    },
+    "excluded_query_count": {
+      "minimum": 0,
+      "title": "Excluded Query Count",
+      "type": "integer"
+    },
+    "rankings": {
+      "additionalProperties": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "propertyNames": {
+        "minLength": 1
+      },
+      "title": "Rankings",
+      "type": "object"
+    },
+    "resumed_from_run_id": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Resumed From Run Id"
+    }
+  },
+  "required": [
+    "schema_version",
+    "config_hash",
+    "dataset_manifest_hash",
+    "dataset_name",
+    "dataset_version",
+    "dataset_locale",
+    "split",
+    "metrics",
+    "system_metrics",
+    "system_metric_query_counts",
+    "system_metric_excluded_query_counts",
+    "p95_inference_latency_ms",
+    "strongest_baseline_id",
+    "strongest_baseline_value",
+    "validation_query_count",
+    "excluded_query_count",
+    "rankings",
+    "resumed_from_run_id"
+  ],
+  "title": "BaselineSummary",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.example.invalid/search-rank/baseline_summary.schema.json"
+}

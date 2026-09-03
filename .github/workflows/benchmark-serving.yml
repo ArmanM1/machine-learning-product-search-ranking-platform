@@ -25,7 +25,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: production-serving-benchmark
+  group: aws-financial-operations
   cancel-in-progress: false
 
 env:
@@ -41,7 +41,7 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    environment: production
+    environment: production-benchmark
     env:
       RELEASE_ID: ${{ inputs.release_id }}
       MODEL_ID: ${{ inputs.model_id }}
@@ -49,13 +49,32 @@ jobs:
       AUTHORIZATION: ${{ inputs.authorization }}
       CAMPAIGN_SPEND_TO_DATE_USD: ${{ secrets.AWS_CAMPAIGN_SPEND_TO_DATE_USD }}
       REMAINING_APPLICABLE_CREDIT_USD: ${{ secrets.AWS_REMAINING_APPLICABLE_CREDIT_USD }}
+      FINANCIAL_SNAPSHOT_OBSERVED_AT: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_OBSERVED_AT }}
+      FINANCIAL_SNAPSHOT_RECEIPT_SHA256: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_RECEIPT_SHA256 }}
+      FINANCIAL_SNAPSHOT_HMAC_KEY: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_HMAC_KEY }}
+      FINANCIAL_RESERVATION_MAX_USD: ${{ secrets.AWS_FINANCIAL_RESERVATION_MAX_USD }}
+      FINANCIAL_RESERVATION_REMAINING_COMMITTED_USD: ${{ secrets.AWS_FINANCIAL_RESERVATION_REMAINING_COMMITTED_USD }}
+      FINANCIAL_RESERVATION_CPU_HOURS: ${{ secrets.AWS_FINANCIAL_RESERVATION_CPU_HOURS }}
+      FINANCIAL_RESERVATION_GPU_HOURS: ${{ secrets.AWS_FINANCIAL_RESERVATION_GPU_HOURS }}
+      FINANCIAL_CPU_HOURS_USED_TO_DATE: ${{ secrets.AWS_FINANCIAL_CPU_HOURS_USED_TO_DATE }}
+      FINANCIAL_GPU_HOURS_USED_TO_DATE: ${{ secrets.AWS_FINANCIAL_GPU_HOURS_USED_TO_DATE }}
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_WORKFLOW: benchmark-serving
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_INPUTS_JSON: ${{ toJSON(inputs) }}
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_COMMIT_SHA: ${{ github.sha }}
+      FINANCIAL_SNAPSHOT_SOURCE: "aws_billing_and_cost_management_console"
+      FINANCIAL_SNAPSHOT_MAX_AGE_SECONDS: "21600"
+      TF_STATE_BUCKET: ${{ vars.AWS_TERRAFORM_STATE_BUCKET }}
       ARTIFACT_BUCKET: ${{ vars.AWS_ARTIFACT_BUCKET }}
       LAMBDA_FUNCTION_NAME: ${{ vars.AWS_LAMBDA_FUNCTION_NAME }}
+      BENCHMARK_RUN_ID: github-${{ github.run_id }}-attempt-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
+      - name: Install the pinned runtime contract validator
+        shell: bash
+        run: python -m pip install --disable-pip-version-check pydantic==2.13.5
       - name: Enforce immutable inputs and the zero-out-of-pocket guard
         shell: bash
         run: |
@@ -67,13 +86,20 @@ jobs:
           : "${ARTIFACT_BUCKET:?Missing AWS_ARTIFACT_BUCKET variable}"
           : "${LAMBDA_FUNCTION_NAME:?Missing AWS_LAMBDA_FUNCTION_NAME variable}"
           mkdir -p .benchmark-evidence
+          PYTHONPATH=src python scripts/validate_financial_snapshot.py emit \
+            --output .benchmark-evidence/financial-snapshot.json
           python - <<'PY'
           import json
           import os
           import re
           import urllib.parse
+          from datetime import UTC, datetime
           from decimal import Decimal, InvalidOperation
           from pathlib import Path
+
+          financial_snapshot = json.loads(
+              Path(".benchmark-evidence/financial-snapshot.json").read_text(encoding="utf-8")
+          )
 
           def amount(name: str) -> Decimal:
               try:
@@ -119,13 +145,21 @@ jobs:
               json.dumps(
                   {
                       "schema_version": "1.0.0",
+                      "artifact_type": "benchmark_cost_preflight",
                       "status": "passed",
+                      "checked_at": datetime.now(UTC).isoformat(),
+                      "benchmark_run_id": os.environ["BENCHMARK_RUN_ID"],
+                      "release_id": os.environ["RELEASE_ID"],
+                      "model_id": os.environ["MODEL_ID"],
+                      "region": os.environ["AWS_REGION"],
+                      "public_origin": normalized,
                       "maximum_out_of_pocket_usd": "0",
                       "campaign_envelope_usd": "40",
                       "required_credit_reserve_usd": "40",
                       "conservative_benchmark_allowance_usd": str(allowance),
                       "heldout_access_enabled": False,
                       "sensitive_balance_values_recorded": False,
+                      "financial_snapshot": financial_snapshot,
                   },
                   indent=2,
                   sort_keys=True,
@@ -134,12 +168,22 @@ jobs:
               encoding="utf-8",
           )
           PY
+          rm .benchmark-evidence/financial-snapshot.json
       - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ vars.AWS_BENCHMARK_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: gha-benchmark-${{ github.run_id }}
           mask-aws-account-id: true
+      - name: Atomically reserve the signed campaign capacity
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${TF_STATE_BUCKET:?Missing AWS_TERRAFORM_STATE_BUCKET variable}"
+          python -m pip install --disable-pip-version-check pydantic==2.13.5
+          PYTHONPATH=src python scripts/reserve_financial_capacity.py reserve \
+            --bucket "${TF_STATE_BUCKET}" \
+            --output financial-capacity-reservation.json
       - name: Bind the benchmark to the current promoted release
         shell: bash
         run: |
@@ -147,43 +191,78 @@ jobs:
           aws s3api head-object \
             --bucket "${ARTIFACT_BUCKET}" \
             --key promoted/current.json > current-pointer-head.json
+          pointer_version_id="$(jq -er '.VersionId' current-pointer-head.json)"
+          pointer_etag="$(jq -er '.ETag' current-pointer-head.json)"
           aws s3api get-object \
             --bucket "${ARTIFACT_BUCKET}" \
             --key promoted/current.json \
-            current-pointer.json >/dev/null
+            --version-id "${pointer_version_id}" \
+            current-pointer.json > current-pointer-get.json
+          jq -e \
+            --arg version "${pointer_version_id}" \
+            --arg etag "${pointer_etag}" \
+            '.VersionId == $version and .ETag == $etag' \
+            current-pointer-get.json >/dev/null
           jq -e \
             --arg release "${RELEASE_ID}" \
             --arg model "${MODEL_ID}" \
              '.release_id == $release and .model_id == $model and
-              .bundle_s3_key == ("promoted/" + $model + "/") and
-              (.evidence_mode == "validation_only" or .evidence_mode == "verified") and
-              (.git_sha | test("^[0-9a-f]{40}$"))' \
+               ((.evidence_mode == "validation_only" and
+                 .bundle_s3_key == ("promoted/" + $model + "/")) or
+                (.evidence_mode == "verified" and
+                 .bundle_s3_key == ("promoted/releases/" + $release + "/"))) and
+               (.git_sha | test("^[0-9a-f]{40}$"))' \
             current-pointer.json >/dev/null
+          bundle_s3_key="$(jq -er '.bundle_s3_key' current-pointer.json)"
+          [[ "${bundle_s3_key}" =~ ^promoted/[A-Za-z0-9._@/-]+/$ ]]
+          [[ "${bundle_s3_key}" != *".."* ]]
           aws s3 cp \
-            "s3://${ARTIFACT_BUCKET}/promoted/${MODEL_ID}/release-manifest.json" \
+            "s3://${ARTIFACT_BUCKET}/${bundle_s3_key}release-manifest.json" \
             release-manifest.json --no-progress
           aws s3 cp \
-            "s3://${ARTIFACT_BUCKET}/promoted/${MODEL_ID}/bundle-checksums.json" \
+            "s3://${ARTIFACT_BUCKET}/${bundle_s3_key}bundle-checksums.json" \
             bundle-checksums.json --no-progress
           aws s3 cp \
-            "s3://${ARTIFACT_BUCKET}/promoted/${MODEL_ID}/public-evidence.json" \
+            "s3://${ARTIFACT_BUCKET}/${bundle_s3_key}public-evidence.json" \
             public-evidence.json --no-progress
           aws s3 cp \
-            "s3://${ARTIFACT_BUCKET}/promoted/${MODEL_ID}/curated-queries.json" \
+            "s3://${ARTIFACT_BUCKET}/${bundle_s3_key}curated-queries.json" \
             curated-queries.json --no-progress
+          aws s3api head-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key "public/${RELEASE_ID}/deployment-evidence.json" \
+            > deployment-evidence-head.json
+          deployment_version_id="$(jq -er '.VersionId' deployment-evidence-head.json)"
+          deployment_etag="$(jq -er '.ETag' deployment-evidence-head.json)"
+          aws s3api get-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key "public/${RELEASE_ID}/deployment-evidence.json" \
+            --version-id "${deployment_version_id}" \
+            deployment-evidence.json > deployment-evidence-get.json
+          jq -e \
+            --arg version "${deployment_version_id}" \
+            --arg etag "${deployment_etag}" \
+            '.VersionId == $version and .ETag == $etag' \
+            deployment-evidence-get.json >/dev/null
+          aws s3 cp \
+            "s3://${ARTIFACT_BUCKET}/${bundle_s3_key}LICENSE" \
+            LICENSE --no-progress
+          aws s3 cp \
+            "s3://${ARTIFACT_BUCKET}/${bundle_s3_key}NOTICE" \
+            NOTICE --no-progress
           evidence_mode="$(jq -r '.evidence_mode' current-pointer.json)"
           case "${evidence_mode}" in
             validation_only)
               aws s3 cp \
-                "s3://${ARTIFACT_BUCKET}/promoted/${MODEL_ID}/baseline-summary.json" \
+                "s3://${ARTIFACT_BUCKET}/${bundle_s3_key}baseline-summary.json" \
                 baseline-summary.json --no-progress
               ;;
             verified)
               aws s3 cp \
-                "s3://${ARTIFACT_BUCKET}/promoted/${MODEL_ID}/evaluation-report.json" \
+                "s3://${ARTIFACT_BUCKET}/${bundle_s3_key}evaluation-report.json" \
                 evaluation-report.json --no-progress
               aws s3 cp \
-                "s3://${ARTIFACT_BUCKET}/promoted/${MODEL_ID}/evaluation-provenance.json" \
+                "s3://${ARTIFACT_BUCKET}/${bundle_s3_key}evaluation-provenance.json" \
                 evaluation-provenance.json --no-progress
               ;;
             *)
@@ -193,7 +272,7 @@ jobs:
           esac
           aws s3api list-objects-v2 \
             --bucket "${ARTIFACT_BUCKET}" \
-            --prefix "promoted/${MODEL_ID}/" > promoted-bundle-objects.json
+            --prefix "${bundle_s3_key}" > promoted-bundle-objects.json
           python - <<'PY'
           import hashlib
           import json
@@ -223,7 +302,12 @@ jobs:
               raise SystemExit("release manifest does not bind the requested immutable release")
           if manifest.get("promoted_model_id") != expected_model:
               raise SystemExit("release manifest does not bind the requested immutable model")
-          if pointer.get("bundle_s3_key") != f"promoted/{expected_model}/":
+          expected_prefix = (
+              f"promoted/{expected_model}/"
+              if pointer.get("evidence_mode") == "validation_only"
+              else f"promoted/releases/{expected_release}/"
+          )
+          if pointer.get("bundle_s3_key") != expected_prefix:
               raise SystemExit("promotion pointer bundle prefix is not canonical")
           mode = manifest.get("evidence_mode")
           if mode not in {"validation_only", "verified"}:
@@ -236,7 +320,7 @@ jobs:
               raise SystemExit("bundle checksum inventory has an invalid schema")
           if any(require_sha256(value, f"bundle checksum for {name}") != value for name, value in files.items()):
               raise SystemExit("bundle checksum inventory is invalid")
-          prefix = f"promoted/{expected_model}/"
+          prefix = expected_prefix
           if objects.get("IsTruncated"):
               raise SystemExit("promoted bundle inventory response was unexpectedly truncated")
           object_names = {
@@ -256,6 +340,8 @@ jobs:
               "release-manifest.json",
               "public-evidence.json",
               "curated-queries.json",
+              "LICENSE",
+              "NOTICE",
               *mode_files,
           }
           for name in local_files:
@@ -264,7 +350,13 @@ jobs:
                   raise SystemExit(f"release artifact checksum is absent or invalid: {name}")
 
           artifact_checksums = manifest.get("artifact_checksums")
-          expected_artifacts = {"public-evidence.json", "curated-queries.json", *mode_files}
+          expected_artifacts = {
+              "public-evidence.json",
+              "curated-queries.json",
+              "LICENSE",
+              "NOTICE",
+              *mode_files,
+          }
           if not isinstance(artifact_checksums, dict) or set(artifact_checksums) != expected_artifacts:
               raise SystemExit("release manifest public artifact inventory is not exact")
           for name in expected_artifacts:
@@ -273,6 +365,9 @@ jobs:
 
           dataset_hash = require_sha256(
               manifest.get("dataset_manifest_hash"), "release dataset content identity"
+          )
+          split_hash = require_sha256(
+              manifest.get("split_manifest_hash"), "release split manifest identity"
           )
           models = manifest.get("models")
           if not isinstance(models, list) or not models:
@@ -301,6 +396,8 @@ jobs:
               raise SystemExit("public evidence sections do not share the release mode")
           if run.get("dataset_manifest_hash") != dataset_hash:
               raise SystemExit("public run and release dataset identities differ")
+          if run.get("split_manifest_hash") != split_hash:
+              raise SystemExit("public run and release split identities differ")
           if run.get("git_sha") != manifest.get("git_sha"):
               raise SystemExit("public run and release Git identities differ")
           if run.get("model_artifact_checksum") != model_checksum:
@@ -319,20 +416,35 @@ jobs:
                   or analysis.get("status") != "not_performed"
               ):
                   raise SystemExit("validation-only public evidence semantics are invalid")
-          elif (
-              run.get("status") != "complete"
-              or not isinstance(run.get("test_access_count"), int)
-              or run["test_access_count"] < 1
-              or evaluation.get("report_id") != manifest.get("evaluation_report_id")
-              or evaluation.get("candidate_model_id") != expected_model
-              or evaluation.get("release_status") != "passed"
-          ):
-              raise SystemExit("verified public evidence semantics are invalid")
+          else:
+              status = evaluation.get("release_status")
+              decision_valid = (
+                  status == "passed"
+                  and evaluation.get("candidate_model_id") == expected_model
+                  and pointer.get("gate_passed") is True
+                  and pointer.get("release_decision") == "promote_candidate"
+              ) or (
+                  status == "failed"
+                  and evaluation.get("strongest_baseline_model_id") == expected_model
+                  and evaluation.get("candidate_model_id") != expected_model
+                  and pointer.get("gate_passed") is False
+                  and pointer.get("release_decision") == "retain_baseline"
+                  and (pointer.get("previous") or {}).get("model_id") == expected_model
+              )
+              if (
+                  run.get("status") != "complete"
+                  or not isinstance(run.get("test_access_count"), int)
+                  or run["test_access_count"] < 1
+                  or evaluation.get("report_id") != manifest.get("evaluation_report_id")
+                  or not decision_valid
+              ):
+                  raise SystemExit("verified public evidence semantics are invalid")
 
           with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as handle:
               handle.write(f"PUBLIC_RUN_ID={run_id}\n")
               handle.write(f"EVIDENCE_MODE={mode}\n")
               handle.write(f"DATASET_MANIFEST_HASH={dataset_hash}\n")
+              handle.write(f"SPLIT_MANIFEST_HASH={split_hash}\n")
               handle.write(f"MODEL_ARTIFACT_CHECKSUM={model_checksum}\n")
           PY
       - name: Verify the live bounded Lambda configuration
@@ -342,11 +454,9 @@ jobs:
           aws lambda get-alias \
             --function-name "${LAMBDA_FUNCTION_NAME}" \
             --name production > lambda-alias-raw.json
-          aws lambda get-function-configuration \
+          aws lambda get-function \
             --function-name "${LAMBDA_FUNCTION_NAME}" \
-            --qualifier production > lambda-configuration-raw.json
-          aws lambda get-function-concurrency \
-            --function-name "${LAMBDA_FUNCTION_NAME}" > lambda-concurrency-raw.json
+            --qualifier production > lambda-function-private.json
 
           set +e
           aws lambda get-provisioned-concurrency-config \
@@ -371,8 +481,9 @@ jobs:
           from pathlib import Path
 
           alias = json.loads(Path("lambda-alias-raw.json").read_text(encoding="utf-8"))
-          config = json.loads(Path("lambda-configuration-raw.json").read_text(encoding="utf-8"))
-          concurrency = json.loads(Path("lambda-concurrency-raw.json").read_text(encoding="utf-8"))
+          function = json.loads(Path("lambda-function-private.json").read_text(encoding="utf-8"))
+          config = function.get("Configuration", {})
+          concurrency = function.get("Concurrency", {})
           architectures = config.get("Architectures")
           if config.get("MemorySize") != 4096:
               raise SystemExit("live Lambda memory must remain exactly 4096 MB")
@@ -382,9 +493,27 @@ jobs:
               raise SystemExit("live Lambda reserved concurrency must remain exactly two")
           if alias.get("Name") != "production" or alias.get("FunctionVersion") != config.get("Version"):
               raise SystemExit("production alias and queried immutable Lambda version do not agree")
+          deployment = json.loads(Path("deployment-evidence.json").read_text(encoding="utf-8"))
+          cold = deployment.get("controlled_cold_start")
+          if (
+              deployment.get("release_id") != os.environ["RELEASE_ID"]
+              or deployment.get("model_id") != os.environ["MODEL_ID"]
+              or deployment.get("production_lambda_version") != config.get("Version")
+              or not isinstance(cold, dict)
+              or cold.get("controlled_cold_start") is not True
+              or cold.get("excluded_from_warm_samples") is not True
+              or cold.get("identifiers", {}).get("function_version") != config.get("Version")
+              or cold.get("identifiers", {}).get("function_name")
+              != os.environ["LAMBDA_FUNCTION_NAME"]
+              or cold.get("control_proof", {}).get("provisioned_concurrency") != 0
+          ):
+              raise SystemExit("deployment cold-start evidence is not bound to the live release")
           sanitized = {
               "schema_version": "1.0.0",
               "checked_at": datetime.now(UTC).isoformat(),
+              "benchmark_run_id": os.environ["BENCHMARK_RUN_ID"],
+              "release_id": os.environ["RELEASE_ID"],
+              "model_id": os.environ["MODEL_ID"],
               "function_name": os.environ["LAMBDA_FUNCTION_NAME"],
               "alias": "production",
               "function_version": config["Version"],
@@ -405,6 +534,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          PYTHONPATH=src python scripts/validate_financial_snapshot.py verify \
+            --cost-preflight .benchmark-evidence/cost-preflight.json
           python - <<'PY'
           from __future__ import annotations
 
@@ -434,6 +565,7 @@ jobs:
           PUBLIC_RUN_ID = os.environ["PUBLIC_RUN_ID"]
           EVIDENCE_MODE = os.environ["EVIDENCE_MODE"]
           DATASET_MANIFEST_HASH = os.environ["DATASET_MANIFEST_HASH"]
+          SPLIT_MANIFEST_HASH = os.environ["SPLIT_MANIFEST_HASH"]
           MODEL_ARTIFACT_CHECKSUM = os.environ["MODEL_ARTIFACT_CHECKSUM"]
 
           def request_json(path: str, payload: dict[str, Any] | None = None) -> tuple[Any, float, int]:
@@ -589,11 +721,15 @@ jobs:
               }
 
           started_at = datetime.now(UTC).isoformat()
-          cold_nonce = uuid.uuid4().hex
-          health, health_ms, health_status = request_json(f"/healthz?benchmark={cold_nonce}")
+          observation_nonce = uuid.uuid4().hex
+          health, health_ms, health_status = request_json(
+              f"/healthz?benchmark={observation_nonce}"
+          )
           if health_status != 200 or health.get("status") != "ok":
               raise SystemExit("first health request did not satisfy the public contract")
-          ready, ready_ms, ready_status = request_json(f"/readyz?benchmark={cold_nonce}")
+          ready, ready_ms, ready_status = request_json(
+              f"/readyz?benchmark={observation_nonce}"
+          )
           if (
               ready_status != 200
               or ready.get("status") != "ready"
@@ -625,6 +761,8 @@ jobs:
               or run_evidence.get("run", {}).get("run_id") != PUBLIC_RUN_ID
               or run_evidence.get("run", {}).get("dataset_manifest_hash")
               != DATASET_MANIFEST_HASH
+              or run_evidence.get("run", {}).get("split_manifest_hash")
+              != SPLIT_MANIFEST_HASH
               or run_evidence.get("run", {}).get("model_artifact_checksum")
               != MODEL_ARTIFACT_CHECKSUM
           ):
@@ -635,11 +773,19 @@ jobs:
                   or run_evidence.get("run", {}).get("held_out_claims_allowed") is not False
               ):
                   raise SystemExit("validation-only run endpoint semantics are invalid")
-          elif (
-              run_evidence.get("evaluation", {}).get("candidate_model_id") != MODEL_ID
-              or run_evidence.get("evaluation", {}).get("release_status") != "passed"
-          ):
-              raise SystemExit("verified run endpoint semantics are invalid")
+          else:
+              evaluation = run_evidence.get("evaluation", {})
+              status = evaluation.get("release_status")
+              verified_semantics = (
+                  status == "passed"
+                  and evaluation.get("candidate_model_id") == MODEL_ID
+              ) or (
+                  status == "failed"
+                  and evaluation.get("strongest_baseline_model_id") == MODEL_ID
+                  and evaluation.get("candidate_model_id") != MODEL_ID
+              )
+              if not verified_semantics:
+                  raise SystemExit("verified run endpoint semantics are invalid")
           by_count: dict[int, str] = {}
           for count in CANDIDATE_COUNTS:
               candidates = sorted(
@@ -680,6 +826,26 @@ jobs:
                       }
                   )
 
+          primary_condition = next(
+              condition
+              for condition in conditions
+              if condition["candidate_count"] == 40
+              and condition["offered_concurrency"] == 1
+          )
+          for condition in conditions:
+              if condition["warmup"]["success_count"] < 1:
+                  raise SystemExit(
+                      "every benchmark condition requires at least one successful warmup"
+                  )
+              minimum_successes = 199 if condition is primary_condition else 20
+              if condition["measured"]["success_count"] < minimum_successes:
+                  raise SystemExit(
+                      "benchmark success floor failed for "
+                      f"candidate_count={condition['candidate_count']}, "
+                      f"offered_concurrency={condition['offered_concurrency']}: "
+                      f"{condition['measured']['success_count']} < {minimum_successes}"
+                  )
+
           lambda_config = json.loads(
               Path(".benchmark-evidence/lambda-configuration.json").read_text(encoding="utf-8")
           )
@@ -689,6 +855,12 @@ jobs:
           manifest = json.loads(manifest_bytes)
           public_evidence_bytes = Path("public-evidence.json").read_bytes()
           bundle_checksums_bytes = Path("bundle-checksums.json").read_bytes()
+          deployment_evidence_bytes = Path("deployment-evidence.json").read_bytes()
+          deployment_evidence = json.loads(deployment_evidence_bytes)
+          deployment_evidence_head = json.loads(
+              Path("deployment-evidence-head.json").read_text(encoding="utf-8")
+          )
+          controlled_cold_start = deployment_evidence["controlled_cold_start"]
           measured_samples = [
               sample for condition in conditions for sample in condition["measured"]["samples"]
           ]
@@ -697,11 +869,13 @@ jobs:
           ]
           report = {
               "schema_version": "1.0.0",
+              "artifact_type": "serving_performance_report",
               "status": "completed",
               "scope": "manual_post_deployment_lambda_performance_protocol",
               "started_at": started_at,
               "completed_at": datetime.now(UTC).isoformat(),
               "identifiers": {
+                  "benchmark_run_id": os.environ["BENCHMARK_RUN_ID"],
                   "release_id": os.environ["RELEASE_ID"],
                   "public_run_id": PUBLIC_RUN_ID,
                   "model_id": MODEL_ID,
@@ -709,6 +883,7 @@ jobs:
                   "release_git_sha": pointer["git_sha"],
                   "benchmark_harness_git_sha": os.environ["GITHUB_SHA"],
                   "dataset_manifest_hash": manifest["dataset_manifest_hash"],
+                  "model_artifact_checksum": MODEL_ARTIFACT_CHECKSUM,
                   "region": os.environ["AWS_REGION"],
                   "public_origin": BASE_URL,
               },
@@ -722,9 +897,15 @@ jobs:
                   + __import__("hashlib").sha256(public_evidence_bytes).hexdigest(),
                   "bundle_checksums_sha256": "sha256:"
                   + __import__("hashlib").sha256(bundle_checksums_bytes).hexdigest(),
+                  "deployment_evidence_version_id": deployment_evidence_head.get("VersionId"),
+                  "deployment_evidence_etag": deployment_evidence_head.get("ETag"),
+                  "deployment_evidence_sha256": "sha256:"
+                  + __import__("hashlib").sha256(deployment_evidence_bytes).hexdigest(),
               },
               "lambda_configuration": lambda_config,
+              "controlled_cold_start": controlled_cold_start,
               "protocol": {
+                  "measurement_class": "warm_after_explicit_per_condition_warmups",
                   "candidate_counts": list(CANDIDATE_COUNTS),
                   "offered_concurrency_levels": list(OFFERED_CONCURRENCY),
                   "warmup_requests_per_condition": WARMUP_REQUESTS,
@@ -732,8 +913,15 @@ jobs:
                   "condition_count": len(conditions),
                   "request_timeout_seconds": REQUEST_TIMEOUT_SECONDS,
                   "response_size_limit_bytes": MAX_RESPONSE_BYTES,
+                  "minimum_warmup_successes_per_condition": 1,
+                  "primary_latency_candidate_count": 40,
+                  "primary_latency_offered_concurrency": 1,
+                  "primary_latency_minimum_successes": 199,
+                  "secondary_latency_minimum_successes": 20,
+                  "controlled_cold_sample_included": False,
+                  "pre_benchmark_observations_included": False,
               },
-              "first_observed_requests": {
+              "pre_benchmark_observations": {
                   "cold_start_controlled": False,
                   "health": {
                       "http_status": health_status,
@@ -758,7 +946,13 @@ jobs:
                   ),
               },
               "interpretation": {
-                  "latency_claim": "Observed public CloudFront end-to-end and model latency only.",
+                  "latency_claim": (
+                      "Warm public CloudFront end-to-end and model latency over successful "
+                      "responses after explicit warmups. The primary 40-candidate, concurrency-one "
+                      "condition has at least 199 successes from 200 attempts (error rate below "
+                      "one percent); every secondary condition has at least 20 successes. The "
+                      "controlled candidate cold start is reported separately."
+                  ),
                   "throughput_claim_eligible": False,
                   "scaling_claim_eligible": False,
                   "concurrency_above_reserved_expected_to_expose_bound": [4, 8],
@@ -767,9 +961,11 @@ jobs:
               "limitations": [
                   "Offered client concurrency is not a throughput or autoscaling measurement.",
                   "Concurrency four and eight exceed reserved Lambda concurrency two and may throttle by design.",
-                  "The first health and first rank observations do not force or prove a Lambda cold start.",
-                  "Client timing includes CloudFront, API Gateway, network, serialization, and model work.",
-                  "No hidden or held-out evaluation data is accessed by this public serving benchmark.",
+                  "Pre-benchmark observations are not treated as cold or warm latency samples.",
+                  "The controlled cold-start section is one observation, not a distribution.",
+                   "Client timing includes CloudFront, API Gateway, network, serialization, and model work.",
+                   "Latency percentiles are emitted only after the explicit per-condition success floors pass.",
+                   "No hidden or held-out evaluation data is accessed by this public serving benchmark.",
               ],
           }
           Path(".benchmark-evidence/performance-report.json").write_text(
@@ -791,9 +987,24 @@ jobs:
           from pathlib import Path
 
           root = Path(".benchmark-evidence")
-          report = json.loads((root / "performance-report.json").read_text(encoding="utf-8"))
+          report_path = root / "performance-report.json"
+          report = json.loads(report_path.read_text(encoding="utf-8"))
           config = json.loads((root / "lambda-configuration.json").read_text(encoding="utf-8"))
-          if report.get("status") != "completed":
+          cost = json.loads((root / "cost-preflight.json").read_text(encoding="utf-8"))
+          if (
+              cost.get("schema_version") != "1.0.0"
+              or cost.get("artifact_type") != "benchmark_cost_preflight"
+              or cost.get("status") != "passed"
+              or cost.get("maximum_out_of_pocket_usd") != "0"
+              or cost.get("heldout_access_enabled") is not False
+              or cost.get("sensitive_balance_values_recorded") is not False
+          ):
+              raise SystemExit("benchmark cost preflight contract is invalid")
+          if (
+              report.get("schema_version") != "1.0.0"
+              or report.get("artifact_type") != "serving_performance_report"
+              or report.get("status") != "completed"
+          ):
               raise SystemExit("benchmark report is not complete")
           identifiers = report.get("identifiers", {})
           if identifiers.get("release_id") != os.environ["RELEASE_ID"]:
@@ -815,6 +1026,7 @@ jobs:
               "release_manifest_sha256",
               "public_evidence_sha256",
               "bundle_checksums_sha256",
+              "deployment_evidence_sha256",
           ):
               value = binding.get(name)
               if not isinstance(value, str) or len(value) != 71 or not value.startswith("sha256:"):
@@ -826,6 +1038,80 @@ jobs:
               or config.get("provisioned_concurrency") != 0
           ):
               raise SystemExit("bounded Lambda configuration is not exact")
+          if not isinstance(binding.get("deployment_evidence_version_id"), str) or not binding[
+              "deployment_evidence_version_id"
+          ]:
+              raise SystemExit("deployment evidence must be read from a versioned S3 object")
+
+          controlled_cold = report.get("controlled_cold_start")
+          if not isinstance(controlled_cold, dict):
+              raise SystemExit("controlled cold-start evidence is absent")
+          cold_ids = controlled_cold.get("identifiers", {})
+          proof = controlled_cold.get("control_proof", {})
+          first_request = controlled_cold.get("first_request", {})
+          lambda_report = controlled_cold.get("lambda_report", {})
+          structured_startup = controlled_cold.get("structured_startup", {})
+          structured_request = controlled_cold.get("structured_request", {})
+          if (
+              controlled_cold.get("status") != "measured"
+              or controlled_cold.get("measurement_class")
+              != "controlled_on_demand_lambda_cold_start"
+              or controlled_cold.get("controlled_cold_start") is not True
+              or controlled_cold.get("sample_count") != 1
+              or controlled_cold.get("excluded_from_warm_samples") is not True
+              or cold_ids.get("release_id") != os.environ["RELEASE_ID"]
+              or cold_ids.get("model_id") != os.environ["MODEL_ID"]
+              or cold_ids.get("dataset_manifest_hash")
+              != os.environ["DATASET_MANIFEST_HASH"]
+              or cold_ids.get("model_artifact_checksum")
+              != os.environ["MODEL_ARTIFACT_CHECKSUM"]
+              or cold_ids.get("function_name") != config.get("function_name")
+              or cold_ids.get("function_version") != config.get("function_version")
+              or cold_ids.get("region") != "us-east-1"
+              or proof
+              != {
+                  **{
+                      "newly_published_after_apply_started": True,
+                      "candidate_version_changed": True,
+                      "new_version_prior_cloudwatch_event_count": 0,
+                      "on_demand_execution": True,
+                      "reserved_concurrency": 2,
+                      "provisioned_concurrency": 0,
+                  },
+                  "previous_candidate_version": proof.get("previous_candidate_version"),
+              }
+              or not isinstance(proof.get("previous_candidate_version"), str)
+              or proof.get("previous_candidate_version") == cold_ids.get("function_version")
+              or first_request.get("route") != "/api/v1/rank"
+              or first_request.get("http_status") != 200
+              or first_request.get("candidate_count") != 40
+              or structured_startup.get("startup_succeeded") is not True
+          ):
+              raise SystemExit("controlled cold-start identity or control proof is invalid")
+          for label, value in {
+              "first request end-to-end": first_request.get("end_to_end_latency_ms"),
+              "first request model": first_request.get("model_latency_ms"),
+              "CloudWatch Init Duration": lambda_report.get("init_duration_ms"),
+              "Lambda invocation duration": lambda_report.get("invocation_duration_ms"),
+              "Lambda billed duration": lambda_report.get("billed_duration_ms"),
+              "Lambda max memory": lambda_report.get("max_memory_used_mb"),
+              "structured model load": structured_startup.get("model_load_duration_ms"),
+              "structured process memory": structured_request.get("process_peak_memory_mb"),
+          }.items():
+              if isinstance(value, bool) or not isinstance(value, (int, float)):
+                  raise SystemExit(f"controlled cold-start {label} is not numeric")
+              if not math.isfinite(float(value)) or float(value) <= 0:
+                  raise SystemExit(f"controlled cold-start {label} is not positive and finite")
+          if (
+              lambda_report.get("configured_memory_mb") != 4096
+              or float(lambda_report["max_memory_used_mb"]) > 4096
+              or float(structured_request["process_peak_memory_mb"]) > 4096
+          ):
+              raise SystemExit("controlled cold-start memory evidence exceeds the fixed bound")
+          (root / "controlled-cold-start.json").write_text(
+              json.dumps(controlled_cold, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
 
           expected_conditions = {(count, concurrency) for count in (10, 20, 40) for concurrency in (1, 4, 8)}
           conditions = report.get("conditions", [])
@@ -835,6 +1121,19 @@ jobs:
           }
           if len(conditions) != 9 or observed_conditions != expected_conditions:
               raise SystemExit("benchmark condition matrix is incomplete or duplicated")
+          protocol = report.get("protocol", {})
+          if (
+              protocol.get("measurement_class")
+              != "warm_after_explicit_per_condition_warmups"
+              or protocol.get("minimum_warmup_successes_per_condition") != 1
+              or protocol.get("primary_latency_candidate_count") != 40
+              or protocol.get("primary_latency_offered_concurrency") != 1
+              or protocol.get("primary_latency_minimum_successes") != 199
+              or protocol.get("secondary_latency_minimum_successes") != 20
+              or protocol.get("controlled_cold_sample_included") is not False
+              or protocol.get("pre_benchmark_observations_included") is not False
+          ):
+              raise SystemExit("warm protocol or its success floors are not exact")
 
           def percentile(values: list[float], probability: float) -> float:
               ordered = sorted(values)
@@ -872,6 +1171,9 @@ jobs:
 
           all_measured = []
           all_warmups = []
+          warmup_condition_success_counts = []
+          secondary_condition_success_counts = []
+          primary_condition_success_count = None
           for condition in conditions:
               for phase_name, expected_count in (("warmup", 10), ("measured", 200)):
                   phase = condition[phase_name]
@@ -927,6 +1229,30 @@ jobs:
                   )
                   (all_warmups if phase_name == "warmup" else all_measured).extend(samples)
 
+              warmup_successes = int(condition["warmup"]["success_count"])
+              measured_successes = int(condition["measured"]["success_count"])
+              warmup_condition_success_counts.append(warmup_successes)
+              if warmup_successes < 1:
+                  raise SystemExit("a benchmark condition has no successful warmup")
+              if (
+                  condition.get("candidate_count") == 40
+                  and condition.get("offered_concurrency") == 1
+              ):
+                  primary_condition_success_count = measured_successes
+                  if measured_successes < 199:
+                      raise SystemExit(
+                          "primary latency condition requires at least 199 successes"
+                      )
+              else:
+                  secondary_condition_success_counts.append(measured_successes)
+                  if measured_successes < 20:
+                      raise SystemExit(
+                          "every secondary latency condition requires at least 20 successes"
+                      )
+
+          if primary_condition_success_count is None:
+              raise SystemExit("primary latency condition is absent")
+
           totals = report.get("totals", {})
           if totals.get("warmup_request_count") != 90 or len(all_warmups) != 90:
               raise SystemExit("total warmup count must be exactly 90")
@@ -941,20 +1267,44 @@ jobs:
           ):
               raise SystemExit("total throttle count is inconsistent")
           interpretation = report.get("interpretation", {})
+          expected_latency_claim = (
+              "Warm public CloudFront end-to-end and model latency over successful responses "
+              "after explicit warmups. The primary 40-candidate, concurrency-one condition "
+              "has at least 199 successes from 200 attempts (error rate below one percent); "
+              "every secondary condition has at least 20 successes. The controlled candidate "
+              "cold start is reported separately."
+          )
+          if interpretation.get("latency_claim") != expected_latency_claim:
+              raise SystemExit("benchmark latency claim does not state the exact success floors")
           if interpretation.get("throughput_claim_eligible") is not False:
               raise SystemExit("benchmark must not make a throughput claim")
           if interpretation.get("scaling_claim_eligible") is not False:
               raise SystemExit("benchmark must not make a scaling claim")
-          if report.get("first_observed_requests", {}).get("cold_start_controlled") is not False:
-              raise SystemExit("benchmark must not claim a controlled cold start")
+          if report.get("pre_benchmark_observations", {}).get("cold_start_controlled") is not False:
+              raise SystemExit("pre-benchmark observations must not claim a cold start")
 
           validation = {
               "schema_version": "1.0.0",
               "status": "passed",
               "validated_at": datetime.now(UTC).isoformat(),
+              "benchmark_run_id": os.environ["BENCHMARK_RUN_ID"],
+              "release_id": os.environ["RELEASE_ID"],
+              "model_id": os.environ["MODEL_ID"],
+              "performance_report_sha256": "sha256:"
+              + hashlib.sha256(report_path.read_bytes()).hexdigest(),
+              "evidence_file_count": 5,
               "condition_count": 9,
+              "controlled_cold_start_sample_count": 1,
               "warmup_request_count": 90,
               "measured_request_count": 1800,
+              "success_thresholds_enforced": True,
+              "minimum_warmup_condition_success_count": min(
+                  warmup_condition_success_counts
+              ),
+              "primary_latency_condition_success_count": primary_condition_success_count,
+              "minimum_secondary_condition_success_count": min(
+                  secondary_condition_success_counts
+              ),
               "immutability_required": True,
           }
           (root / "validation.json").write_text(
@@ -977,29 +1327,142 @@ jobs:
               if not path.is_file() or actual != expected:
                   raise SystemExit(f"evidence checksum validation failed: {relative}")
           PY
+          bundle_digest="$(sha256sum .benchmark-evidence/evidence-checksums.json | cut -d' ' -f1)"
+          publication_prefix="public/${RELEASE_ID}/performance/runs/${BENCHMARK_RUN_ID}/sha256-${bundle_digest}/"
+          PYTHONPATH=src python scripts/validate_benchmark_contracts.py \
+            --evidence-dir .benchmark-evidence \
+            --promotion-pointer current-pointer.json \
+            --promotion-pointer-head current-pointer-head.json \
+            --release-manifest release-manifest.json \
+            --release-checksums bundle-checksums.json \
+            --public-evidence public-evidence.json \
+            --deployment-evidence deployment-evidence.json \
+            --deployment-evidence-head deployment-evidence-head.json \
+            --benchmark-run-id "${BENCHMARK_RUN_ID}" \
+            --release-id "${RELEASE_ID}" \
+            --model-id "${MODEL_ID}" \
+            --public-run-id "${PUBLIC_RUN_ID}" \
+            --evidence-mode "${EVIDENCE_MODE}" \
+            --dataset-manifest-hash "${DATASET_MANIFEST_HASH}" \
+            --model-artifact-checksum "${MODEL_ARTIFACT_CHECKSUM}" \
+            --benchmark-harness-git-sha "${GITHUB_SHA}" \
+            --function-name "${LAMBDA_FUNCTION_NAME}" \
+            --region "${AWS_REGION}" \
+            --public-origin "${BENCHMARK_BASE_URL}" \
+            --publication-prefix "${publication_prefix}"
       - name: Publish the immutable validated performance evidence
         shell: bash
         run: |
           set -euo pipefail
-          prefix="public/${RELEASE_ID}/performance/github-${GITHUB_RUN_ID}-attempt-${GITHUB_RUN_ATTEMPT}/"
-          existing="$(aws s3api list-objects-v2 \
+          bundle_digest="$(sha256sum .benchmark-evidence/evidence-checksums.json | cut -d' ' -f1)"
+          prefix="public/${RELEASE_ID}/performance/runs/${BENCHMARK_RUN_ID}/sha256-${bundle_digest}/"
+          readback_dir="$(mktemp -d)"
+          trap 'rm -rf -- "${readback_dir}"' EXIT
+
+          # Re-attest the exact release and immutable serving revision immediately before the
+          # first publication. Shared concurrency prevents normal deploy/rollback overlap; these
+          # comparisons also fail closed on any out-of-band control-plane change.
+          aws s3api head-object \
             --bucket "${ARTIFACT_BUCKET}" \
-            --prefix "${prefix}" \
-            --max-keys 1 \
-            --query 'KeyCount' \
-            --output text)"
-          test "${existing}" = "0"
-          while IFS= read -r -d '' file; do
-            relative="${file#.benchmark-evidence/}"
-            aws s3api put-object \
+            --key promoted/current.json > "${readback_dir}/current-pointer-head.json"
+          test "$(jq -er '.VersionId' "${readback_dir}/current-pointer-head.json")" = \
+            "$(jq -er '.VersionId' current-pointer-head.json)"
+          test "$(jq -er '.ETag' "${readback_dir}/current-pointer-head.json")" = \
+            "$(jq -er '.ETag' current-pointer-head.json)"
+          aws s3api head-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key "public/${RELEASE_ID}/deployment-evidence.json" \
+            > "${readback_dir}/deployment-evidence-head.json"
+          test "$(jq -er '.VersionId' "${readback_dir}/deployment-evidence-head.json")" = \
+            "$(jq -er '.VersionId' deployment-evidence-head.json)"
+          test "$(jq -er '.ETag' "${readback_dir}/deployment-evidence-head.json")" = \
+            "$(jq -er '.ETag' deployment-evidence-head.json)"
+          aws lambda get-alias \
+            --function-name "${LAMBDA_FUNCTION_NAME}" \
+            --name production > "${readback_dir}/lambda-alias.json"
+          jq -e --slurpfile expected lambda-alias-raw.json '
+            .FunctionVersion == $expected[0].FunctionVersion and
+            .RevisionId == $expected[0].RevisionId
+          ' "${readback_dir}/lambda-alias.json" >/dev/null
+          aws lambda get-function \
+            --function-name "${LAMBDA_FUNCTION_NAME}" \
+            --qualifier production > "${readback_dir}/lambda-function.json"
+          jq -e --slurpfile expected lambda-function-private.json '
+            (.Configuration | {
+              FunctionName, Version, RevisionId, CodeSha256, LastModified,
+              MemorySize, Timeout, Architectures, PackageType
+            }) == ($expected[0].Configuration | {
+              FunctionName, Version, RevisionId, CodeSha256, LastModified,
+              MemorySize, Timeout, Architectures, PackageType
+            }) and .Code.ResolvedImageUri == $expected[0].Code.ResolvedImageUri
+          ' "${readback_dir}/lambda-function.json" >/dev/null
+
+          put_immutable_or_verify_identical() {
+            local source_file="$1"
+            local object_key="$2"
+            local put_error="${readback_dir}/put-error.txt"
+            local existing_file="${readback_dir}/existing-object"
+            PYTHONPATH=src python scripts/validate_financial_snapshot.py verify \
+              --cost-preflight .benchmark-evidence/cost-preflight.json
+            if aws s3api put-object \
               --bucket "${ARTIFACT_BUCKET}" \
-              --key "${prefix}${relative}" \
-              --body "${file}" \
+              --key "${object_key}" \
+              --body "${source_file}" \
               --content-type application/json \
               --checksum-algorithm SHA256 \
               --tagging "RetentionClass=public" \
-              --if-none-match '*' >/dev/null
+              --if-none-match '*' >/dev/null 2>"${put_error}"; then
+              return 0
+            fi
+            if aws s3api get-object \
+              --bucket "${ARTIFACT_BUCKET}" \
+              --key "${object_key}" \
+              --checksum-mode ENABLED \
+              "${existing_file}" >/dev/null 2>&1 \
+              && cmp -s "${source_file}" "${existing_file}"; then
+              return 0
+            fi
+            cat "${put_error}" >&2
+            echo "Immutable benchmark object exists with different bytes or could not be verified." >&2
+            return 1
+          }
+
+          while IFS= read -r -d '' file; do
+            relative="${file#.benchmark-evidence/}"
+            put_immutable_or_verify_identical "${file}" "${prefix}${relative}"
+            aws s3api get-object \
+              --bucket "${ARTIFACT_BUCKET}" \
+              --key "${prefix}${relative}" \
+              --checksum-mode ENABLED \
+              "${readback_dir}/${relative}" >/dev/null
+            cmp -s "${file}" "${readback_dir}/${relative}"
           done < <(find .benchmark-evidence -maxdepth 1 -type f -name '*.json' -print0 | sort -z)
+          aws s3api list-objects-v2 \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --prefix "${prefix}" \
+            --no-paginate > published-benchmark-objects.json
+          PYTHONPATH=src python scripts/validate_benchmark_contracts.py \
+            --evidence-dir "${readback_dir}" \
+            --promotion-pointer current-pointer.json \
+            --promotion-pointer-head current-pointer-head.json \
+            --release-manifest release-manifest.json \
+            --release-checksums bundle-checksums.json \
+            --public-evidence public-evidence.json \
+            --deployment-evidence deployment-evidence.json \
+            --deployment-evidence-head deployment-evidence-head.json \
+            --benchmark-run-id "${BENCHMARK_RUN_ID}" \
+            --release-id "${RELEASE_ID}" \
+            --model-id "${MODEL_ID}" \
+            --public-run-id "${PUBLIC_RUN_ID}" \
+            --evidence-mode "${EVIDENCE_MODE}" \
+            --dataset-manifest-hash "${DATASET_MANIFEST_HASH}" \
+            --model-artifact-checksum "${MODEL_ARTIFACT_CHECKSUM}" \
+            --benchmark-harness-git-sha "${GITHUB_SHA}" \
+            --function-name "${LAMBDA_FUNCTION_NAME}" \
+            --region "${AWS_REGION}" \
+            --public-origin "${BENCHMARK_BASE_URL}" \
+            --published-objects published-benchmark-objects.json \
+            --publication-prefix "${prefix}"
           printf '%s' "${prefix}" > .benchmark-evidence/published-prefix.txt
           echo "Validated immutable evidence was published under the release's immutable performance prefix." >> "${GITHUB_STEP_SUMMARY}"
           echo "No throughput or scaling claim is made; offered concurrency above two exercises the configured bound." >> "${GITHUB_STEP_SUMMARY}"

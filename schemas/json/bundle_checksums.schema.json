@@ -1,0 +1,33 @@
+{
+  "$id": "https://schemas.example.invalid/search-rank/bundle_checksums.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Complete content-addressed inventory excluding the inventory itself.",
+  "properties": {
+    "files": {
+      "patternProperties": {
+        "^[A-Za-z0-9][A-Za-z0-9._/-]*$": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "type": "string"
+        }
+      },
+      "propertyNames": {
+        "maxLength": 512,
+        "minLength": 1
+      },
+      "title": "Files",
+      "type": "object"
+    },
+    "schema_version": {
+      "const": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "files"
+  ],
+  "title": "BundleChecksums",
+  "type": "object"
+}

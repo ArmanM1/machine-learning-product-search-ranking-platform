@@ -1,0 +1,85 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "artifact_type": {
+      "const": "heldout_processing_job_evidence",
+      "title": "Artifact Type",
+      "type": "string"
+    },
+    "processing_job_name": {
+      "minLength": 1,
+      "title": "Processing Job Name",
+      "type": "string"
+    },
+    "status": {
+      "const": "Completed",
+      "title": "Status",
+      "type": "string"
+    },
+    "instance_type": {
+      "const": "ml.m5.xlarge",
+      "title": "Instance Type",
+      "type": "string"
+    },
+    "instance_count": {
+      "const": 1,
+      "title": "Instance Count",
+      "type": "integer"
+    },
+    "creation_time": {
+      "format": "date-time",
+      "title": "Creation Time",
+      "type": "string"
+    },
+    "end_time": {
+      "format": "date-time",
+      "title": "End Time",
+      "type": "string"
+    },
+    "image_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Image Digest",
+      "type": "string"
+    },
+    "region": {
+      "const": "us-east-1",
+      "title": "Region",
+      "type": "string"
+    },
+    "clean_run": {
+      "enum": [
+        1,
+        2
+      ],
+      "title": "Clean Run",
+      "type": "integer"
+    },
+    "exit_message_present": {
+      "title": "Exit Message Present",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "processing_job_name",
+    "status",
+    "instance_type",
+    "instance_count",
+    "creation_time",
+    "end_time",
+    "image_digest",
+    "region",
+    "clean_run",
+    "exit_message_present"
+  ],
+  "title": "ProcessingJobEvidence",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.example.invalid/search-rank/processing_job_evidence.schema.json"
+}

@@ -1,0 +1,203 @@
+{
+  "$id": "https://schemas.example.invalid/search-rank/candidate_release_inputs.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Release-facing identity emitted after a successful cloud training job.",
+  "properties": {
+    "artifact_type": {
+      "const": "candidate_release_inputs",
+      "title": "Artifact Type",
+      "type": "string"
+    },
+    "best_validation_ndcg_at_10": {
+      "maximum": 1,
+      "minimum": 0,
+      "title": "Best Validation Ndcg At 10",
+      "type": "number"
+    },
+    "candidate_artifact_s3_key": {
+      "pattern": "^runs/[A-Za-z0-9._/-]+\\.tar\\.gz$",
+      "title": "Candidate Artifact S3 Key",
+      "type": "string"
+    },
+    "candidate_artifact_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Candidate Artifact Sha256",
+      "type": "string"
+    },
+    "candidate_checkpoint_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Candidate Checkpoint Sha256",
+      "type": "string"
+    },
+    "candidate_model_id": {
+      "minLength": 1,
+      "title": "Candidate Model Id",
+      "type": "string"
+    },
+    "candidate_run_id": {
+      "minLength": 1,
+      "title": "Candidate Run Id",
+      "type": "string"
+    },
+    "candidate_training_config_file_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Candidate Training Config File Sha256",
+      "type": "string"
+    },
+    "candidate_training_config_path": {
+      "pattern": "^configs/experiments/[A-Za-z0-9._/-]+\\.ya?ml$",
+      "title": "Candidate Training Config Path",
+      "type": "string"
+    },
+    "candidate_training_config_s3_key": {
+      "pattern": "^runs/[A-Za-z0-9._/-]+/config/experiment\\.yaml$",
+      "title": "Candidate Training Config S3 Key",
+      "type": "string"
+    },
+    "candidate_training_config_sha256": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Candidate Training Config Sha256",
+      "type": "string"
+    },
+    "dataset_manifest_hash": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Dataset Manifest Hash",
+      "type": "string"
+    },
+    "git_sha": {
+      "pattern": "^[0-9a-f]{40}$",
+      "title": "Git Sha",
+      "type": "string"
+    },
+    "repository_dirty": {
+      "const": false,
+      "title": "Repository Dirty",
+      "type": "boolean"
+    },
+    "schema_version": {
+      "const": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "source_identity_basis": {
+      "const": "clean checkout and exact sha-commit ECR tag-to-digest binding",
+      "title": "Source Identity Basis",
+      "type": "string"
+    },
+    "training_accelerator": {
+      "enum": [
+        "cpu",
+        "gpu"
+      ],
+      "title": "Training Accelerator",
+      "type": "string"
+    },
+    "training_billable_on_demand_upper_bound_usd": {
+      "anyOf": [
+        {
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Training Billable On Demand Upper Bound Usd"
+    },
+    "training_config_role": {
+      "enum": [
+        "candidate_treatment",
+        "random_negative_control",
+        "title_only_control"
+      ],
+      "title": "Training Config Role",
+      "type": "string"
+    },
+    "training_hardware": {
+      "enum": [
+        "ml.m5.xlarge",
+        "ml.g4dn.xlarge"
+      ],
+      "title": "Training Hardware",
+      "type": "string"
+    },
+    "training_image_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Training Image Digest",
+      "type": "string"
+    },
+    "training_image_source_tag": {
+      "pattern": "^sha-[0-9a-f]{40}$",
+      "title": "Training Image Source Tag",
+      "type": "string"
+    },
+    "training_image_uri": {
+      "pattern": "^[0-9]{12}\\.dkr\\.ecr\\.us-east-1\\.amazonaws\\.com/[a-z0-9/_-]+@sha256:[0-9a-f]{64}$",
+      "title": "Training Image Uri",
+      "type": "string"
+    },
+    "training_region": {
+      "const": "us-east-1",
+      "title": "Training Region",
+      "type": "string"
+    },
+    "training_run_kind": {
+      "enum": [
+        "development",
+        "ablation",
+        "final"
+      ],
+      "title": "Training Run Kind",
+      "type": "string"
+    },
+    "training_run_manifest_s3_key": {
+      "pattern": "^runs/[A-Za-z0-9._/-]+/reports/run-manifest\\.json$",
+      "title": "Training Run Manifest S3 Key",
+      "type": "string"
+    },
+    "training_run_manifest_sha256": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Training Run Manifest Sha256",
+      "type": "string"
+    },
+    "training_status": {
+      "const": "succeeded",
+      "title": "Training Status",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "candidate_run_id",
+    "candidate_model_id",
+    "candidate_artifact_s3_key",
+    "candidate_artifact_sha256",
+    "candidate_checkpoint_sha256",
+    "candidate_training_config_sha256",
+    "candidate_training_config_path",
+    "candidate_training_config_s3_key",
+    "candidate_training_config_file_sha256",
+    "dataset_manifest_hash",
+    "best_validation_ndcg_at_10",
+    "training_run_kind",
+    "training_config_role",
+    "git_sha",
+    "repository_dirty",
+    "training_image_uri",
+    "training_image_digest",
+    "training_image_source_tag",
+    "training_hardware",
+    "training_accelerator",
+    "training_region",
+    "training_status",
+    "training_billable_on_demand_upper_bound_usd",
+    "training_run_manifest_s3_key",
+    "training_run_manifest_sha256",
+    "source_identity_basis"
+  ],
+  "title": "CandidateReleaseInputs",
+  "type": "object"
+}

@@ -22,7 +22,7 @@ RUN groupadd --gid "${APP_GID}" app \
     && mkdir -p /opt/ml/processing/input /opt/ml/processing/output /opt/ml/cache/huggingface \
     && chown -R app:app /app /opt/ml
 
-COPY pyproject.toml uv.lock README.md LICENSE ./
+COPY pyproject.toml uv.lock README.md LICENSE NOTICE ./
 COPY src ./src
 COPY configs ./configs
 COPY scripts/container_eval.py ./scripts/container_eval.py

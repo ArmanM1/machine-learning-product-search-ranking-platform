@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
+from search_rank.artifacts.checksums import sha256_file
 from search_rank.schemas.api import (
     PublicModelMetricRow,
     PublicValidationRunMetrics,
@@ -21,6 +23,7 @@ from search_rank.serving.public_evidence import (
 pytestmark = pytest.mark.integration
 ZERO_HASH = "sha256:" + "0" * 64
 DATA_HASH = "sha256:" + "a" * 64
+SPLIT_HASH = "sha256:" + "b" * 64
 
 
 def _queries(path: Path) -> None:
@@ -54,43 +57,98 @@ def _queries(path: Path) -> None:
     )
 
 
-def _summary(model_id: str, kind: str, checksum: str) -> dict[str, object]:
+def _summary(
+    model_id: str,
+    kind: str,
+    checksum: str,
+    *,
+    evaluation_report_id: str = "report-tiny",
+    promoted: bool = True,
+) -> dict[str, object]:
     return {
         "model_id": model_id,
         "display_name": model_id,
         "kind": kind,
         "base_model_id": None,
         "artifact_checksum": checksum,
-        "evaluation_report_id": "report-tiny",
-        "promoted_at": "2026-09-02T00:00:00Z",
+        "evaluation_report_id": evaluation_report_id,
+        "promoted_at": "2026-09-02T00:00:00Z" if promoted else None,
         "limitations_url": "/methodology#limitations",
     }
+
+
+def _strict_validation_manifest(
+    *, evaluation_report_id: str, git_sha: str = "abcdef0"
+) -> dict[str, object]:
+    artifact_checksums = {
+        name: ZERO_HASH
+        for name in (
+            "baseline-summary.json",
+            "curated-queries.json",
+            "public-evidence.json",
+            "LICENSE",
+            "NOTICE",
+        )
+    }
+    return {
+        "schema_version": "1.0.0",
+        "release_id": "release-validation-baseline",
+        "promoted_model_id": "bm25-v1",
+        "dataset_manifest_hash": DATA_HASH,
+        "split_manifest_hash": SPLIT_HASH,
+        "evaluation_report_id": evaluation_report_id,
+        "git_sha": git_sha,
+        "evidence_mode": "validation_only",
+        "artifact_checksums": artifact_checksums,
+        "models": [
+            {
+                "model_id": "bm25-v1",
+                "kind": "bm25",
+                "text_template": "enriched_v1",
+                "artifact_checksum": ZERO_HASH,
+                "public_summary": _summary(
+                    "bm25-v1",
+                    "bm25",
+                    ZERO_HASH,
+                    evaluation_report_id=evaluation_report_id,
+                ),
+            },
+            {
+                "model_id": "bm25-v2",
+                "kind": "bm25",
+                "text_template": "title_v1",
+                "artifact_checksum": DATA_HASH,
+                "public_summary": _summary(
+                    "bm25-v2",
+                    "bm25",
+                    DATA_HASH,
+                    evaluation_report_id=evaluation_report_id,
+                    promoted=False,
+                ),
+            },
+        ],
+    }
+
+
+def _write_release_manifest(path: Path, manifest: dict[str, object]) -> None:
+    checksums = manifest["artifact_checksums"]
+    assert isinstance(checksums, dict)
+    for name in checksums:
+        artifact = path.parent / str(name)
+        if not artifact.exists():
+            artifact.write_text("{}\n", encoding="utf-8")
+    manifest["artifact_checksums"] = {
+        str(name): f"sha256:{sha256_file(path.parent / str(name))}" for name in checksums
+    }
+    path.write_text(json.dumps(manifest), encoding="utf-8")
 
 
 def test_embedded_bm25_release_becomes_ready_and_ranks(tmp_path: Path) -> None:
     query_path = tmp_path / "curated-queries.json"
     manifest_path = tmp_path / "release-manifest.json"
     _queries(query_path)
-    manifest_path.write_text(
-        json.dumps(
-            {
-                "schema_version": "1.0.0",
-                "release_id": "release-tiny",
-                "promoted_model_id": "bm25-v1",
-                "dataset_manifest_hash": DATA_HASH,
-                "evaluation_report_id": "report-tiny",
-                "git_sha": "abcdef0",
-                "models": [
-                    {
-                        "model_id": "bm25-v1",
-                        "kind": "bm25",
-                        "artifact_checksum": ZERO_HASH,
-                        "public_summary": _summary("bm25-v1", "lexical baseline", ZERO_HASH),
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
+    _write_release_manifest(
+        manifest_path, _strict_validation_manifest(evaluation_report_id="report-tiny")
     )
     settings = ServiceSettings(
         release_manifest=manifest_path,
@@ -111,30 +169,47 @@ def test_embedded_bm25_release_becomes_ready_and_ranks(tmp_path: Path) -> None:
         assert response.json()["results"][0]["product_id"] == "p1"
 
 
+def test_model_load_emits_bounded_startup_metrics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    query_path = tmp_path / "curated-queries.json"
+    manifest_path = tmp_path / "release-manifest.json"
+    _queries(query_path)
+    _write_release_manifest(
+        manifest_path, _strict_validation_manifest(evaluation_report_id="report-tiny")
+    )
+    events: list[tuple[str, dict[str, Any]]] = []
+
+    def capture(_: object, event: str, **context: Any) -> None:
+        events.append((event, context))
+
+    monkeypatch.setattr("search_rank.serving.dependencies.log_event", capture)
+    state = ServiceState(
+        ServiceSettings(release_manifest=manifest_path, curated_queries=query_path)
+    )
+    state.load()
+    assert state.ready
+    assert state.startup_succeeded
+    assert state.model_load_duration_ms is not None and state.model_load_duration_ms >= 0
+    assert events == [
+        (
+            "service_startup_success",
+            {
+                "startup_success": True,
+                "model_load_duration_ms": state.model_load_duration_ms,
+                "model_id": "bm25-v1",
+                "error_code": None,
+            },
+        )
+    ]
+
+
 def test_release_mode_requires_complete_public_evidence(tmp_path: Path) -> None:
     query_path = tmp_path / "curated-queries.json"
     manifest_path = tmp_path / "release-manifest.json"
     _queries(query_path)
-    manifest_path.write_text(
-        json.dumps(
-            {
-                "schema_version": "1.0.0",
-                "release_id": "release-without-evidence",
-                "promoted_model_id": "bm25-v1",
-                "dataset_manifest_hash": DATA_HASH,
-                "evaluation_report_id": "report-tiny",
-                "git_sha": "abcdef0",
-                "models": [
-                    {
-                        "model_id": "bm25-v1",
-                        "kind": "bm25",
-                        "artifact_checksum": ZERO_HASH,
-                        "public_summary": _summary("bm25-v1", "lexical baseline", ZERO_HASH),
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
+    _write_release_manifest(
+        manifest_path, _strict_validation_manifest(evaluation_report_id="report-tiny")
     )
     settings = ServiceSettings(
         release_manifest=manifest_path,
@@ -163,32 +238,12 @@ def test_validation_only_baseline_evidence_is_release_ready(tmp_path: Path) -> N
     manifest_path = tmp_path / "release-manifest.json"
     evidence_path = tmp_path / "public-evidence.json"
     _queries(query_path)
-    manifest_path.write_text(
-        json.dumps(
-            {
-                "schema_version": "1.0.0",
-                "release_id": "release-validation-baseline",
-                "promoted_model_id": "bm25-v1",
-                "dataset_manifest_hash": DATA_HASH,
-                "evaluation_report_id": "baseline-summary-tiny",
-                "git_sha": "abcdef0",
-                "models": [
-                    {
-                        "model_id": "bm25-v1",
-                        "kind": "bm25",
-                        "artifact_checksum": ZERO_HASH,
-                        "public_summary": _summary("bm25-v1", "lexical baseline", ZERO_HASH),
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
     run = PublicValidationRunSummary(
         run_id="baseline-run-tiny",
         selected_model_id="bm25-v1",
         config_hash=ZERO_HASH,
         dataset_manifest_hash=DATA_HASH,
+        split_manifest_hash=SPLIT_HASH,
         git_sha="abcdef0",
         image_digest=ZERO_HASH,
         model_artifact_checksum=ZERO_HASH,
@@ -225,6 +280,10 @@ def test_validation_only_baseline_evidence_is_release_ready(tmp_path: Path) -> N
         failure_analysis_reason="Held-out failure analysis has not been performed.",
     )
     write_public_evidence(evidence, evidence_path)
+    _write_release_manifest(
+        manifest_path,
+        _strict_validation_manifest(evaluation_report_id="baseline-summary-tiny"),
+    )
     settings = ServiceSettings(
         release_manifest=manifest_path,
         curated_queries=query_path,
@@ -249,6 +308,7 @@ def test_validation_only_baseline_evidence_is_release_ready(tmp_path: Path) -> N
     [
         ("git_sha", "abcdef9", "git SHA differs"),
         ("model_artifact_checksum", "sha256:" + "9" * 64, "model checksum differs"),
+        ("split_manifest_hash", "sha256:" + "9" * 64, "split hash differs"),
     ],
 )
 def test_release_mode_rejects_evidence_not_bound_to_promoted_artifact(
@@ -257,23 +317,13 @@ def test_release_mode_rejects_evidence_not_bound_to_promoted_artifact(
     value: str,
     message: str,
 ) -> None:
-    manifest = {
-        "dataset_manifest_hash": DATA_HASH,
-        "git_sha": "abcdef0",
-        "promoted_model_id": "bm25-v1",
-        "evaluation_report_id": "baseline-summary-tiny",
-        "models": [
-            {
-                "model_id": "bm25-v1",
-                "artifact_checksum": ZERO_HASH,
-            }
-        ],
-    }
+    manifest = _strict_validation_manifest(evaluation_report_id="baseline-summary-tiny")
     run_values = {
         "run_id": "baseline-run-tiny",
         "selected_model_id": "bm25-v1",
         "config_hash": ZERO_HASH,
         "dataset_manifest_hash": DATA_HASH,
+        "split_manifest_hash": SPLIT_HASH,
         "git_sha": "abcdef0",
         "image_digest": ZERO_HASH,
         "model_artifact_checksum": ZERO_HASH,
@@ -314,40 +364,90 @@ def test_release_mode_rejects_evidence_not_bound_to_promoted_artifact(
         ServiceState._validate_evidence_binding(evidence, manifest)
 
 
-def test_checksum_mismatch_never_becomes_ready(tmp_path: Path) -> None:
+def test_checksum_mismatch_never_becomes_ready(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     query_path = tmp_path / "curated-queries.json"
     manifest_path = tmp_path / "release-manifest.json"
     checkpoint = tmp_path / "model"
     checkpoint.mkdir()
     (checkpoint / "weights.bin").write_bytes(b"changed")
     _queries(query_path)
-    manifest_path.write_text(
-        json.dumps(
-            {
-                "schema_version": "1.0.0",
-                "release_id": "release-bad",
-                "promoted_model_id": "candidate",
-                "dataset_manifest_hash": DATA_HASH,
-                "evaluation_report_id": "report-tiny",
-                "git_sha": "abcdef0",
-                "models": [
-                    {
-                        "model_id": "candidate",
-                        "kind": "fine_tuned",
-                        "checkpoint": "model",
-                        "artifact_checksum": "sha256:" + "b" * 64,
-                        "public_summary": _summary(
-                            "candidate", "fine-tuned reranker", "sha256:" + "b" * 64
-                        ),
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
+    manifest = _strict_validation_manifest(evaluation_report_id="report-tiny")
+    manifest["release_id"] = "release-bad"
+    manifest["promoted_model_id"] = "candidate"
+    manifest["models"] = [
+        {
+            "model_id": "candidate",
+            "kind": "pretrained",
+            "checkpoint": "model",
+            "text_template": "enriched_v1",
+            "batch_size": 32,
+            "artifact_checksum": "sha256:" + "b" * 64,
+            "public_summary": _summary("candidate", "pretrained", "sha256:" + "b" * 64),
+        },
+        {
+            "model_id": "bm25-v1",
+            "kind": "bm25",
+            "text_template": "enriched_v1",
+            "artifact_checksum": ZERO_HASH,
+            "public_summary": _summary("bm25-v1", "bm25", ZERO_HASH, promoted=False),
+        },
+    ]
+    _write_release_manifest(manifest_path, manifest)
     state = ServiceState(
         ServiceSettings(release_manifest=manifest_path, curated_queries=query_path)
     )
+    failures: list[dict[str, Any]] = []
+
+    def capture_failure(_: str, *, extra: dict[str, Any]) -> None:
+        failures.append(extra["context"])
+
+    monkeypatch.setattr("search_rank.serving.dependencies.LOGGER.exception", capture_failure)
     with pytest.raises(ValueError, match="checksum mismatch"):
+        state.load()
+    assert not state.ready
+    assert not state.startup_succeeded
+    assert failures[0]["error_code"] == "MODEL_LOAD_FAILED"
+    assert failures[0]["model_load_duration_ms"] >= 0
+
+
+def test_curated_query_tamper_never_becomes_ready(tmp_path: Path) -> None:
+    query_path = tmp_path / "curated-queries.json"
+    manifest_path = tmp_path / "release-manifest.json"
+    _queries(query_path)
+    _write_release_manifest(
+        manifest_path, _strict_validation_manifest(evaluation_report_id="report-tiny")
+    )
+    query_path.write_text(query_path.read_text(encoding="utf-8") + " ", encoding="utf-8")
+
+    state = ServiceState(
+        ServiceSettings(release_manifest=manifest_path, curated_queries=query_path)
+    )
+    with pytest.raises(ValueError, match=r"checksum mismatch: curated-queries\.json"):
+        state.load()
+    assert not state.ready
+
+
+def test_public_evidence_tamper_never_becomes_ready(tmp_path: Path) -> None:
+    query_path = tmp_path / "curated-queries.json"
+    manifest_path = tmp_path / "release-manifest.json"
+    evidence_path = tmp_path / "public-evidence.json"
+    _queries(query_path)
+    evidence_path.write_text("{}\n", encoding="utf-8")
+    _write_release_manifest(
+        manifest_path, _strict_validation_manifest(evaluation_report_id="report-tiny")
+    )
+    evidence_path.write_text('{"tampered":true}\n', encoding="utf-8")
+
+    state = ServiceState(
+        ServiceSettings(
+            release_manifest=manifest_path,
+            curated_queries=query_path,
+            public_evidence=evidence_path,
+            release_mode=True,
+        )
+    )
+    with pytest.raises(ValueError, match=r"checksum mismatch: public-evidence\.json"):
         state.load()
     assert not state.ready

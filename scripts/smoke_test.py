@@ -98,11 +98,25 @@ def run_smoke(base_url: str, *, repeat: int) -> dict[str, Any]:
         if not isinstance(ranking, dict) or len(ranking.get("results", [])) != top_k:
             raise SmokeFailure("rank response has an unexpected result count")
 
-    baseline_id = next((model_id for model_id in model_ids if model_id != promoted_id), None)
+    evaluated_candidate_id = next(
+        (
+            str(item["model_id"])
+            for item in models
+            if str(item.get("kind", "")).casefold() == "fine_tuned"
+        ),
+        promoted_id,
+    )
+    baseline_id = next(
+        (model_id for model_id in model_ids if model_id != evaluated_candidate_id), None
+    )
     comparison_checked = False
     if baseline_id:
         query_string = urllib.parse.urlencode(
-            {"baseline": baseline_id, "candidate": promoted_id, "include_judgments": "true"}
+            {
+                "baseline": baseline_id,
+                "candidate": evaluated_candidate_id,
+                "include_judgments": "true",
+            }
         )
         comparison, latency = _request(
             base_url, f"/api/v1/comparisons/{urllib.parse.quote(query_id)}?{query_string}"
@@ -111,7 +125,7 @@ def run_smoke(base_url: str, *, repeat: int) -> dict[str, Any]:
         comparison_checked = bool(
             isinstance(comparison, dict)
             and comparison.get("baseline_model_id") == baseline_id
-            and comparison.get("candidate_model_id") == promoted_id
+            and comparison.get("candidate_model_id") == evaluated_candidate_id
         )
         if not comparison_checked:
             raise SmokeFailure("comparison response did not preserve selected model IDs")
@@ -122,6 +136,7 @@ def run_smoke(base_url: str, *, repeat: int) -> dict[str, Any]:
         "scope": "bounded_release_smoke",
         "base_url_origin": f"{parsed.scheme}://{parsed.netloc}",
         "model_id": promoted_id,
+        "evaluated_candidate_model_id": evaluated_candidate_id,
         "query_id": query_id,
         "candidate_count": candidate_count,
         "rank_requests": repeat,

@@ -13,7 +13,8 @@ ENV PYTHONUNBUFFERED=1 \
     UV_LINK_MODE=copy \
     PATH="/app/.venv/bin:${PATH}" \
     HF_HOME=/opt/ml/cache/huggingface \
-    TRANSFORMERS_CACHE=/opt/ml/cache/huggingface
+    TRANSFORMERS_CACHE=/opt/ml/cache/huggingface \
+    SEARCH_RANK_CHECKPOINT_DIR=/opt/ml/checkpoints
 
 WORKDIR /app
 
@@ -22,7 +23,7 @@ RUN groupadd --gid "${APP_GID}" app \
     && mkdir -p /opt/ml/model /opt/ml/checkpoints /opt/ml/cache/huggingface \
     && chown -R app:app /app /opt/ml
 
-COPY pyproject.toml uv.lock README.md LICENSE ./
+COPY pyproject.toml uv.lock README.md LICENSE NOTICE ./
 COPY src ./src
 COPY configs ./configs
 COPY scripts/container_train.py ./scripts/container_train.py

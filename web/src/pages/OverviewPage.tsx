@@ -42,7 +42,9 @@ export function OverviewPage() {
           <p className="hero-sentence">
             {validationOnly
               ? 'An unchanged baseline is deployed for operational verification while the locked held-out evaluation remains untouched.'
-              : 'A trained reranker learns which products best match ambiguous shopper queries and shows where it improves or fails against simpler search methods.'}
+              : overview.release_status === 'failed'
+                ? `The evaluated reranker did not clear the release gate, so ${overview.promoted_model.display_name} remains active while the negative result stays public.`
+                : 'A trained reranker learns which products best match ambiguous shopper queries and shows where it improves or fails against simpler search methods.'}
           </p>
           <div className="hero-actions">
             <Link className="button primary" to={validationOnly ? '/evaluation' : `/compare?q=${overview.default_query.query_id}`}>
@@ -73,8 +75,8 @@ export function OverviewPage() {
               <span className="versus" aria-label="versus">/</span>
               <div>
                 <span>Candidate</span>
-                <strong>{overview.promoted_model.display_name}</strong>
-                <small>Training candidate</small>
+                <strong>{overview.evaluated_candidate!.display_name}</strong>
+                <small>{overview.release_status === 'failed' ? 'Evaluated · not promoted' : 'Training candidate · promoted'}</small>
               </div>
             </div>
           )}
@@ -99,6 +101,7 @@ export function OverviewPage() {
         <section className="release-note failed" aria-labelledby="release-note-title">
           <p className="eyebrow">Release decision</p>
           <h2 id="release-note-title">The trained candidate did not demonstrate a statistically supported improvement.</h2>
+          <p>{overview.promoted_model.display_name} remains the active ranking model.</p>
           <Link className="text-link" to="/failures">Read the failure report <ArrowRightIcon /></Link>
         </section>
       ) : overview.release_status === 'fixture' ? (

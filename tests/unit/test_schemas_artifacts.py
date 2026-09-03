@@ -8,7 +8,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from search_rank.schemas import DatasetManifest, ModelArtifact, RunManifest
+from search_rank.schemas import DatasetManifest, ModelArtifact, PromotionPointer, RunManifest
+from search_rank.schemas.dataset import SplitManifestIdentity
 
 SHA_A = "sha256:" + "a" * 64
 SHA_B = "sha256:" + "b" * 64
@@ -16,7 +17,7 @@ NOW = datetime(2026, 9, 2, 12, 0, tzinfo=UTC)
 
 
 def dataset_manifest_values() -> dict[str, object]:
-    return {
+    values: dict[str, object] = {
         "schema_version": "1.0.0",
         "dataset_name": "Amazon Shopping Queries ESCI",
         "dataset_version": "small-v1",
@@ -46,6 +47,23 @@ def dataset_manifest_values() -> dict[str, object]:
         "processed_checksum": SHA_A,
         "created_at": NOW,
     }
+    values["split_manifest_hash"] = SplitManifestIdentity.model_validate(
+        {
+            "dataset_name": values["dataset_name"],
+            "dataset_version": values["dataset_version"],
+            "source_revision": values["source_revision"],
+            "locale": values["locale"],
+            "raw_checksums": values["raw_checksums"],
+            "preprocessing_version": values["preprocessing_version"],
+            "split_strategy": values["split_strategy"],
+            "split_salt_hash": values["split_salt_hash"],
+            "split_counts": values["split_counts"],
+            "split_query_id_hashes": values["split_query_id_hashes"],
+            "row_count": values["row_count"],
+            "query_count": values["query_count"],
+        }
+    ).checksum()
+    return values
 
 
 def test_dataset_manifest_round_trip_and_required_field_validation() -> None:
@@ -55,6 +73,32 @@ def test_dataset_manifest_round_trip_and_required_field_validation() -> None:
     del missing["processed_checksum"]
     with pytest.raises(ValidationError, match="processed_checksum"):
         DatasetManifest.model_validate(missing)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("row_count", 149, "row_count must equal"),
+        ("query_count", 14, "query_count must equal"),
+        ("product_count", 151, "product_count cannot exceed"),
+    ],
+)
+def test_dataset_manifest_aggregate_counts_are_exact(field: str, value: int, message: str) -> None:
+    values = dataset_manifest_values()
+    values[field] = value
+    with pytest.raises(ValidationError, match=message):
+        DatasetManifest.model_validate(values)
+
+
+def test_dataset_manifest_rejects_split_identity_tamper() -> None:
+    values = dataset_manifest_values()
+    split_counts = values["split_counts"]
+    assert isinstance(split_counts, dict)
+    train = split_counts["train"]
+    assert isinstance(train, dict)
+    train["product_count"] = 89
+    with pytest.raises(ValidationError, match="split_manifest_hash"):
+        DatasetManifest.model_validate(values)
 
 
 def test_artifact_contracts_reject_unknown_fields_and_unprefixed_hashes() -> None:
@@ -112,25 +156,96 @@ def test_run_manifest_enforces_terminal_lifecycle_and_artifact_checksums() -> No
         RunManifest.model_validate(values)
 
 
-def test_promoted_model_artifact_requires_preregistered_mapping() -> None:
-    values = {
+def model_artifact_values() -> dict[str, object]:
+    return {
         "schema_version": "1.0.0",
         "model_id": "candidate-v1",
         "run_id": "run-1",
         "base_model_id": "base",
         "base_model_revision": "rev",
         "tokenizer_revision": "rev",
-        "checkpoint_uri": "s3://private/checkpoint",
+        "checkpoint_uri": "candidate/best",
         "artifact_checksum": SHA_A,
         "artifact_size_bytes": 123,
-        "input_contract_version": "enriched-v1",
-        "label_mapping_version": "changed-after-test",
-        "promoted": True,
-        "promotion_reason": "passed",
-        "evaluation_report_id": "report-1",
+        "config_id": "candidate-v1",
+        "config_hash": SHA_B,
+        "dataset_manifest_hash": SHA_A,
+        "input_contract_version": "enriched_v1",
+        "label_mapping_version": "project_graded_v1",
+        "sampling_strategy": "mixed_hard_random_v1",
+        "hard_example_sources": ["bm25", "pretrained_cross_encoder"],
+        "promoted": False,
+        "promotion_reason": "pending held-out evaluation",
+        "evaluation_report_id": "not_evaluated",
+        "sample_statistics": {
+            "row_count": 2,
+            "sampling_source_counts": {"hard": 1, "random": 1},
+            "label_counts": {"Exact": 1, "Irrelevant": 1},
+        },
+        "training_result": {
+            "best_checkpoint": "candidate/best",
+            "best_validation_ndcg_at_10": 0.7,
+            "epochs_completed": 1,
+            "optimizer_steps": 2,
+            "duration_seconds": 3.0,
+            "changed_parameter_count": 1,
+            "curves_path": "candidate/curves.json",
+            "fresh_load_verified": True,
+            "warmup_steps": 1,
+            "planned_optimizer_steps": 2,
+            "device_type": "cuda",
+            "cuda_available": True,
+            "cuda_device_count": 1,
+            "accelerator_type": "gpu",
+        },
         "created_at": NOW,
     }
+
+
+def test_model_artifact_requires_preregistered_mapping() -> None:
+    values = model_artifact_values()
+    values["label_mapping_version"] = "changed-after-test"
     with pytest.raises(ValidationError, match="project_graded_v1"):
+        ModelArtifact.model_validate(values)
+
+
+@pytest.mark.parametrize(
+    ("promoted", "reason"),
+    [
+        (True, "held-out release gates passed"),
+        (False, "held-out release gates failed; prior baseline retained"),
+    ],
+)
+def test_final_model_artifact_binds_source_run_manifest_and_evaluation(
+    promoted: bool, reason: str
+) -> None:
+    source = ModelArtifact.model_validate(model_artifact_values())
+    values = source.model_dump(mode="json")
+    values.update(
+        {
+            "git_sha": "d" * 40,
+            "image_digest": SHA_B,
+            "promoted": promoted,
+            "promotion_reason": reason,
+            "evaluation_report_id": "report-1",
+            "source_model_artifact_sha256": SHA_A,
+            "selected_training_run_manifest_sha256": SHA_B,
+            "evaluation_report_sha256": SHA_A,
+        }
+    )
+    artifact = ModelArtifact.model_validate(values)
+    assert artifact.promoted is promoted
+    assert artifact.source_model_artifact_sha256 == SHA_A
+
+    values["evaluation_report_sha256"] = None
+    with pytest.raises(ValidationError, match="require source, run-manifest, and report hashes"):
+        ModelArtifact.model_validate(values)
+
+
+def test_unevaluated_model_artifact_cannot_claim_final_release_binding() -> None:
+    values = model_artifact_values()
+    values["source_model_artifact_sha256"] = SHA_A
+    with pytest.raises(ValidationError, match="cannot claim final release bindings"):
         ModelArtifact.model_validate(values)
 
 
@@ -142,12 +257,18 @@ def test_checked_in_json_schemas_are_valid_documents_with_required_fields() -> N
         "run_manifest.schema.json": "artifact_checksums",
         "model_artifact.schema.json": "promotion_reason",
         "evaluation_report.schema.json": "release_gate_results",
+        "promotion_pointer.schema.json": "release_decision",
+        "trial_selection.schema.json": "test_access_count",
+        "public_training_provenance.schema.json": "trial_selection_sha256",
+        "public_evaluation_provenance.schema.json": "clean_execution_count",
     }
     for filename, required_field in expected.items():
         schema = json.loads((schema_dir / filename).read_text(encoding="utf-8"))
         assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
         assert required_field in schema["required"]
         assert schema["additionalProperties"] is False
+    model_schema = json.loads((schema_dir / "model_artifact.schema.json").read_text())
+    assert "evaluation_report_sha256" in model_schema["properties"]
 
 
 def test_checked_in_json_schemas_match_pydantic_contracts() -> None:
@@ -162,6 +283,22 @@ def test_checked_in_json_schemas_match_pydantic_contracts() -> None:
         "evaluation_report.schema.json": (
             "search_rank.schemas.evaluation",
             "EvaluationReport",
+        ),
+        "promotion_pointer.schema.json": (
+            "search_rank.schemas.release",
+            "PromotionPointer",
+        ),
+        "trial_selection.schema.json": (
+            "search_rank.schemas.trial",
+            "TrialSelection",
+        ),
+        "public_training_provenance.schema.json": (
+            "search_rank.schemas.api",
+            "PublicTrainingProvenance",
+        ),
+        "public_evaluation_provenance.schema.json": (
+            "search_rank.schemas.api",
+            "PublicEvaluationProvenance",
         ),
         "rank_request.schema.json": ("search_rank.schemas.api", "RankRequest"),
         "ranked_product.schema.json": ("search_rank.schemas.api", "RankedProduct"),
@@ -193,3 +330,59 @@ def test_checked_in_json_schemas_match_pydantic_contracts() -> None:
         document.pop("$id")
         model = getattr(importlib.import_module(module_name), model_name)
         assert document == model.model_json_schema(), filename
+
+
+def test_promotion_pointer_publishes_failed_evidence_without_promoting_candidate() -> None:
+    pointer = PromotionPointer.model_validate(
+        {
+            "schema_version": "1.0.0",
+            "release_id": "report-heldout-1",
+            "model_id": "pretrained-baseline-v1",
+            "bundle_s3_key": "promoted/releases/report-heldout-1/",
+            "evaluation_report_id": "report-heldout-1",
+            "git_sha": "abcdef0123456789",
+            "evidence_mode": "verified",
+            "release_decision": "retain_baseline",
+            "gate_passed": False,
+            "evaluated_candidate_model_id": "candidate-v1",
+            "previous": {
+                "release_id": "baseline-bootstrap-1",
+                "model_id": "pretrained-baseline-v1",
+                "pointer_version_id": "version-1",
+            },
+        }
+    )
+    assert pointer.model_id == pointer.previous.model_id  # type: ignore[union-attr]
+    assert pointer.model_id != pointer.evaluated_candidate_model_id
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("model_id", "candidate-v1", "cannot activate the evaluated candidate"),
+        ("bundle_s3_key", "promoted/pretrained-baseline-v1/", "immutable canonical key"),
+    ],
+)
+def test_promotion_pointer_rejects_false_or_mutable_failed_publication(
+    field: str, value: object, message: str
+) -> None:
+    payload: dict[str, object] = {
+        "schema_version": "1.0.0",
+        "release_id": "report-heldout-1",
+        "model_id": "pretrained-baseline-v1",
+        "bundle_s3_key": "promoted/releases/report-heldout-1/",
+        "evaluation_report_id": "report-heldout-1",
+        "git_sha": "abcdef0123456789",
+        "evidence_mode": "verified",
+        "release_decision": "retain_baseline",
+        "gate_passed": False,
+        "evaluated_candidate_model_id": "candidate-v1",
+        "previous": {
+            "release_id": "baseline-bootstrap-1",
+            "model_id": "pretrained-baseline-v1",
+            "pointer_version_id": "version-1",
+        },
+    }
+    payload[field] = value
+    with pytest.raises(ValidationError, match=message):
+        PromotionPointer.model_validate(payload)

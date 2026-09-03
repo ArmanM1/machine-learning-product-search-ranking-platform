@@ -46,6 +46,10 @@ output "cloudfront_url" {
   value = module.platform.cloudfront_url
 }
 
+output "budget_kill_switch" {
+  value = module.platform.budget_kill_switch
+}
+
 output "cost_guard" {
   value = module.platform.cost_guard
 }

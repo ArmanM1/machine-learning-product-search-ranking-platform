@@ -12,6 +12,8 @@ from search_rank.artifacts.checksums import sha256_directory, sha256_file
 from search_rank.config import sha256_value
 from search_rank.schemas.api import PublicEvidenceEnvelope
 from search_rank.schemas.evaluation import EvaluationReport
+from search_rank.schemas.evidence import BundleChecksums, EvaluationProvenance, ReleaseManifest
+from search_rank.schemas.model import ModelArtifact
 from search_rank.serving.dependencies import ServiceSettings, ServiceState
 from search_rank.serving.query_store import QueryStore
 
@@ -44,16 +46,28 @@ def verify_release(release_dir: Path, *, load_models: bool) -> dict[str, Any]:
     query_path = root / "curated-queries.json"
     evidence_path = root / "public-evidence.json"
     bundle_path = root / "bundle-checksums.json"
-    for required in (manifest_path, query_path, evidence_path, bundle_path):
+    license_path = root / "LICENSE"
+    notice_path = root / "NOTICE"
+    for required in (
+        manifest_path,
+        query_path,
+        evidence_path,
+        bundle_path,
+        license_path,
+        notice_path,
+    ):
         if not required.is_file():
             raise FileNotFoundError(f"release artifact is missing: {required.name}")
 
-    manifest = _load_object(manifest_path)
+    manifest = ReleaseManifest.model_validate(_load_object(manifest_path)).model_dump(
+        mode="json", exclude_none=True
+    )
     required_fields = {
         "schema_version",
         "release_id",
         "promoted_model_id",
         "dataset_manifest_hash",
+        "split_manifest_hash",
         "evaluation_report_id",
         "git_sha",
         "evidence_mode",
@@ -67,11 +81,17 @@ def verify_release(release_dir: Path, *, load_models: bool) -> dict[str, Any]:
         raise ValueError("unsupported release manifest schema version")
     if not SHA256.fullmatch(str(manifest["dataset_manifest_hash"])):
         raise ValueError("release dataset manifest hash is not canonical SHA-256")
+    if not SHA256.fullmatch(str(manifest["split_manifest_hash"])):
+        raise ValueError("release split manifest hash is not canonical SHA-256")
     if not GIT_SHA.fullmatch(str(manifest["git_sha"])):
         raise ValueError("release Git revision is not a canonical hexadecimal SHA")
     evidence_mode = str(manifest["evidence_mode"])
     if evidence_mode not in {"verified", "validation_only"}:
         raise ValueError("release manifest has an unsupported evidence mode")
+    if evidence_mode == "verified" and not isinstance(manifest.get("provenance"), dict):
+        raise ValueError("verified release manifest has no separated execution provenance")
+    if evidence_mode == "validation_only" and "provenance" in manifest:
+        raise ValueError("validation-only release cannot claim trained-candidate provenance")
     if not isinstance(manifest["models"], list) or len(manifest["models"]) < 2:
         raise ValueError("release must compare at least two public models")
 
@@ -89,9 +109,11 @@ def verify_release(release_dir: Path, *, load_models: bool) -> dict[str, Any]:
         expected_source,
         "curated-queries.json",
         "public-evidence.json",
+        "LICENSE",
+        "NOTICE",
     }
     if evidence_mode == "verified":
-        expected_artifacts.add("evaluation-provenance.json")
+        expected_artifacts.update({"candidate-model-artifact.json", "evaluation-provenance.json"})
     artifact_checksums = manifest["artifact_checksums"]
     if not isinstance(artifact_checksums, dict) or set(artifact_checksums) != expected_artifacts:
         raise ValueError("release artifact checksum inventory does not match its evidence mode")
@@ -105,10 +127,8 @@ def verify_release(release_dir: Path, *, load_models: bool) -> dict[str, Any]:
         if expected != "sha256:" + sha256_file(path):
             raise ValueError(f"release artifact checksum mismatch: {name}")
 
-    bundle = _load_object(bundle_path)
-    if bundle.get("schema_version") != "1.0.0" or not isinstance(bundle.get("files"), dict):
-        raise ValueError("bundle checksum inventory has an invalid schema")
-    bundle_files = bundle["files"]
+    bundle = BundleChecksums.model_validate(_load_object(bundle_path))
+    bundle_files = bundle.files
     actual_files = {
         path.relative_to(root).as_posix()
         for path in root.rglob("*")
@@ -169,14 +189,46 @@ def verify_release(release_dir: Path, *, load_models: bool) -> dict[str, Any]:
         report = EvaluationReport.model_validate_json(report_path.read_text(encoding="utf-8"))
         if report.report_id != manifest["evaluation_report_id"]:
             raise ValueError("release manifest and evaluation report IDs differ")
-        provenance = _load_object(root / "evaluation-provenance.json")
+        provenance = EvaluationProvenance.model_validate(
+            _load_object(root / "evaluation-provenance.json")
+        ).model_dump(mode="json")
         if (
             provenance.get("report_id") != report.report_id
             or provenance.get("split") != "test"
             or provenance.get("dataset_manifest_hash") != manifest["dataset_manifest_hash"]
+            or provenance.get("split_manifest_hash") != manifest["split_manifest_hash"]
             or provenance.get("evaluation_git_sha") != manifest["git_sha"]
         ):
             raise ValueError("evaluation provenance differs from the verified release identity")
+        artifact_path = root / "candidate-model-artifact.json"
+        artifact = ModelArtifact.model_validate_json(artifact_path.read_text(encoding="utf-8"))
+        training_provenance = manifest["provenance"]["training"]
+        candidate_model = next(
+            (
+                model
+                for model in manifest["models"]
+                if model["model_id"] == artifact.model_id and model["kind"] == "fine_tuned"
+            ),
+            None,
+        )
+        if candidate_model is None:
+            raise ValueError("candidate ModelArtifact has no matching fine-tuned release model")
+        if (
+            artifact.artifact_checksum != candidate_model["artifact_checksum"]
+            or artifact.dataset_manifest_hash != manifest["dataset_manifest_hash"]
+            or artifact.evaluation_report_id != report.report_id
+            or artifact.evaluation_report_sha256 != "sha256:" + sha256_file(report_path)
+            or artifact.selected_training_run_manifest_sha256
+            != training_provenance["run_manifest_sha256"]
+            or artifact.run_id != training_provenance["run_id"]
+            or artifact.git_sha != training_provenance["git_sha"]
+            or artifact.image_digest != training_provenance["image_digest"]
+            or artifact.config_hash != training_provenance["config_hash"]
+            or artifact.promoted != (manifest["promoted_model_id"] == artifact.model_id)
+        ):
+            raise ValueError(
+                "candidate ModelArtifact differs from the selected training and evaluation evidence"
+            )
 
     ready_verified = False
     if load_models:
@@ -202,10 +254,13 @@ def verify_release(release_dir: Path, *, load_models: bool) -> dict[str, Any]:
         "model_count": len(model_ids),
         "checkpoint_count": len(verified_checkpoints),
         "evidence_mode": evidence_mode,
+        "split_manifest_hash": manifest["split_manifest_hash"],
         "release_manifest_sha256": "sha256:" + sha256_file(manifest_path),
         "evidence_source_sha256": "sha256:" + sha256_file(root / expected_source),
         "curated_queries_sha256": "sha256:" + sha256_file(query_path),
         "public_evidence_sha256": "sha256:" + sha256_file(evidence_path),
+        "license_sha256": "sha256:" + sha256_file(license_path),
+        "notice_sha256": "sha256:" + sha256_file(notice_path),
         "bundle_checksums_sha256": "sha256:" + sha256_file(bundle_path),
         "metadata_verified": True,
         "model_load_and_readiness_verified": ready_verified,

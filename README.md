@@ -10,7 +10,14 @@ The planned controlled experiment is designed to compare deterministic controls,
 
 - The official test set is inaccessible to normal local and CI commands.
 - Raw data and model artifacts are not committed.
-- Cloud jobs require an explicit current-price check and bounded authorization.
+- Cloud writes require an operation-scoped, HMAC-bound financial snapshot and an atomic reservation in
+  the private S3 campaign ledger before the first mutation. Pricing and service-specific limits remain
+  separate fail-closed checks.
+- GitHub OIDC roles are bound to one protected environment and one workflow file on `main`; baseline,
+  trial-selection, benchmark, training, and deployment authority are not shared.
+- The owner waived AWS Budget creation and email confirmation. Public serving therefore uses an automatic
+  24-hour expiry and a least-privilege shutdown handler, but neither promotional credit nor these controls
+  can provide a hard USD 0 billing guarantee.
 - The AWS owner declined root MFA; this is recorded as a security deviation and prevents strict conformance with the original Milestone 0 acceptance criterion.
 - No resume-ready result exists while this notice remains.
 

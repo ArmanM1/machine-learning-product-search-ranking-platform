@@ -175,6 +175,7 @@ export interface OverviewData {
   evaluation_scope: EvaluationData['evaluation_scope']
   release_status: EvaluationData['release_status']
   promoted_model: ModelSummary
+  evaluated_candidate: ModelSummary | null
   strongest_baseline: ModelSummary | null
   evaluation_query_count: number
   primary_metric_name: string
@@ -223,7 +224,7 @@ export interface PublicRunSummary {
   status: 'complete' | 'failed' | 'pending' | 'fixture' | 'validation_only'
   configuration_hash: string | null
   data_hash: string | null
-  split_manifest_hash: string | null
+  split_manifest_hash: string
   code_commit: string | null
   image_digest: string | null
   model_artifact_checksum: string | null
@@ -238,6 +239,8 @@ export interface PublicRunSummary {
   duration_seconds: number | null
   cost_usd: number | null
   cost_evidence: string
+  training_provenance: VerifiedTrainingProvenance | null
+  evaluation_provenance: VerifiedEvaluationProvenance | null
   test_access_count: number
   limitations: string[]
   prohibited_claims: string[]
@@ -249,6 +252,41 @@ export interface VerifiedPublicInterval {
   lower: number
   upper: number
   confidence_level: number
+}
+
+export interface VerifiedTrainingProvenance {
+  trial_selection_id: string
+  trial_selection_sha256: string
+  run_id: string
+  run_manifest_sha256: string
+  selected_model_id: string
+  selected_model_artifact_checksum: string
+  config_hash: string
+  git_sha: string
+  image_digest: string
+  hardware_class: 'ml.m5.xlarge' | 'ml.g4dn.xlarge'
+  accelerator: 'cpu' | 'gpu'
+  region: 'us-east-1'
+  runtime_seconds: number
+  estimated_cost_usd: number
+  actual_cost_usd: number | null
+  cost_evidence: string
+}
+
+export interface VerifiedEvaluationProvenance {
+  candidate_model_id: string
+  candidate_model_artifact_checksum: string
+  evaluation_config_hash: string
+  git_sha: string
+  image_digest: string
+  hardware_class: 'ml.m5.xlarge'
+  region: 'us-east-1'
+  clean_execution_count: 2
+  runtime_seconds: number
+  runtime_basis: 'processing_job_wall_clock_sum'
+  estimated_cost_usd: number
+  actual_cost_usd: number | null
+  cost_evidence: string
 }
 
 export interface VerifiedPublicMetricValue {
@@ -339,8 +377,8 @@ export interface VerifiedPublicRun {
   status: 'complete'
   config_hash: string
   dataset_manifest_hash: string
+  split_manifest_hash: string
   git_sha: string
-  image_digest: string
   model_artifact_checksum: string
   dataset_name: string
   dataset_version: string
@@ -348,8 +386,8 @@ export interface VerifiedPublicRun {
   base_model_id: string
   base_model_revision: string
   training_strategy: string
-  hardware_class: string
-  region: string
+  training_provenance: VerifiedTrainingProvenance
+  evaluation_provenance: VerifiedEvaluationProvenance
   metrics: {
     candidate_graded_ndcg_at_10: number
     strongest_baseline_graded_ndcg_at_10: number
@@ -358,9 +396,6 @@ export interface VerifiedPublicRun {
   intervals: {
     candidate_minus_baseline_graded_ndcg_at_10: VerifiedPublicInterval
   }
-  duration_seconds: number
-  actual_cost_usd: number | null
-  cost_evidence: string
   test_access_count: number
   limitations: string[]
   prohibited_claims: string[]
@@ -382,6 +417,7 @@ export interface ValidationPublicRun {
   selected_model_id: string
   config_hash: string
   dataset_manifest_hash: string
+  split_manifest_hash: string
   git_sha: string
   image_digest: string
   model_artifact_checksum: string

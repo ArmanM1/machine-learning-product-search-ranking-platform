@@ -10,9 +10,10 @@ from typing import TYPE_CHECKING
 import pandas as pd
 
 from search_rank.artifacts.checksums import verify_file
-from search_rank.config import sha256_value
 from search_rank.evaluation.gates import HeldoutAccessDenied
 from search_rank.schemas.dataset import DatasetManifest
+
+from .identity import dataset_processed_checksum
 
 if TYPE_CHECKING:
     from search_rank.evaluation.gates import HeldoutAccessReceipt
@@ -34,9 +35,11 @@ def _checksum_index(manifest_path: Path) -> dict[str, str]:
 
 def _verify_dataset_identity(manifest: DatasetManifest, manifest_path: Path) -> None:
     checksums = _checksum_index(manifest_path)
-    calculated = f"sha256:{sha256_value({'preprocessing_version': manifest.preprocessing_version, 'artifacts': {name: checksum.removeprefix('sha256:') for name, checksum in checksums.items()}})}"
+    calculated = dataset_processed_checksum(manifest, checksums)
     if calculated != manifest.processed_checksum:
-        raise ValueError("prepared artifact index does not match the manifest processed checksum")
+        raise ValueError(
+            "prepared semantic manifest or artifact index does not match the processed checksum"
+        )
 
 
 def resolve_manifest_path(reference: str | Path) -> Path:

@@ -1,0 +1,452 @@
+{
+  "$id": "https://schemas.example.invalid/search-rank/trial_selection.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "ValidationContrast": {
+      "additionalProperties": false,
+      "description": "One predeclared single-factor validation comparison.",
+      "properties": {
+        "contrast_id": {
+          "enum": [
+            "mixed_vs_random_sampling",
+            "enriched_vs_title_input"
+          ],
+          "title": "Contrast Id",
+          "type": "string"
+        },
+        "treatment_role": {
+          "const": "candidate_treatment",
+          "title": "Treatment Role",
+          "type": "string"
+        },
+        "control_role": {
+          "enum": [
+            "random_negative_control",
+            "title_only_control"
+          ],
+          "title": "Control Role",
+          "type": "string"
+        },
+        "controlled_difference_fields": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Controlled Difference Fields",
+          "type": "array"
+        },
+        "treatment_validation_ndcg_at_10": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Treatment Validation Ndcg At 10",
+          "type": "number"
+        },
+        "control_validation_ndcg_at_10": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Control Validation Ndcg At 10",
+          "type": "number"
+        },
+        "treatment_minus_control": {
+          "maximum": 1,
+          "minimum": -1,
+          "title": "Treatment Minus Control",
+          "type": "number"
+        }
+      },
+      "required": [
+        "contrast_id",
+        "treatment_role",
+        "control_role",
+        "controlled_difference_fields",
+        "treatment_validation_ndcg_at_10",
+        "control_validation_ndcg_at_10",
+        "treatment_minus_control"
+      ],
+      "title": "ValidationContrast",
+      "type": "object"
+    },
+    "ValidationTrial": {
+      "additionalProperties": false,
+      "description": "One checksummed cloud-training result used by the frozen comparison.",
+      "properties": {
+        "role": {
+          "enum": [
+            "candidate_treatment",
+            "random_negative_control",
+            "title_only_control"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "promotion_eligible": {
+          "title": "Promotion Eligible",
+          "type": "boolean"
+        },
+        "candidate_run_id": {
+          "minLength": 1,
+          "title": "Candidate Run Id",
+          "type": "string"
+        },
+        "candidate_model_id": {
+          "minLength": 1,
+          "title": "Candidate Model Id",
+          "type": "string"
+        },
+        "candidate_artifact_s3_key": {
+          "pattern": "^runs/[A-Za-z0-9._/-]+\\.tar\\.gz$",
+          "title": "Candidate Artifact S3 Key",
+          "type": "string"
+        },
+        "candidate_artifact_sha256": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Candidate Artifact Sha256",
+          "type": "string"
+        },
+        "candidate_checkpoint_sha256": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Candidate Checkpoint Sha256",
+          "type": "string"
+        },
+        "candidate_release_inputs_s3_key": {
+          "pattern": "^runs/[A-Za-z0-9._/-]+/reports/candidate-release-inputs\\.json$",
+          "title": "Candidate Release Inputs S3 Key",
+          "type": "string"
+        },
+        "candidate_release_inputs_sha256": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Candidate Release Inputs Sha256",
+          "type": "string"
+        },
+        "training_run_manifest_s3_key": {
+          "pattern": "^runs/[A-Za-z0-9._/-]+/reports/run-manifest\\.json$",
+          "title": "Training Run Manifest S3 Key",
+          "type": "string"
+        },
+        "training_run_manifest_sha256": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Training Run Manifest Sha256",
+          "type": "string"
+        },
+        "training_summary_sha256": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Training Summary Sha256",
+          "type": "string"
+        },
+        "frozen_config_file_sha256": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Frozen Config File Sha256",
+          "type": "string"
+        },
+        "candidate_training_config_path": {
+          "pattern": "^configs/experiments/[A-Za-z0-9._/-]+\\.ya?ml$",
+          "title": "Candidate Training Config Path",
+          "type": "string"
+        },
+        "candidate_training_config_s3_key": {
+          "pattern": "^runs/[A-Za-z0-9._/-]+/config/experiment\\.yaml$",
+          "title": "Candidate Training Config S3 Key",
+          "type": "string"
+        },
+        "candidate_training_config_file_sha256": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Candidate Training Config File Sha256",
+          "type": "string"
+        },
+        "candidate_training_config_sha256": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Candidate Training Config Sha256",
+          "type": "string"
+        },
+        "config_id": {
+          "minLength": 1,
+          "title": "Config Id",
+          "type": "string"
+        },
+        "dataset_manifest_hash": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Dataset Manifest Hash",
+          "type": "string"
+        },
+        "input_template_version": {
+          "enum": [
+            "title_v1",
+            "enriched_v1"
+          ],
+          "title": "Input Template Version",
+          "type": "string"
+        },
+        "sampling_strategy": {
+          "enum": [
+            "mixed_hard_random_v1",
+            "random_only_v1"
+          ],
+          "title": "Sampling Strategy",
+          "type": "string"
+        },
+        "hard_example_sources": {
+          "items": {
+            "enum": [
+              "bm25",
+              "pretrained_cross_encoder"
+            ],
+            "type": "string"
+          },
+          "title": "Hard Example Sources",
+          "type": "array"
+        },
+        "best_validation_ndcg_at_10": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Best Validation Ndcg At 10",
+          "type": "number"
+        },
+        "training_git_sha": {
+          "pattern": "^[0-9a-f]{40}$",
+          "title": "Training Git Sha",
+          "type": "string"
+        },
+        "repository_dirty": {
+          "const": false,
+          "title": "Repository Dirty",
+          "type": "boolean"
+        },
+        "training_run_kind": {
+          "enum": [
+            "ablation",
+            "final"
+          ],
+          "title": "Training Run Kind",
+          "type": "string"
+        },
+        "training_config_role": {
+          "enum": [
+            "candidate_treatment",
+            "random_negative_control",
+            "title_only_control"
+          ],
+          "title": "Training Config Role",
+          "type": "string"
+        },
+        "training_image_uri": {
+          "pattern": "^[0-9]{12}\\.dkr\\.ecr\\.us-east-1\\.amazonaws\\.com/[a-z0-9/_-]+@sha256:[0-9a-f]{64}$",
+          "title": "Training Image Uri",
+          "type": "string"
+        },
+        "training_image_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Training Image Digest",
+          "type": "string"
+        },
+        "training_image_source_tag": {
+          "pattern": "^sha-[0-9a-f]{40}$",
+          "title": "Training Image Source Tag",
+          "type": "string"
+        },
+        "training_job_id": {
+          "minLength": 1,
+          "title": "Training Job Id",
+          "type": "string"
+        },
+        "region": {
+          "const": "us-east-1",
+          "title": "Region",
+          "type": "string"
+        },
+        "hardware_class": {
+          "enum": [
+            "ml.m5.xlarge",
+            "ml.g4dn.xlarge"
+          ],
+          "title": "Hardware Class",
+          "type": "string"
+        },
+        "accelerator": {
+          "enum": [
+            "cpu",
+            "gpu"
+          ],
+          "title": "Accelerator",
+          "type": "string"
+        },
+        "training_billable_on_demand_upper_bound_usd": {
+          "minimum": 0,
+          "title": "Training Billable On Demand Upper Bound Usd",
+          "type": "number"
+        },
+        "source_identity_basis": {
+          "const": "clean checkout and exact sha-commit ECR tag-to-digest binding",
+          "title": "Source Identity Basis",
+          "type": "string"
+        }
+      },
+      "required": [
+        "role",
+        "promotion_eligible",
+        "candidate_run_id",
+        "candidate_model_id",
+        "candidate_artifact_s3_key",
+        "candidate_artifact_sha256",
+        "candidate_checkpoint_sha256",
+        "candidate_release_inputs_s3_key",
+        "candidate_release_inputs_sha256",
+        "training_run_manifest_s3_key",
+        "training_run_manifest_sha256",
+        "training_summary_sha256",
+        "frozen_config_file_sha256",
+        "candidate_training_config_path",
+        "candidate_training_config_s3_key",
+        "candidate_training_config_file_sha256",
+        "candidate_training_config_sha256",
+        "config_id",
+        "dataset_manifest_hash",
+        "input_template_version",
+        "sampling_strategy",
+        "hard_example_sources",
+        "best_validation_ndcg_at_10",
+        "training_git_sha",
+        "repository_dirty",
+        "training_run_kind",
+        "training_config_role",
+        "training_image_uri",
+        "training_image_digest",
+        "training_image_source_tag",
+        "training_job_id",
+        "region",
+        "hardware_class",
+        "accelerator",
+        "training_billable_on_demand_upper_bound_usd",
+        "source_identity_basis"
+      ],
+      "title": "ValidationTrial",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Frozen, validation-only evidence required before held-out access.",
+  "properties": {
+    "schema_version": {
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "artifact_type": {
+      "const": "validation_trial_selection",
+      "title": "Artifact Type",
+      "type": "string"
+    },
+    "selection_id": {
+      "pattern": "^trial-selection-[0-9a-f]{20}$",
+      "title": "Selection Id",
+      "type": "string"
+    },
+    "git_sha": {
+      "pattern": "^[0-9a-f]{40}$",
+      "title": "Git Sha",
+      "type": "string"
+    },
+    "repository_dirty": {
+      "const": false,
+      "title": "Repository Dirty",
+      "type": "boolean"
+    },
+    "dataset_manifest_hash": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Dataset Manifest Hash",
+      "type": "string"
+    },
+    "split": {
+      "const": "validation",
+      "title": "Split",
+      "type": "string"
+    },
+    "metric_name": {
+      "const": "graded_ndcg@10",
+      "title": "Metric Name",
+      "type": "string"
+    },
+    "test_access_count": {
+      "const": 0,
+      "title": "Test Access Count",
+      "type": "integer"
+    },
+    "heldout_accessed": {
+      "const": false,
+      "title": "Heldout Accessed",
+      "type": "boolean"
+    },
+    "trial_count": {
+      "const": 3,
+      "title": "Trial Count",
+      "type": "integer"
+    },
+    "selection_rule_id": {
+      "const": "preregistered_treatment_controls_validation_only_v1",
+      "title": "Selection Rule Id",
+      "type": "string"
+    },
+    "selection_rule": {
+      "minLength": 1,
+      "title": "Selection Rule",
+      "type": "string"
+    },
+    "selected_role": {
+      "const": "candidate_treatment",
+      "title": "Selected Role",
+      "type": "string"
+    },
+    "selected_candidate_run_id": {
+      "minLength": 1,
+      "title": "Selected Candidate Run Id",
+      "type": "string"
+    },
+    "selected_candidate_model_id": {
+      "minLength": 1,
+      "title": "Selected Candidate Model Id",
+      "type": "string"
+    },
+    "selected_candidate_config_sha256": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Selected Candidate Config Sha256",
+      "type": "string"
+    },
+    "trials": {
+      "items": {
+        "$ref": "#/$defs/ValidationTrial"
+      },
+      "title": "Trials",
+      "type": "array"
+    },
+    "contrasts": {
+      "items": {
+        "$ref": "#/$defs/ValidationContrast"
+      },
+      "title": "Contrasts",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "selection_id",
+    "git_sha",
+    "repository_dirty",
+    "dataset_manifest_hash",
+    "split",
+    "metric_name",
+    "test_access_count",
+    "heldout_accessed",
+    "trial_count",
+    "selection_rule_id",
+    "selection_rule",
+    "selected_role",
+    "selected_candidate_run_id",
+    "selected_candidate_model_id",
+    "selected_candidate_config_sha256",
+    "trials",
+    "contrasts"
+  ],
+  "title": "TrialSelection",
+  "type": "object"
+}

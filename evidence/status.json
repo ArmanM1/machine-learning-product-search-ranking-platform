@@ -8,6 +8,19 @@
   "accepted_security_deviations": [
     "The owner explicitly declined root/account-owner MFA on 2026-09-02; MFA will not be configured or requested again. FR-SETUP-005 and strict Milestone 0 conformance therefore remain unmet."
   ],
+  "owner_cloud_authorization": {
+    "credits_only_risk_authorized": true,
+    "maximum_out_of_pocket_usd": 0,
+    "budget_thresholds_usd": [
+      1,
+      10,
+      25,
+      40
+    ],
+    "budget_thresholds_approved": true,
+    "budget_destination_confirmation_reported": true,
+    "exact_budget_address_received": false
+  },
   "local_configuration_validation": {
     "terraform_format_and_validate": true,
     "github_workflow_actionlint": true,
@@ -18,8 +31,11 @@
   "claim_boundary": {
     "dataset_pipeline_verified": true,
     "baselines_verified": false,
-    "validation_baseline_single_run_completed": true,
-    "validation_baseline_reproducibility_verified": false,
+    "validation_baseline_two_scoring_processes_completed": true,
+    "validation_baseline_quality_reproducibility_verified": true,
+    "validation_baseline_ranking_and_score_reproducibility_verified": true,
+    "validation_baseline_latency_reproducibility_verified": false,
+    "validation_baseline_clean_checkout_reproducibility_verified": false,
     "candidate_trained": false,
     "validation_baseline_bundle_published": false,
     "heldout_evaluation_completed": false,
@@ -33,11 +49,13 @@
   },
   "aws_apply_authorized": false,
   "aws_apply_blockers": [
-    "temporary non-root AWS CLI identity is not verified",
-    "the public GitHub repository exists, but its AWS OIDC trust has not been applied or verified",
-    "budget approval and notification-email decision are unresolved",
-    "the owner's strict USD 0 out-of-pocket target cannot be guaranteed from promotional credits because applicability, tax, and billing lag remain outside the project controls",
-    "no exact Terraform bootstrap plan has been approved"
+    "redacted caller-identity evidence from the temporary non-root GitHub OIDC role is not yet retained",
+    "the temporary state-bootstrap role still needs its exact provider-refresh reads and self-only policy-simulation preflight permission",
+    "the externally controlled project permission boundary and one-time platform seed role have not yet been created",
+    "the approved budget thresholds cannot be applied until the owner supplies the exact protected notification address",
+    "no exact Terraform state-bootstrap plan hash has been reviewed and applied",
+    "the requested single-instance SageMaker Managed Spot quotas remain pending",
+    "the ml.m5.xlarge SageMaker Processing quota is applied at zero; AWS currently refuses another quota request while the two existing quota requests remain open"
   ],
   "current_evidence_mode": null,
   "release_evidence_modes": {
@@ -56,5 +74,5 @@
   "public_demo_url": null,
   "current_release_id": null,
   "evidence_manifest_sha256": null,
-  "note": "The data claim is limited to the two checksummed historical local runs in evidence/data; those runs lack Git commit identity. The baseline claim is limited to one full validation scoring run, so reproducibility is not claimed. No release evidence mode is current until an immutable bundle is published. The PRD is not complete."
+  "note": "The owner authorized credits-only AWS work despite the acknowledged absence of a hard USD 0 guarantee, but each permission change and reviewed Terraform apply remains gated. The data claim is limited to the two checksummed historical local runs in evidence/data; those runs lack Git commit identity. Two separate local validation scoring processes reproduced all six quality vectors and every rank and score exactly, but both used a dirty shared worktree and their uncontrolled p95 timings varied, so clean-checkout and latency reproducibility remain unverified and the broad baselines_verified flag remains false. No release evidence mode is current until an immutable bundle is published. The PRD is not complete."
 }

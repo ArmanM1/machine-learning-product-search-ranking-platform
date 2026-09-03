@@ -3,63 +3,9 @@ name: Publish the validation-only baseline release
 on:
   workflow_dispatch:
     inputs:
-      baseline_command_summary_s3_key:
-        description: Immutable runs/.../summary.json key from a successful validation baseline run
+      dispatch_config:
+        description: Exact JSON; copy docs/workflow-inputs/bootstrap-baseline.example.json and replace evidence values
         required: true
-        type: string
-      baseline_command_summary_sha256:
-        description: SHA-256 hex digest of the command summary object
-        required: true
-        type: string
-      baseline_summary_s3_key:
-        description: Immutable runs/.../baseline-summary.json key bound by the command summary
-        required: true
-        type: string
-      baseline_summary_sha256:
-        description: SHA-256 hex digest of the baseline summary object
-        required: true
-        type: string
-      dataset_manifest_s3_key:
-        description: Immutable runs/.../manifest.json evidence copy; no prepared split objects are read
-        required: true
-        type: string
-      dataset_manifest_sha256:
-        description: SHA-256 hex digest of the transported manifest object
-        required: true
-        type: string
-      dataset_processed_sha256:
-        description: Semantic DatasetManifest.processed_checksum in sha256:... form
-        required: true
-        type: string
-      curated_queries_s3_key:
-        description: Immutable runs/.../curated-queries.json key produced from validation data
-        required: true
-        type: string
-      curated_queries_sha256:
-        description: SHA-256 hex digest of the curated-query object
-        required: true
-        type: string
-      baseline_config_path:
-        description: Committed baseline configuration used by the successful run
-        required: true
-        default: configs/experiments/baselines-v1.yaml
-        type: string
-      baseline_config_file_sha256:
-        description: SHA-256 hex digest of the committed baseline YAML bytes
-        required: true
-        type: string
-      strongest_baseline_id:
-        description: Validation-selected unchanged model expected to become the initial pointer
-        required: true
-        type: string
-      evidence_image_digest:
-        description: Immutable evaluation/serving image digest in sha256:... form
-        required: true
-        type: string
-      hardware_class:
-        description: Hardware class that produced the validation evidence
-        required: true
-        default: github-hosted-ubuntu-x86_64
         type: string
       authorization:
         description: Type PUBLISH VALIDATION BASELINE after reviewing the immutable inputs
@@ -71,7 +17,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: baseline-release-bootstrap
+  group: aws-financial-operations
   cancel-in-progress: false
 
 env:
@@ -90,24 +36,25 @@ jobs:
     environment: baseline-release
     env:
       AUTHORIZATION: ${{ inputs.authorization }}
-      BASELINE_COMMAND_SUMMARY_S3_KEY: ${{ inputs.baseline_command_summary_s3_key }}
-      BASELINE_COMMAND_SUMMARY_SHA256: ${{ inputs.baseline_command_summary_sha256 }}
-      BASELINE_SUMMARY_S3_KEY: ${{ inputs.baseline_summary_s3_key }}
-      BASELINE_SUMMARY_SHA256: ${{ inputs.baseline_summary_sha256 }}
-      DATASET_MANIFEST_S3_KEY: ${{ inputs.dataset_manifest_s3_key }}
-      DATASET_MANIFEST_SHA256: ${{ inputs.dataset_manifest_sha256 }}
-      DATASET_PROCESSED_SHA256: ${{ inputs.dataset_processed_sha256 }}
-      CURATED_QUERIES_S3_KEY: ${{ inputs.curated_queries_s3_key }}
-      CURATED_QUERIES_SHA256: ${{ inputs.curated_queries_sha256 }}
-      BASELINE_CONFIG_PATH: ${{ inputs.baseline_config_path }}
-      BASELINE_CONFIG_FILE_SHA256: ${{ inputs.baseline_config_file_sha256 }}
-      STRONGEST_BASELINE_ID: ${{ inputs.strongest_baseline_id }}
-      EVIDENCE_IMAGE_DIGEST: ${{ inputs.evidence_image_digest }}
-      HARDWARE_CLASS: ${{ inputs.hardware_class }}
       ARTIFACT_BUCKET: ${{ vars.AWS_ARTIFACT_BUCKET }}
       EVAL_REPOSITORY: ${{ vars.AWS_EVAL_ECR_REPOSITORY_URL }}
       CAMPAIGN_SPEND_TO_DATE_USD: ${{ secrets.AWS_CAMPAIGN_SPEND_TO_DATE_USD }}
       REMAINING_APPLICABLE_CREDIT_USD: ${{ secrets.AWS_REMAINING_APPLICABLE_CREDIT_USD }}
+      FINANCIAL_SNAPSHOT_OBSERVED_AT: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_OBSERVED_AT }}
+      FINANCIAL_SNAPSHOT_RECEIPT_SHA256: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_RECEIPT_SHA256 }}
+      FINANCIAL_SNAPSHOT_HMAC_KEY: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_HMAC_KEY }}
+      FINANCIAL_RESERVATION_MAX_USD: ${{ secrets.AWS_FINANCIAL_RESERVATION_MAX_USD }}
+      FINANCIAL_RESERVATION_REMAINING_COMMITTED_USD: ${{ secrets.AWS_FINANCIAL_RESERVATION_REMAINING_COMMITTED_USD }}
+      FINANCIAL_RESERVATION_CPU_HOURS: ${{ secrets.AWS_FINANCIAL_RESERVATION_CPU_HOURS }}
+      FINANCIAL_RESERVATION_GPU_HOURS: ${{ secrets.AWS_FINANCIAL_RESERVATION_GPU_HOURS }}
+      FINANCIAL_CPU_HOURS_USED_TO_DATE: ${{ secrets.AWS_FINANCIAL_CPU_HOURS_USED_TO_DATE }}
+      FINANCIAL_GPU_HOURS_USED_TO_DATE: ${{ secrets.AWS_FINANCIAL_GPU_HOURS_USED_TO_DATE }}
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_WORKFLOW: bootstrap-baseline
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_INPUTS_JSON: ${{ toJSON(inputs) }}
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_COMMIT_SHA: ${{ github.sha }}
+      FINANCIAL_SNAPSHOT_SOURCE: "aws_billing_and_cost_management_console"
+      FINANCIAL_SNAPSHOT_MAX_AGE_SECONDS: "21600"
+      TF_STATE_BUCKET: ${{ vars.AWS_TERRAFORM_STATE_BUCKET }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -116,6 +63,13 @@ jobs:
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           enable-cache: true
+      - name: Validate and unpack the exact dispatch configuration
+        env:
+          DISPATCH_CONFIG_JSON: ${{ inputs.dispatch_config }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/validate_workflow_dispatch.py --workflow bootstrap-baseline
       - name: Validate the non-held-out immutable inputs and cost boundary
         shell: bash
         run: |
@@ -185,6 +139,15 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: gha-baseline-${{ github.run_id }}
           mask-aws-account-id: true
+      - name: Atomically reserve the signed campaign capacity
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${TF_STATE_BUCKET:?Missing AWS_TERRAFORM_STATE_BUCKET variable}"
+          python -m pip install --disable-pip-version-check pydantic==2.13.5
+          PYTHONPATH=src python scripts/reserve_financial_capacity.py reserve \
+            --bucket "${TF_STATE_BUCKET}" \
+            --output financial-capacity-reservation.json
       - name: Bind validation evidence to the reviewed image and commit
         shell: bash
         run: |
@@ -244,6 +207,8 @@ jobs:
             '.processed_checksum == $dataset and .dataset_name == "amazon-shopping-queries-esci" and
              (.split_counts.validation.query_count | type == "number")' \
             baseline-input/manifest.json >/dev/null
+          SPLIT_MANIFEST_HASH="$(jq -er '.split_manifest_hash | select(test("^sha256:[0-9a-f]{64}$"))' baseline-input/manifest.json)"
+          export SPLIT_MANIFEST_HASH
           jq -e \
             '.schema_version == "1.0.0" and (.queries | type == "array") and
              ([.queries[].products | length]) as $counts |
@@ -259,8 +224,17 @@ jobs:
         run: |
           set -euo pipefail
           uv sync --frozen --all-extras
+          uv run python scripts/validate_release_artifacts.py file \
+            --kind command-summary baseline-input/summary.json
+          uv run python scripts/validate_release_artifacts.py file \
+            --kind baseline-summary baseline-input/baseline-summary.json
+          uv run python scripts/validate_release_artifacts.py file \
+            --kind dataset-manifest baseline-input/manifest.json
+          uv run python scripts/validate_release_artifacts.py file \
+            --kind curated-queries baseline-input/curated-queries.json
           baseline_git_sha="$(jq -r '.git_sha' baseline-input/summary.json)"
-          export SEARCH_RANK_RUN_ROOT="$(pwd)/baseline-bootstrap-command"
+          SEARCH_RANK_RUN_ROOT="$(pwd)/baseline-bootstrap-command"
+          export SEARCH_RANK_RUN_ROOT
           uv run python -m search_rank.cli bootstrap-baseline-release \
             --baseline-summary baseline-input/summary.json \
             --baseline-config "${BASELINE_CONFIG_PATH}" \
@@ -280,7 +254,10 @@ jobs:
           test -f .baseline-release/baseline-summary.json
           test -f .baseline-release/curated-queries.json
           test -f .baseline-release/bundle-checksums.json
+          test -f .baseline-release/LICENSE
+          test -f .baseline-release/NOTICE
           test ! -e .baseline-release/evaluation-report.json
+          test ! -e .baseline-release/candidate-model-artifact.json
           uv run python - <<'PY'
           import json
           import os
@@ -288,11 +265,18 @@ jobs:
 
           from search_rank.artifacts.checksums import sha256_file
           from search_rank.schemas.api import PublicEvidenceEnvelope
+          from search_rank.schemas.dataset import DatasetManifest
+          from search_rank.schemas.evidence import BundleChecksums, ReleaseManifest
 
           root = Path(".baseline-release").resolve()
-          manifest = json.loads((root / "release-manifest.json").read_text(encoding="utf-8"))
+          manifest = ReleaseManifest.model_validate_json(
+              (root / "release-manifest.json").read_text(encoding="utf-8")
+          ).model_dump(mode="json", exclude_none=True)
           evidence = PublicEvidenceEnvelope.model_validate_json(
               (root / "public-evidence.json").read_text(encoding="utf-8")
+          )
+          source_manifest = DatasetManifest.model_validate_json(
+              Path("baseline-input/manifest.json").read_text(encoding="utf-8")
           )
           if evidence.evidence_mode != "validation_only":
               raise SystemExit("baseline public evidence must be explicitly validation-only")
@@ -308,6 +292,13 @@ jobs:
               raise SystemExit("release manifest selected a different baseline")
           if manifest.get("dataset_manifest_hash") != os.environ["DATASET_PROCESSED_SHA256"]:
               raise SystemExit("release manifest dataset identity changed")
+          if not (
+              source_manifest.split_manifest_hash
+              == manifest.get("split_manifest_hash")
+              == evidence.run.split_manifest_hash
+              == os.environ["SPLIT_MANIFEST_HASH"]
+          ):
+              raise SystemExit("source, release, and public split identities differ")
           if any(model.get("kind") == "fine_tuned" for model in manifest.get("models", [])):
               raise SystemExit("validation-only bundle unexpectedly contains a fine-tuned model")
           if len(manifest.get("models", [])) < 2:
@@ -318,12 +309,20 @@ jobs:
               for path in sorted(root.rglob("*"))
               if path.is_file() and path.name != "bundle-checksums.json"
           }
-          inventory = json.loads((root / "bundle-checksums.json").read_text(encoding="utf-8"))
-          if inventory != {"schema_version": "1.0.0", "files": actual}:
+          inventory = BundleChecksums.model_validate_json(
+              (root / "bundle-checksums.json").read_text(encoding="utf-8")
+          )
+          if inventory.files != actual:
               raise SystemExit("bundle checksum inventory is not exact")
-          required = {"baseline-summary.json", "curated-queries.json", "public-evidence.json"}
+          required = {
+              "baseline-summary.json",
+              "curated-queries.json",
+              "public-evidence.json",
+              "LICENSE",
+              "NOTICE",
+          }
           bound = manifest.get("artifact_checksums")
-          if not isinstance(bound, dict) or not required <= bound.keys():
+          if not isinstance(bound, dict) or set(bound) != required:
               raise SystemExit("release manifest is missing public evidence checksums")
           for relative in required:
               if bound[relative] != actual[relative]:
@@ -331,18 +330,15 @@ jobs:
           PY
           jq -e \
             --arg selected "${STRONGEST_BASELINE_ID}" \
+            --arg split "${SPLIT_MANIFEST_HASH}" \
             '.command == "bootstrap-baseline-release" and .status == "succeeded" and
              .result.promoted_model_id == $selected and .result.evidence_mode == "validation_only" and
+             .result.split_manifest_hash == $split and
              .result.test_access_count == 0' baseline-bootstrap-summary.json >/dev/null
       - name: Publish the immutable baseline bundle and create the initial pointer
         shell: bash
         run: |
           set -euo pipefail
-          if aws s3api head-object --bucket "${ARTIFACT_BUCKET}" --key promoted/current.json \
-            > existing-pointer-private.json 2>/dev/null; then
-            echo "The initial promotion pointer already exists; refusing baseline bootstrap." >&2
-            exit 1
-          fi
           release_id="$(jq -r '.release_id' .baseline-release/release-manifest.json)"
           promoted_model="$(jq -r '.promoted_model_id' .baseline-release/release-manifest.json)"
           evidence_id="$(jq -r '.evaluation_report_id' .baseline-release/release-manifest.json)"
@@ -351,19 +347,79 @@ jobs:
           [[ "${release_id}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{2,99}$ ]]
           [[ "${evidence_id}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{2,199}$ ]]
           prefix="promoted/${promoted_model}/"
-          existing="$(aws s3api list-objects-v2 --bucket "${ARTIFACT_BUCKET}" \
-            --prefix "${prefix}" --max-keys 1 --query 'KeyCount' --output text)"
-          test "${existing}" = "0"
-          while IFS= read -r -d '' file; do
-            relative="${file#.baseline-release/}"
-            aws s3api put-object \
+          uv run python scripts/validate_release_artifacts.py bundle .baseline-release
+          readback_dir="$(mktemp -d)"
+          trap 'rm -rf -- "${readback_dir}"' EXIT
+          put_immutable_or_verify_identical() {
+            local source_file="$1"
+            local object_key="$2"
+            local stem
+            stem="$(sha256sum <<<"${object_key}" | cut -d' ' -f1)"
+            local existing_file="${readback_dir}/${stem}.object"
+            local put_error="${readback_dir}/${stem}.put-error.txt"
+            PYTHONPATH=src uv run python scripts/validate_financial_snapshot.py emit \
+              --output /dev/null
+            if ! aws s3api put-object \
               --bucket "${ARTIFACT_BUCKET}" \
-              --key "${prefix}${relative}" \
-              --body "${file}" \
+              --key "${object_key}" \
+              --body "${source_file}" \
               --checksum-algorithm SHA256 \
               --tagging "RetentionClass=promoted" \
-              --if-none-match '*' >/dev/null
+              --if-none-match '*' >/dev/null 2>"${put_error}"; then
+              aws s3api get-object \
+                --bucket "${ARTIFACT_BUCKET}" \
+                --key "${object_key}" \
+                --checksum-mode ENABLED \
+                "${existing_file}" >/dev/null 2>&1 || {
+                  cat "${put_error}" >&2
+                  return 1
+                }
+              cmp -s "${source_file}" "${existing_file}" || {
+                cat "${put_error}" >&2
+                echo "Immutable baseline object exists with different bytes." >&2
+                return 1
+              }
+            fi
+            aws s3api head-object \
+              --bucket "${ARTIFACT_BUCKET}" \
+              --key "${object_key}" \
+              --checksum-mode ENABLED > "${readback_dir}/${stem}.head.json"
+            aws s3api get-object-tagging \
+              --bucket "${ARTIFACT_BUCKET}" \
+              --key "${object_key}" > "${readback_dir}/${stem}.tags.json"
+            jq -e '.ChecksumSHA256 | type == "string" and length > 0' \
+              "${readback_dir}/${stem}.head.json" >/dev/null
+            jq -e '.TagSet == [{Key: "RetentionClass", Value: "promoted"}]' \
+              "${readback_dir}/${stem}.tags.json" >/dev/null
+          }
+          while IFS= read -r -d '' file; do
+            relative="${file#.baseline-release/}"
+            put_immutable_or_verify_identical "${file}" "${prefix}${relative}"
           done < <(find .baseline-release -type f -print0 | sort -z)
+          aws s3api list-objects-v2 \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --prefix "${prefix}" \
+            --no-paginate > "${readback_dir}/bundle-objects.json"
+          BUNDLE_PREFIX="${prefix}" READBACK_DIR="${readback_dir}" uv run python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          prefix = os.environ["BUNDLE_PREFIX"]
+          expected = sorted(
+              prefix + path.relative_to(".baseline-release").as_posix()
+              for path in Path(".baseline-release").rglob("*")
+              if path.is_file()
+          )
+          payload = json.loads(
+              Path(os.environ["READBACK_DIR"] + "/bundle-objects.json").read_text(
+                  encoding="utf-8"
+              )
+          )
+          actual = sorted(item["Key"] for item in payload.get("Contents", []))
+          if payload.get("IsTruncated") is True or actual != expected:
+              raise SystemExit("baseline bundle prefix inventory is not exact")
+          PY
           jq -n \
             --arg release "${release_id}" \
             --arg model "${promoted_model}" \
@@ -372,18 +428,56 @@ jobs:
             --arg commit "${baseline_git_sha}" \
             '{schema_version: "1.0.0", release_id: $release, model_id: $model,
               bundle_s3_key: $bundle_key, evaluation_report_id: $evidence, git_sha: $commit,
-              evidence_mode: "validation_only", previous: null}' > baseline-promotion-pointer.json
-          aws s3api put-object \
+              evidence_mode: "validation_only", release_decision: "validation_baseline",
+              gate_passed: null, evaluated_candidate_model_id: null,
+              previous: null}' > baseline-promotion-pointer.json
+          uv run python - <<'PY'
+          from pathlib import Path
+
+          from search_rank.schemas.release import PromotionPointer
+
+          PromotionPointer.model_validate_json(
+              Path("baseline-promotion-pointer.json").read_text(encoding="utf-8")
+          )
+          PY
+          PYTHONPATH=src uv run python scripts/validate_financial_snapshot.py emit \
+            --output /dev/null
+          if ! aws s3api put-object \
             --bucket "${ARTIFACT_BUCKET}" \
             --key promoted/current.json \
             --body baseline-promotion-pointer.json \
             --content-type application/json \
             --checksum-algorithm SHA256 \
             --tagging "RetentionClass=promoted" \
-            --if-none-match '*' > baseline-promotion-put-result.private.json
-          jq '{schema_version: "1.0.0", status: "published",
-            version_id_present: (.VersionId != null), etag_present: (.ETag != null)}' \
-            baseline-promotion-put-result.private.json > baseline-publication-evidence.json
+            --if-none-match '*' > baseline-promotion-put-result.private.json \
+            2> baseline-promotion-put-error.private.txt; then
+            aws s3api get-object \
+              --bucket "${ARTIFACT_BUCKET}" \
+              --key promoted/current.json \
+              --checksum-mode ENABLED \
+              "${readback_dir}/existing-pointer.json" >/dev/null 2>&1 || {
+                cat baseline-promotion-put-error.private.txt >&2
+                exit 1
+              }
+            cmp -s baseline-promotion-pointer.json "${readback_dir}/existing-pointer.json" || {
+              cat baseline-promotion-put-error.private.txt >&2
+              echo "Initial promotion pointer already exists with different bytes." >&2
+              exit 1
+            }
+          fi
+          aws s3api head-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key promoted/current.json \
+            --checksum-mode ENABLED > baseline-promotion-pointer-head.private.json
+          jq -n --argjson version_id_present "$(jq '.VersionId != null' baseline-promotion-pointer-head.private.json)" \
+            --argjson etag_present "$(jq '.ETag != null' baseline-promotion-pointer-head.private.json)" \
+            '{schema_version: "1.0.0", artifact_type: "object_publication_evidence",
+              status: "published", version_id_present: $version_id_present,
+              etag_present: $etag_present}' > baseline-publication-evidence.json
+          uv run python scripts/validate_release_artifacts.py file \
+            --kind publication-evidence baseline-publication-evidence.json
+          uv run python scripts/validate_release_artifacts.py file \
+            --kind command-summary baseline-bootstrap-summary.json
           echo "release_id=${release_id}" >> "${GITHUB_OUTPUT}"
           echo "model_id=${promoted_model}" >> "${GITHUB_OUTPUT}"
           echo "Validation-only baseline bundle and initial versioned pointer were published." \
@@ -395,6 +489,8 @@ jobs:
           path: |
             .baseline-release/baseline-summary.json
             .baseline-release/bundle-checksums.json
+            .baseline-release/LICENSE
+            .baseline-release/NOTICE
             .baseline-release/public-evidence.json
             .baseline-release/release-manifest.json
             baseline-bootstrap-summary.json

@@ -8,6 +8,8 @@ from pydantic import ValidationError
 from search_rank.schemas.api import (
     ComparisonResponse,
     PublicEvidenceEnvelope,
+    PublicRunSummary,
+    PublicValidationRunSummary,
     RankMovement,
     RankRequest,
     RankResponse,
@@ -15,6 +17,7 @@ from search_rank.schemas.api import (
 
 SHA_A = "sha256:" + "a" * 64
 SHA_B = "sha256:" + "b" * 64
+GIT_SHA = "a" * 40
 
 
 def test_rank_request_applies_default_and_bounds() -> None:
@@ -90,8 +93,8 @@ def public_evidence_values() -> dict[str, Any]:
             "status": "complete",
             "config_hash": SHA_A,
             "dataset_manifest_hash": SHA_B,
-            "git_sha": "abcdef1",
-            "image_digest": SHA_A,
+            "split_manifest_hash": SHA_A,
+            "git_sha": GIT_SHA,
             "model_artifact_checksum": SHA_B,
             "dataset_name": "Amazon Shopping Queries ESCI",
             "dataset_version": "small-v1",
@@ -99,17 +102,45 @@ def public_evidence_values() -> dict[str, Any]:
             "base_model_id": "cross-encoder/model",
             "base_model_revision": "233e41b",
             "training_strategy": "mixed difficult and seeded-random examples",
-            "hardware_class": "ml.g4dn.xlarge",
-            "region": "us-east-1",
+            "training_provenance": {
+                "trial_selection_id": "trial-selection-" + "1" * 20,
+                "trial_selection_sha256": SHA_A,
+                "run_id": "training-run-1",
+                "run_manifest_sha256": SHA_B,
+                "selected_model_id": "candidate-v1",
+                "selected_model_artifact_checksum": SHA_A,
+                "config_hash": SHA_A,
+                "git_sha": GIT_SHA,
+                "image_digest": SHA_A,
+                "hardware_class": "ml.g4dn.xlarge",
+                "accelerator": "gpu",
+                "region": "us-east-1",
+                "runtime_seconds": 100.0,
+                "estimated_cost_usd": 0.8,
+                "actual_cost_usd": None,
+                "cost_evidence": "Training estimate; reconciliation pending.",
+            },
+            "evaluation_provenance": {
+                "candidate_model_id": "candidate-v1",
+                "candidate_model_artifact_checksum": SHA_A,
+                "evaluation_config_hash": SHA_B,
+                "git_sha": GIT_SHA,
+                "image_digest": SHA_B,
+                "hardware_class": "ml.m5.xlarge",
+                "region": "us-east-1",
+                "clean_execution_count": 2,
+                "runtime_seconds": 20.0,
+                "runtime_basis": "processing_job_wall_clock_sum",
+                "estimated_cost_usd": 0.2,
+                "actual_cost_usd": None,
+                "cost_evidence": "Processing estimate; reconciliation pending.",
+            },
             "metrics": {
                 "candidate_graded_ndcg_at_10": 0.70,
                 "strongest_baseline_graded_ndcg_at_10": 0.65,
                 "candidate_minus_baseline_graded_ndcg_at_10": 0.05,
             },
             "intervals": {"candidate_minus_baseline_graded_ndcg_at_10": interval},
-            "duration_seconds": 120.0,
-            "actual_cost_usd": None,
-            "cost_evidence": "Billing reconciliation is pending.",
             "test_access_count": 1,
             "limitations": ["Reranks only a supplied candidate set."],
             "prohibited_claims": ["No claim of shopper impact."],
@@ -204,11 +235,68 @@ def public_evidence_values() -> dict[str, Any]:
 def test_public_evidence_is_typed_bound_and_fail_closed() -> None:
     evidence = PublicEvidenceEnvelope.model_validate(public_evidence_values())
     assert evidence.run.metrics.candidate_graded_ndcg_at_10 == 0.70
+    assert evidence.run.training_provenance.hardware_class == "ml.g4dn.xlarge"
+    assert evidence.run.evaluation_provenance.hardware_class == "ml.m5.xlarge"
 
     mismatched = public_evidence_values()
     mismatched["failure_analysis"]["run_id"] = "run-2"  # type: ignore[index]
     with pytest.raises(ValidationError, match="share one run_id"):
         PublicEvidenceEnvelope.model_validate(mismatched)
+
+    conflated = public_evidence_values()
+    conflated["run"]["evaluation_provenance"]["candidate_model_artifact_checksum"] = SHA_B
+    with pytest.raises(ValidationError, match="training artifact differs"):
+        PublicEvidenceEnvelope.model_validate(conflated)
+
+    mislabeled_training = public_evidence_values()
+    mislabeled_training["run"]["training_provenance"]["accelerator"] = "cpu"
+    with pytest.raises(ValidationError, match="hardware and accelerator do not match"):
+        PublicEvidenceEnvelope.model_validate(mislabeled_training)
+
+    mislabeled_evaluation = public_evidence_values()
+    mislabeled_evaluation["run"]["evaluation_provenance"]["hardware_class"] = "ml.g4dn.xlarge"
+    with pytest.raises(ValidationError, match=r"ml\.m5\.xlarge"):
+        PublicEvidenceEnvelope.model_validate(mislabeled_evaluation)
+
+
+def test_both_public_run_modes_require_a_canonical_split_manifest_hash() -> None:
+    verified = public_evidence_values()["run"]
+    validation = {
+        "run_id": "validation-run-1",
+        "selected_model_id": "bm25-v1",
+        "config_hash": SHA_A,
+        "dataset_manifest_hash": SHA_B,
+        "split_manifest_hash": SHA_A,
+        "git_sha": GIT_SHA,
+        "image_digest": SHA_A,
+        "model_artifact_checksum": SHA_B,
+        "dataset_name": "Amazon Shopping Queries ESCI",
+        "dataset_version": "small-v1",
+        "locale": "us",
+        "base_model_id": None,
+        "hardware_class": "local-cpu",
+        "region": "us-east-1",
+        "metrics": {"selected_model_graded_ndcg_at_10": 0.5},
+        "duration_seconds": 1,
+        "actual_cost_usd": None,
+        "cost_evidence": "No cloud cost was incurred.",
+        "validation_only_notice": "Validation only.",
+        "limitations": ["No held-out evidence."],
+        "prohibited_claims": ["No held-out improvement claim."],
+        "reproduction_command": "search-rank baseline run --config baseline.yaml",
+    }
+    for model, values in (
+        (PublicRunSummary, verified),
+        (PublicValidationRunSummary, validation),
+    ):
+        model.model_validate(values)
+        missing = dict(values)
+        missing.pop("split_manifest_hash")
+        with pytest.raises(ValidationError, match="split_manifest_hash"):
+            model.model_validate(missing)
+        malformed = {**values, "split_manifest_hash": "not-a-sha256"}
+        with pytest.raises(ValidationError, match="split_manifest_hash"):
+            model.model_validate(malformed)
 
 
 @pytest.mark.parametrize(

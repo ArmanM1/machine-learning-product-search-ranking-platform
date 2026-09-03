@@ -1,5 +1,7 @@
 owner_alias                      = "REPLACE_WITH_NON_SENSITIVE_ALIAS"
 github_repository                 = "REPLACE_WITH_GITHUB_OWNER/machine-learning-product-search-ranking-platform"
+github_repository_owner_id        = "REPLACE_WITH_GITHUB_OWNER_ID"
+github_repository_id              = "REPLACE_WITH_GITHUB_REPOSITORY_ID"
 create_github_oidc_provider       = false
 existing_github_oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
 
@@ -8,6 +10,9 @@ enable_budgets            = false
 budget_notification_email = ""
 alarm_notification_email  = ""
 
-# A separate public-deployment approval and an immutable ECR digest are required.
-enable_serving    = false
-serving_image_uri = ""
+# Create the private candidate first; expose the public API/site only after its gates pass.
+enable_serving        = false
+enable_public_serving = false
+serving_image_uri     = ""
+serving_git_sha       = ""
+serving_deployment_nonce = ""

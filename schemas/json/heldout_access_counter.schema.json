@@ -1,0 +1,56 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "artifact_type": {
+      "const": "heldout_access_counter",
+      "title": "Artifact Type",
+      "type": "string"
+    },
+    "count": {
+      "minimum": 1,
+      "title": "Count",
+      "type": "integer"
+    },
+    "clean_run": {
+      "enum": [
+        1,
+        2
+      ],
+      "title": "Clean Run",
+      "type": "integer"
+    },
+    "candidate_run_id": {
+      "minLength": 1,
+      "title": "Candidate Run Id",
+      "type": "string"
+    },
+    "code_commit": {
+      "pattern": "^[0-9a-f]{40}$",
+      "title": "Code Commit",
+      "type": "string"
+    },
+    "workflow_run_id": {
+      "pattern": "^[0-9]+$",
+      "title": "Workflow Run Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "count",
+    "clean_run",
+    "candidate_run_id",
+    "code_commit",
+    "workflow_run_id"
+  ],
+  "title": "HeldoutAccessCounter",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.example.invalid/search-rank/heldout_access_counter.schema.json"
+}

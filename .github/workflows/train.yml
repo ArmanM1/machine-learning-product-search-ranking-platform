@@ -3,62 +3,9 @@ name: Submit one bounded SageMaker training job
 on:
   workflow_dispatch:
     inputs:
-      experiment_config_path:
-        description: Versioned experiment configuration in this repository
+      dispatch_config:
+        description: Exact JSON; copy docs/workflow-inputs/train.example.json and replace run-specific values
         required: true
-        default: configs/experiments/candidate-v1.yaml
-        type: string
-      dataset_manifest_hash:
-        description: Content identity from DatasetManifest.processed_checksum (sha256:...)
-        required: true
-        type: string
-      prepared_data_s3_prefix:
-        description: Immutable data/processed/... source prefix; only train/validation artifacts are staged
-        required: true
-        type: string
-      training_image_digest:
-        description: Immutable train image digest in sha256:... form
-        required: true
-        type: string
-      run_kind:
-        description: Controls the maximum permitted GPU timeout
-        required: true
-        type: choice
-        options: [development, ablation, final]
-      instance_type:
-        description: Small approved SageMaker training instance
-        required: true
-        type: choice
-        options: [ml.m5.xlarge, ml.g4dn.xlarge]
-      accelerator:
-        description: Must match the selected instance
-        required: true
-        type: choice
-        options: [cpu, gpu]
-      maximum_timeout_seconds:
-        description: Hard SageMaker runtime limit
-        required: true
-        default: "3600"
-        type: string
-      declared_job_cost_cap_usd:
-        description: Must cover the current on-demand upper-bound estimate
-        required: true
-        default: "1.00"
-        type: string
-      estimated_remaining_non_job_usd:
-        description: Conservative remaining storage, serving, logs, and transfer estimate
-        required: true
-        default: "10.00"
-        type: string
-      gpu_hours_used_to_date:
-        description: Billed GPU instance-hours already consumed by this campaign
-        required: true
-        default: "0"
-        type: string
-      cpu_hours_used_to_date:
-        description: Paid CPU instance-hours already consumed by this campaign
-        required: true
-        default: "0"
         type: string
       authorization:
         description: Type SUBMIT ONE SAGEMAKER TRAINING JOB after reviewing the estimate
@@ -70,7 +17,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: sagemaker-training-campaign
+  group: aws-financial-operations
   cancel-in-progress: false
 
 env:
@@ -87,22 +34,24 @@ jobs:
     timeout-minutes: 360
     environment: aws-training
     env:
-      CONFIG_PATH: ${{ inputs.experiment_config_path }}
-      DATASET_MANIFEST_HASH: ${{ inputs.dataset_manifest_hash }}
-      PREPARED_DATA_S3_PREFIX: ${{ inputs.prepared_data_s3_prefix }}
-      PREPARED_DATA_S3_URI: s3://${{ vars.AWS_ARTIFACT_BUCKET }}/${{ inputs.prepared_data_s3_prefix }}
-      TRAINING_IMAGE_DIGEST: ${{ inputs.training_image_digest }}
-      TRAINING_IMAGE_URI: ${{ vars.AWS_TRAIN_ECR_REPOSITORY_URL }}@${{ inputs.training_image_digest }}
-      RUN_KIND: ${{ inputs.run_kind }}
-      INSTANCE_TYPE: ${{ inputs.instance_type }}
-      ACCELERATOR: ${{ inputs.accelerator }}
-      MAX_TIMEOUT_SECONDS: ${{ inputs.maximum_timeout_seconds }}
-      DECLARED_JOB_COST_CAP_USD: ${{ inputs.declared_job_cost_cap_usd }}
+      TRAINING_IMAGE_SOURCE_TAG: sha-${{ github.sha }}
       CAMPAIGN_SPEND_TO_DATE_USD: ${{ secrets.AWS_CAMPAIGN_SPEND_TO_DATE_USD }}
       REMAINING_APPLICABLE_CREDIT_USD: ${{ secrets.AWS_REMAINING_APPLICABLE_CREDIT_USD }}
-      ESTIMATED_REMAINING_NON_JOB_USD: ${{ inputs.estimated_remaining_non_job_usd }}
-      GPU_HOURS_USED_TO_DATE: ${{ inputs.gpu_hours_used_to_date }}
-      CPU_HOURS_USED_TO_DATE: ${{ inputs.cpu_hours_used_to_date }}
+      FINANCIAL_SNAPSHOT_OBSERVED_AT: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_OBSERVED_AT }}
+      FINANCIAL_SNAPSHOT_RECEIPT_SHA256: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_RECEIPT_SHA256 }}
+      FINANCIAL_SNAPSHOT_HMAC_KEY: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_HMAC_KEY }}
+      FINANCIAL_RESERVATION_MAX_USD: ${{ secrets.AWS_FINANCIAL_RESERVATION_MAX_USD }}
+      FINANCIAL_RESERVATION_REMAINING_COMMITTED_USD: ${{ secrets.AWS_FINANCIAL_RESERVATION_REMAINING_COMMITTED_USD }}
+      FINANCIAL_RESERVATION_CPU_HOURS: ${{ secrets.AWS_FINANCIAL_RESERVATION_CPU_HOURS }}
+      FINANCIAL_RESERVATION_GPU_HOURS: ${{ secrets.AWS_FINANCIAL_RESERVATION_GPU_HOURS }}
+      FINANCIAL_CPU_HOURS_USED_TO_DATE: ${{ secrets.AWS_FINANCIAL_CPU_HOURS_USED_TO_DATE }}
+      FINANCIAL_GPU_HOURS_USED_TO_DATE: ${{ secrets.AWS_FINANCIAL_GPU_HOURS_USED_TO_DATE }}
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_WORKFLOW: train
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_INPUTS_JSON: ${{ toJSON(inputs) }}
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_COMMIT_SHA: ${{ github.sha }}
+      FINANCIAL_SNAPSHOT_SOURCE: "aws_billing_and_cost_management_console"
+      FINANCIAL_SNAPSHOT_MAX_AGE_SECONDS: "21600"
+      TF_STATE_BUCKET: ${{ vars.AWS_TERRAFORM_STATE_BUCKET }}
       AUTHORIZATION: ${{ inputs.authorization }}
       ARTIFACT_BUCKET: ${{ vars.AWS_ARTIFACT_BUCKET }}
       TRAINING_ROLE_ARN: ${{ vars.AWS_SAGEMAKER_TRAINING_ROLE_ARN }}
@@ -115,6 +64,23 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
+      - name: Validate and unpack the exact dispatch configuration
+        env:
+          DISPATCH_CONFIG_JSON: ${{ inputs.dispatch_config }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/validate_workflow_dispatch.py --workflow train
+      - name: Validate the frozen experiment and requested hardware contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check --only-binary=:all: \
+            pydantic==2.13.5 PyYAML==6.0.3
+          PYTHONPATH=src python scripts/validate_training_contracts.py config \
+            --config "${CONFIG_PATH}" \
+            --instance-type "${INSTANCE_TYPE}" \
+            --accelerator "${ACCELERATOR}"
       - name: Validate immutable inputs and explicit authorization
         shell: bash
         run: |
@@ -122,6 +88,9 @@ jobs:
           test "${AUTHORIZATION}" = "SUBMIT ONE SAGEMAKER TRAINING JOB"
           test "${ALLOW_HELDOUT_EVAL}" = "0"
           test "${AWS_REGION}" = "us-east-1"
+          [[ "${GITHUB_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test -z "$(git status --porcelain --untracked-files=all)"
           [[ "${CONFIG_PATH}" =~ ^configs/experiments/[A-Za-z0-9._/-]+\.ya?ml$ ]]
           [[ "${CONFIG_PATH}" != *".."* ]]
           test -f "${CONFIG_PATH}"
@@ -133,7 +102,25 @@ jobs:
           [[ "${PREPARED_DATA_S3_URI}" != *".."* ]]
           : "${TRAINING_ROLE_ARN:?Missing AWS_SAGEMAKER_TRAINING_ROLE_ARN variable}"
           : "${TRAIN_REPOSITORY:?Missing AWS_TRAIN_ECR_REPOSITORY_URL variable}"
+          [[ "${TRAIN_REPOSITORY}" =~ ^[0-9]{12}\.dkr\.ecr\.us-east-1\.amazonaws\.com/[a-z0-9]+([._/-][a-z0-9]+)*$ ]]
+          test "${TRAINING_IMAGE_SOURCE_TAG}" = "sha-${GITHUB_SHA}"
           [[ "${OWNER_ALIAS}" =~ ^[A-Za-z0-9_.-]{2,32}$ ]]
+          case "${CONFIG_PATH}" in
+            configs/experiments/candidate-v1.yaml)
+              training_config_role=candidate_treatment
+              [[ "${RUN_KIND}" == development || "${RUN_KIND}" == final ]]
+              ;;
+            configs/experiments/candidate-random-ablation-v1.yaml)
+              training_config_role=random_negative_control
+              test "${RUN_KIND}" = "ablation"
+              ;;
+            configs/experiments/candidate-title-ablation-v1.yaml)
+              training_config_role=title_only_control
+              test "${RUN_KIND}" = "ablation"
+              ;;
+            *) echo "Training is restricted to the three frozen candidate configurations." >&2; exit 1 ;;
+          esac
+          printf 'TRAINING_CONFIG_ROLE=%s\n' "${training_config_role}" >> "${GITHUB_ENV}"
           case "${INSTANCE_TYPE}:${ACCELERATOR}" in
             ml.m5.xlarge:cpu|ml.g4dn.xlarge:gpu) ;;
             *) echo "Instance and accelerator do not match the approved allowlist." >&2; exit 1 ;;
@@ -144,6 +131,48 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: gha-train-${{ github.run_id }}
           mask-aws-account-id: true
+      - name: Atomically reserve the signed campaign capacity
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${TF_STATE_BUCKET:?Missing AWS_TERRAFORM_STATE_BUCKET variable}"
+          python -m pip install --disable-pip-version-check pydantic==2.13.5
+          PYTHONPATH=src python scripts/reserve_financial_capacity.py reserve \
+            --bucket "${TF_STATE_BUCKET}" \
+            --output financial-capacity-reservation.json
+      - name: Bind the immutable training image to this exact commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          registry_host="${TRAIN_REPOSITORY%%/*}"
+          registry_id="${registry_host%%.*}"
+          repository_name="${TRAIN_REPOSITORY#*/}"
+          test "$(aws sts get-caller-identity --query Account --output text)" = "${registry_id}"
+          aws ecr describe-images \
+            --registry-id "${registry_id}" \
+            --repository-name "${repository_name}" \
+            --image-ids "imageTag=${TRAINING_IMAGE_SOURCE_TAG}" \
+            --no-paginate > training-image-description-private.json
+          jq -e \
+            --arg registry "${registry_id}" \
+            --arg repository "${repository_name}" \
+            --arg tag "${TRAINING_IMAGE_SOURCE_TAG}" \
+            --arg digest "${TRAINING_IMAGE_DIGEST}" \
+            '(.imageDetails | length) == 1 and
+             .imageDetails[0].registryId == $registry and
+             .imageDetails[0].repositoryName == $repository and
+             .imageDetails[0].imageDigest == $digest and
+             (.imageDetails[0].imageTags | index($tag) != null)' \
+            training-image-description-private.json >/dev/null
+          jq -n \
+            --arg git_sha "${GITHUB_SHA}" \
+            --arg source_tag "${TRAINING_IMAGE_SOURCE_TAG}" \
+            --arg image_uri "${TRAINING_IMAGE_URI}" \
+            --arg image_digest "${TRAINING_IMAGE_DIGEST}" \
+            '{schema_version: "1.0.0", git_sha: $git_sha,
+              repository_dirty: false, source_tag: $source_tag,
+              image_uri: $image_uri, image_digest: $image_digest,
+              binding_verified: true}' > training-image-provenance.json
       - name: Retrieve current on-demand upper-bound price
         shell: bash
         run: |
@@ -180,19 +209,25 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          export UNIT_PRICE_USD="$(cat unit-price.txt)"
+          UNIT_PRICE_USD="$(cat unit-price.txt)"
+          export UNIT_PRICE_USD
+          PYTHONPATH=src python scripts/validate_financial_snapshot.py emit \
+            --output financial-snapshot.json
           python - <<'PY'
           import json
           import os
           from decimal import Decimal, InvalidOperation, ROUND_UP
+
+          with open("financial-snapshot.json", encoding="utf-8") as handle:
+              financial_snapshot = json.load(handle)
 
           def amount(name: str) -> Decimal:
               try:
                   value = Decimal(os.environ[name])
               except (InvalidOperation, KeyError) as exc:
                   raise SystemExit(f"{name} must be a decimal number") from exc
-              if value < 0:
-                  raise SystemExit(f"{name} may not be negative")
+              if not value.is_finite() or value < 0:
+                  raise SystemExit(f"{name} must be finite and non-negative")
               return value
 
           timeout = int(os.environ["MAX_TIMEOUT_SECONDS"])
@@ -231,6 +266,8 @@ jobs:
               raise SystemExit("job would breach the 10 paid CPU-instance-hour campaign cap")
 
           evidence = {
+              "schema_version": "1.0.0",
+              "artifact_type": "training_cost_preflight",
               "region": os.environ["AWS_REGION"],
               "instance_type": os.environ["INSTANCE_TYPE"],
               "accelerator": accelerator,
@@ -242,11 +279,13 @@ jobs:
               "required_credit_reserve_usd": str(reserve),
               "maximum_out_of_pocket_usd": "0",
               "pricing_basis": "live AWS Price List response; highest matching hourly dimension",
+              "financial_snapshot": financial_snapshot,
           }
           with open("cost-preflight.json", "w", encoding="utf-8") as handle:
               json.dump(evidence, handle, indent=2, sort_keys=True)
           print(f"Guard passed; current upper-bound training estimate is ${estimate}.")
           PY
+          rm financial-snapshot.json
       - name: Verify the immutable prepared-dataset identity
         shell: bash
         run: |
@@ -265,34 +304,178 @@ jobs:
              (["train.parquet", "validation.parquet", "test.parquet"] - keys | length == 0) and
              all(to_entries[]; .value | test("^sha256:[0-9a-f]{64}$"))' \
             prepared-artifact-checksums.json >/dev/null
+      - name: Fail closed on the live managed-spot instance quota
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${INSTANCE_TYPE}" in
+            ml.m5.xlarge)
+              quota_code="L-4CEE6BA6"
+              quota_name="ml.m5.xlarge for spot training job usage"
+              ;;
+            ml.g4dn.xlarge)
+              quota_code="L-944F78BB"
+              quota_name="ml.g4dn.xlarge for spot training job usage"
+              ;;
+            *) echo "No managed-spot quota mapping exists for ${INSTANCE_TYPE}." >&2; exit 1 ;;
+          esac
+          export EXPECTED_QUOTA_CODE="${quota_code}"
+          export EXPECTED_QUOTA_NAME="${quota_name}"
+          aws service-quotas get-service-quota \
+            --region "${AWS_REGION}" \
+            --service-code sagemaker \
+            --quota-code "${quota_code}" > managed-spot-quota-private.json
+          python - <<'PY'
+          import json
+          import math
+          import os
+          from datetime import UTC, datetime
+          from pathlib import Path
+
+          response = json.loads(
+              Path("managed-spot-quota-private.json").read_text(encoding="utf-8")
+          )
+          quota = response.get("Quota")
+          if not isinstance(quota, dict):
+              raise SystemExit("GetServiceQuota returned no quota; refusing training submission")
+          code = quota.get("QuotaCode")
+          name = quota.get("QuotaName")
+          service_code = quota.get("ServiceCode")
+          value = quota.get("Value")
+          if not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+              raise SystemExit("GetServiceQuota returned an invalid applied value")
+          expected_code = os.environ["EXPECTED_QUOTA_CODE"]
+          expected_name = os.environ["EXPECTED_QUOTA_NAME"]
+          identity_matches = (
+              service_code == "sagemaker"
+              and code == expected_code
+              and name == expected_name
+          )
+          guard_passed = identity_matches and value >= 1
+          evidence = {
+              "schema_version": "1.0.0",
+              "artifact_type": "sagemaker_managed_spot_quota_preflight",
+              "checked_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+              "region": os.environ["AWS_REGION"],
+              "service_code": "sagemaker",
+              "instance_type": os.environ["INSTANCE_TYPE"],
+              "quota_code": expected_code,
+              "quota_name": expected_name,
+              "applied_value": value,
+              "required_value": 1,
+              "quota_guard_passed": guard_passed,
+          }
+          if not identity_matches:
+              raise SystemExit("live managed-spot quota identity differs from the exact mapping")
+          if not guard_passed:
+              raise SystemExit(
+                  f"applied {expected_name} quota is {value}; at least 1 is required"
+              )
+          Path("managed-spot-quota-preflight.json").write_text(
+              json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+          )
+          PY
       - name: Upload frozen configuration and submit exactly one job
         shell: bash
         run: |
           set -euo pipefail
-          short_sha="${GITHUB_SHA:0:12}"
           run_id="${PROJECT_NAME}-${ENVIRONMENT_NAME}-${RUN_KIND}-${GITHUB_RUN_ID}"
           run_id="${run_id:0:63}"
           config_file_hash="$(sha256sum "${CONFIG_PATH}" | cut -d' ' -f1)"
-          config_uri="s3://${ARTIFACT_BUCKET}/runs/${run_id}/config/experiment.yaml"
           training_input_uri="s3://${ARTIFACT_BUCKET}/runs/${run_id}/training-input/"
           output_uri="s3://${ARTIFACT_BUCKET}/runs/${run_id}/"
-          aws s3 cp "${CONFIG_PATH}" "${config_uri}" --checksum-algorithm SHA256 --no-progress
-          for artifact in manifest.json artifact-checksums.json train.parquet validation.parquet; do
-            aws s3 cp \
-              "${PREPARED_DATA_S3_URI%/}/${artifact}" \
-              "${training_input_uri}${artifact}" \
+          readback_dir="$(mktemp -d)"
+          trap 'rm -rf -- "${readback_dir}"' EXIT
+
+          put_immutable_or_verify_identical() {
+            local source_file="$1"
+            local object_key="$2"
+            local content_type="$3"
+            local retention_class="$4"
+            local local_sha stem existing head put_error
+            local_sha="sha256:$(sha256sum "${source_file}" | cut -d' ' -f1)"
+            stem="$(printf '%s' "${object_key}" | sha256sum | cut -d' ' -f1)"
+            existing="${readback_dir}/${stem}.object"
+            head="${readback_dir}/${stem}.head.json"
+            put_error="${readback_dir}/${stem}.put-error.txt"
+            PYTHONPATH=src python scripts/validate_financial_snapshot.py verify \
+              --cost-preflight cost-preflight.json
+            if ! aws s3api put-object \
+              --bucket "${ARTIFACT_BUCKET}" \
+              --key "${object_key}" \
+              --body "${source_file}" \
+              --content-type "${content_type}" \
               --checksum-algorithm SHA256 \
-              --no-progress
+              --metadata "sha256=${local_sha},retention-class=${retention_class}" \
+              --tagging "RetentionClass=${retention_class}" \
+              --if-none-match '*' >/dev/null 2>"${put_error}"; then
+              : # A retry may find the immutable object already present.
+            fi
+            if ! aws s3api get-object \
+              --bucket "${ARTIFACT_BUCKET}" \
+              --key "${object_key}" \
+              --checksum-mode ENABLED \
+              "${existing}" >/dev/null 2>&1 \
+              || ! cmp -s "${source_file}" "${existing}"; then
+              cat "${put_error}" >&2
+              echo "Immutable training object differs or cannot be read: ${object_key}" >&2
+              return 1
+            fi
+            aws s3api head-object \
+              --bucket "${ARTIFACT_BUCKET}" \
+              --key "${object_key}" \
+              --checksum-mode ENABLED > "${head}"
+            jq -e \
+              --arg content_type "${content_type}" \
+              --arg sha "${local_sha}" \
+              --arg retention "${retention_class}" \
+              '.ContentType == $content_type and
+               (.ChecksumSHA256 | type == "string" and length > 0) and
+               .TagCount == 1 and
+               .Metadata == {"retention-class": $retention, sha256: $sha}' \
+              "${head}" >/dev/null
+          }
+
+          mkdir -p .training-input
+          cp prepared-manifest.json .training-input/manifest.json
+          cp prepared-artifact-checksums.json .training-input/artifact-checksums.json
+          for artifact in train.parquet validation.parquet; do
+            aws s3 cp "${PREPARED_DATA_S3_URI%/}/${artifact}" \
+              ".training-input/${artifact}" --no-progress
+            expected="$(jq -er --arg artifact "${artifact}" '.[$artifact]' prepared-artifact-checksums.json)"
+            actual="sha256:$(sha256sum ".training-input/${artifact}" | cut -d' ' -f1)"
+            test "${actual}" = "${expected}"
+          done
+          put_immutable_or_verify_identical \
+            "${CONFIG_PATH}" "runs/${run_id}/config/experiment.yaml" application/yaml candidate
+          for artifact in manifest.json artifact-checksums.json train.parquet validation.parquet; do
+            case "${artifact}" in
+              *.json) content_type=application/json ;;
+              *) content_type=application/octet-stream ;;
+            esac
+            put_immutable_or_verify_identical \
+              ".training-input/${artifact}" \
+              "runs/${run_id}/training-input/${artifact}" \
+              "${content_type}" candidate
           done
           aws s3api list-objects-v2 \
             --bucket "${ARTIFACT_BUCKET}" \
             --prefix "runs/${run_id}/training-input/" \
+            --no-paginate \
             --query 'Contents[].Key' \
             --output json > staged-training-inputs.json
           jq -e --arg prefix "runs/${run_id}/training-input/" \
             'map(ltrimstr($prefix)) | sort ==
              ["artifact-checksums.json", "manifest.json", "train.parquet", "validation.parquet"]' \
             staged-training-inputs.json >/dev/null
+          aws s3api list-objects-v2 \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --prefix "runs/${run_id}/config/" \
+            --no-paginate \
+            --query 'Contents[].Key' \
+            --output json > staged-training-config.json
+          jq -e --arg key "runs/${run_id}/config/experiment.yaml" \
+            'sort == [$key]' staged-training-config.json >/dev/null
           jq -n \
             --arg job "${run_id}" \
             --arg role "${TRAINING_ROLE_ARN}" \
@@ -305,9 +488,15 @@ jobs:
             --arg dataset_hash "${DATASET_MANIFEST_HASH}" \
             --arg config_file_hash "${config_file_hash}" \
             --arg commit "${GITHUB_SHA}" \
+            --arg image_digest "${TRAINING_IMAGE_DIGEST}" \
+            --arg image_source_tag "${TRAINING_IMAGE_SOURCE_TAG}" \
             --arg project "${PROJECT_NAME}" \
             --arg environment "${ENVIRONMENT_NAME}" \
             --arg owner "${OWNER_ALIAS}" \
+            --arg region "${AWS_REGION}" \
+            --arg accelerator "${ACCELERATOR}" \
+            --arg config_role "${TRAINING_CONFIG_ROLE}" \
+            --arg run_kind "${RUN_KIND}" \
             --argjson timeout "${MAX_TIMEOUT_SECONDS}" \
             '{
               TrainingJobName: $job,
@@ -330,6 +519,16 @@ jobs:
                 DATASET_MANIFEST_HASH: $dataset_hash,
                 EXPERIMENT_CONFIG_FILE_SHA256: $config_file_hash,
                 CODE_COMMIT: $commit,
+                SEARCH_RANK_GIT_SHA: $commit,
+                SEARCH_RANK_CLOUD_RUN_ID: $job,
+                SEARCH_RANK_TRAINING_IMAGE_DIGEST: $image_digest,
+                SEARCH_RANK_TRAINING_IMAGE_SOURCE_TAG: $image_source_tag,
+                SEARCH_RANK_HARDWARE_CLASS: $instance,
+                SEARCH_RANK_ACCELERATOR: $accelerator,
+                SEARCH_RANK_TRAINING_CONFIG_ROLE: $config_role,
+                SEARCH_RANK_RUN_KIND: $run_kind,
+                SEARCH_RANK_CHECKPOINT_DIR: "/opt/ml/checkpoints",
+                AWS_REGION: $region,
                 ALLOW_HELDOUT_EVAL: "0"
               },
               Tags: [
@@ -337,10 +536,60 @@ jobs:
                 {Key: "Environment", Value: $environment},
                 {Key: "Owner", Value: $owner},
                 {Key: "RunId", Value: $job},
+                {Key: "ConfigRole", Value: $config_role},
+                {Key: "RunKind", Value: $run_kind},
                 {Key: "CodeCommit", Value: $commit}
               ]
             }' > training-job.json
-          aws sagemaker create-training-job --cli-input-json file://training-job.json >/dev/null
+
+          validate_existing_training_job() {
+            local description="$1"
+            local arn status
+            jq -e --slurpfile expected training-job.json '
+              .TrainingJobName == $expected[0].TrainingJobName and
+              .RoleArn == $expected[0].RoleArn and
+              .AlgorithmSpecification == $expected[0].AlgorithmSpecification and
+              .InputDataConfig == $expected[0].InputDataConfig and
+              .OutputDataConfig == $expected[0].OutputDataConfig and
+              .ResourceConfig == $expected[0].ResourceConfig and
+              .StoppingCondition == $expected[0].StoppingCondition and
+              .EnableManagedSpotTraining == $expected[0].EnableManagedSpotTraining and
+              .CheckpointConfig == $expected[0].CheckpointConfig and
+              .Environment == $expected[0].Environment' "${description}" >/dev/null
+            arn="$(jq -er '.TrainingJobArn' "${description}")"
+            aws sagemaker list-tags --resource-arn "${arn}" > existing-training-tags.json
+            jq -e --slurpfile expected training-job.json '
+              (.Tags | sort_by(.Key, .Value)) ==
+              ($expected[0].Tags | sort_by(.Key, .Value))' \
+              existing-training-tags.json >/dev/null
+            status="$(jq -er '.TrainingJobStatus' "${description}")"
+            case "${status}" in
+              InProgress|Stopping|Completed) ;;
+              Failed|Stopped)
+                echo "Existing training job is terminal and unsuccessful: ${status}" >&2
+                return 1
+                ;;
+              *) echo "Unexpected existing training status: ${status}" >&2; return 1 ;;
+            esac
+          }
+
+          if aws sagemaker describe-training-job \
+            --training-job-name "${run_id}" > existing-training-job.json \
+            2> existing-training-job-error.txt; then
+            validate_existing_training_job existing-training-job.json
+            PYTHONPATH=src python scripts/validate_financial_snapshot.py verify \
+              --cost-preflight cost-preflight.json
+            echo "Reusing exact existing SageMaker training job ${run_id}."
+          elif grep -Eq 'ValidationException.*(Requested resource not found|Could not find)' \
+            existing-training-job-error.txt; then
+            PYTHONPATH=src python scripts/validate_financial_snapshot.py verify \
+              --cost-preflight cost-preflight.json
+            aws sagemaker create-training-job \
+              --cli-input-json file://training-job.json >/dev/null
+          else
+            cat existing-training-job-error.txt >&2
+            exit 1
+          fi
           printf '%s' "${run_id}" > job-name.txt
           printf '%s' "${output_uri}" > output-uri.txt
       - name: Wait for completion and capture sanitized evidence
@@ -353,21 +602,101 @@ jobs:
           waiter_status=$?
           set -e
           aws sagemaker describe-training-job --training-job-name "${job_name}" > training-job-description-private.json
-          jq --arg artifact_prefix "s3://${ARTIFACT_BUCKET}/" '{
+          job_arn="$(jq -r '.TrainingJobArn' training-job-description-private.json)"
+          [[ "${job_arn}" =~ ^arn:aws:sagemaker:us-east-1:[0-9]{12}:training-job/[A-Za-z0-9-]+$ ]]
+          aws sagemaker list-tags --resource-arn "${job_arn}" > training-job-tags-private.json
+          expected_output_uri="$(cat output-uri.txt)"
+          expected_training_input_uri="s3://${ARTIFACT_BUCKET}/runs/${job_name}/training-input/"
+          expected_config_input_uri="s3://${ARTIFACT_BUCKET}/runs/${job_name}/config/"
+          jq -e \
+            --arg job "${job_name}" \
+            --arg image "${TRAINING_IMAGE_URI}" \
+            --arg output "${expected_output_uri}" \
+            --arg training_input "${expected_training_input_uri}" \
+            --arg config_input "${expected_config_input_uri}" \
+            --arg commit "${GITHUB_SHA}" \
+            --arg digest "${TRAINING_IMAGE_DIGEST}" \
+            --arg source_tag "${TRAINING_IMAGE_SOURCE_TAG}" \
+            --arg instance "${INSTANCE_TYPE}" \
+            --arg accelerator "${ACCELERATOR}" \
+            --arg config_role "${TRAINING_CONFIG_ROLE}" \
+            --arg run_kind "${RUN_KIND}" \
+            --arg region "${AWS_REGION}" \
+            '.TrainingJobName == $job and
+             .AlgorithmSpecification.TrainingImage == $image and
+             .OutputDataConfig.S3OutputPath == $output and
+             (.ModelArtifacts.S3ModelArtifacts | startswith($output)) and
+             ([.InputDataConfig[] | select(.ChannelName == "training") |
+               .DataSource.S3DataSource.S3Uri] == [$training_input]) and
+             ([.InputDataConfig[] | select(.ChannelName == "config") |
+               .DataSource.S3DataSource.S3Uri] == [$config_input]) and
+             .ResourceConfig.InstanceType == $instance and
+             .ResourceConfig.InstanceCount == 1 and
+             .EnableManagedSpotTraining == true and
+             .CheckpointConfig.LocalPath == "/opt/ml/checkpoints" and
+             (.CheckpointConfig.S3Uri | startswith($output + "checkpoints/")) and
+             .Environment.CODE_COMMIT == $commit and
+             .Environment.SEARCH_RANK_GIT_SHA == $commit and
+             .Environment.SEARCH_RANK_CLOUD_RUN_ID == $job and
+             .Environment.SEARCH_RANK_TRAINING_IMAGE_DIGEST == $digest and
+             .Environment.SEARCH_RANK_TRAINING_IMAGE_SOURCE_TAG == $source_tag and
+             .Environment.SEARCH_RANK_HARDWARE_CLASS == $instance and
+             .Environment.SEARCH_RANK_ACCELERATOR == $accelerator and
+             .Environment.SEARCH_RANK_TRAINING_CONFIG_ROLE == $config_role and
+             .Environment.SEARCH_RANK_RUN_KIND == $run_kind and
+             .Environment.SEARCH_RANK_CHECKPOINT_DIR == "/opt/ml/checkpoints" and
+             .Environment.AWS_REGION == $region and
+             .Environment.ALLOW_HELDOUT_EVAL == "0"' \
+            training-job-description-private.json >/dev/null
+          jq -e \
+            --arg project "${PROJECT_NAME}" \
+            --arg environment "${ENVIRONMENT_NAME}" \
+            --arg owner "${OWNER_ALIAS}" \
+            --arg run_id "${job_name}" \
+            --arg config_role "${TRAINING_CONFIG_ROLE}" \
+            --arg run_kind "${RUN_KIND}" \
+            --arg commit "${GITHUB_SHA}" \
+            'def values_for($key): [.Tags[] | select(.Key == $key) | .Value];
+             values_for("Project") == [$project] and
+             values_for("Environment") == [$environment] and
+             values_for("Owner") == [$owner] and
+             values_for("RunId") == [$run_id] and
+             values_for("ConfigRole") == [$config_role] and
+             values_for("RunKind") == [$run_kind] and
+             values_for("CodeCommit") == [$commit]' \
+            training-job-tags-private.json >/dev/null
+          jq \
+            --arg artifact_prefix "s3://${ARTIFACT_BUCKET}/" \
+            --arg git_sha "${GITHUB_SHA}" \
+            --arg source_tag "${TRAINING_IMAGE_SOURCE_TAG}" \
+            --arg accelerator "${ACCELERATOR}" \
+            --arg config_role "${TRAINING_CONFIG_ROLE}" \
+            --arg run_kind "${RUN_KIND}" \
+            --arg region "${AWS_REGION}" '{
             training_job_name: .TrainingJobName,
             status: .TrainingJobStatus,
             instance_type: .ResourceConfig.InstanceType,
             instance_count: .ResourceConfig.InstanceCount,
+            accelerator: $accelerator,
+            config_role: $config_role,
+            run_kind: $run_kind,
+            region: $region,
             managed_spot: .EnableManagedSpotTraining,
             training_seconds: .TrainingTimeInSeconds,
             billable_seconds: .BillableTimeInSeconds,
             creation_time: .CreationTime,
+            training_start_time: .TrainingStartTime,
             end_time: .TrainingEndTime,
+            git_sha: $git_sha,
+            repository_dirty: false,
+            dataset_manifest_hash: .Environment.DATASET_MANIFEST_HASH,
+            config_file_sha256: .Environment.EXPERIMENT_CONFIG_FILE_SHA256,
+            image_uri: .AlgorithmSpecification.TrainingImage,
             image_digest: (.AlgorithmSpecification.TrainingImage | split("@") | .[-1]),
+            image_source_tag: $source_tag,
             output_key_prefix: (.OutputDataConfig.S3OutputPath | ltrimstr($artifact_prefix)),
             model_artifact_key: (.ModelArtifacts.S3ModelArtifacts | ltrimstr($artifact_prefix))
           }' training-job-description-private.json > training-job-evidence.json
-          aws s3 cp training-job-evidence.json "$(cat output-uri.txt)reports/cloud-training-job.json" --checksum-algorithm SHA256 --no-progress
           status="$(jq -r '.status' training-job-evidence.json)"
           if [[ "${waiter_status}" -ne 0 || "${status}" != "Completed" ]]; then
             echo "Training job did not complete successfully; inspect private AWS logs." >&2
@@ -377,22 +706,44 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          job_name="$(cat job-name.txt)"
           model_key="$(jq -r '.model_artifact_key' training-job-evidence.json)"
-          [[ "${model_key}" == runs/* ]]
+          [[ "${model_key}" == "runs/${job_name}/"* ]]
           [[ "${model_key}" != *".."* ]]
           model_uri="s3://${ARTIFACT_BUCKET}/${model_key}"
           [[ "${model_uri}" == "s3://${ARTIFACT_BUCKET}/runs/"* ]]
           [[ "${model_uri}" == *.tar.gz ]]
           aws s3 cp "${model_uri}" candidate-model.tar.gz --no-progress
-          export CANDIDATE_ARTIFACT_SHA256="$(sha256sum candidate-model.tar.gz | cut -d' ' -f1)"
+          CANDIDATE_ARTIFACT_SHA256="$(sha256sum candidate-model.tar.gz | cut -d' ' -f1)"
+          export CANDIDATE_ARTIFACT_SHA256
           export MODEL_ARTIFACT_S3_URI="${model_uri}"
-          export CLOUD_TRAINING_RUN_ID="$(cat job-name.txt)"
+          export CLOUD_TRAINING_RUN_ID="${job_name}"
+          RUN_OUTPUT_S3_URI="$(cat output-uri.txt)"
+          export RUN_OUTPUT_S3_URI
+          export CONFIG_ARTIFACT_S3_URI="${RUN_OUTPUT_S3_URI}config/experiment.yaml"
+          CONFIG_FILE_SHA256="$(sha256sum "${CONFIG_PATH}" | cut -d' ' -f1)"
+          export CONFIG_FILE_SHA256
+          TRAINING_JOB_EVIDENCE_SHA256="$(sha256sum training-job-evidence.json | cut -d' ' -f1)"
+          export TRAINING_JOB_EVIDENCE_SHA256
+          TRAINING_IMAGE_PROVENANCE_SHA256="$(sha256sum training-image-provenance.json | cut -d' ' -f1)"
+          export TRAINING_IMAGE_PROVENANCE_SHA256
+          COST_PREFLIGHT_SHA256="$(sha256sum cost-preflight.json | cut -d' ' -f1)"
+          export COST_PREFLIGHT_SHA256
+          MANAGED_SPOT_QUOTA_PREFLIGHT_SHA256="$(sha256sum managed-spot-quota-preflight.json | cut -d' ' -f1)"
+          export MANAGED_SPOT_QUOTA_PREFLIGHT_SHA256
           python - <<'PY'
           import hashlib
           import json
           import os
+          import re
           import tarfile
+          from datetime import datetime
+          from decimal import Decimal, ROUND_UP
+          from math import isfinite
           from pathlib import Path
+
+          SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
+          GIT_SHA = re.compile(r"^[0-9a-f]{40}$")
 
           archive = Path("candidate-model.tar.gz")
           destination = Path("candidate-model")
@@ -417,6 +768,15 @@ jobs:
           summary = summaries[0]
           result = summary["result"]
 
+          source_git_sha = os.environ["GITHUB_SHA"]
+          if not GIT_SHA.fullmatch(source_git_sha):
+              raise SystemExit("workflow source commit is not a full Git SHA")
+          container_git_sha = str(summary.get("git_sha", ""))
+          if container_git_sha not in {"unavailable", source_git_sha}:
+              raise SystemExit("container summary claims a different source commit")
+          if container_git_sha == source_git_sha and summary.get("repository_dirty") is not False:
+              raise SystemExit("container summary claims the source commit from a dirty tree")
+
           def file_hash(path: Path) -> str:
               digest = hashlib.sha256()
               with path.open("rb") as handle:
@@ -440,34 +800,407 @@ jobs:
           ]
           if len(matches) != 1:
               raise SystemExit("model archive checkpoint does not match its training summary")
+          model_manifest_paths = list(destination.rglob("model-manifest.json"))
+          if len(model_manifest_paths) != 1:
+              raise SystemExit("model archive must contain exactly one typed model manifest")
+          model_manifest_path = model_manifest_paths[0]
+          model_manifest = json.loads(model_manifest_path.read_text(encoding="utf-8"))
+          required_model_fields = {
+              "schema_version", "model_id", "run_id", "base_model_id",
+              "base_model_revision", "tokenizer_revision", "checkpoint_uri",
+              "artifact_checksum", "artifact_size_bytes", "config_id", "config_hash",
+              "dataset_manifest_hash", "input_contract_version", "label_mapping_version",
+               "sampling_strategy", "hard_example_sources", "promoted", "promotion_reason",
+               "evaluation_report_id", "git_sha", "image_digest",
+               "source_model_artifact_sha256", "selected_training_run_manifest_sha256",
+               "evaluation_report_sha256", "sample_statistics", "training_result", "created_at",
+          }
+          if set(model_manifest) != required_model_fields:
+              raise SystemExit("model manifest fields differ from the checked-in contract")
+          if not (
+              model_manifest.get("schema_version") == "1.0.0"
+              and model_manifest.get("model_id") == result["candidate_model_id"]
+              and model_manifest.get("run_id") == os.environ["CLOUD_TRAINING_RUN_ID"]
+              and model_manifest.get("artifact_checksum") == expected_checkpoint
+              and model_manifest.get("config_hash") == result["config_hash"]
+              and model_manifest.get("dataset_manifest_hash") == result["dataset_manifest_hash"]
+              and model_manifest.get("checkpoint_uri") == "candidate/best"
+              and model_manifest.get("promoted") is False
+              and model_manifest.get("promotion_reason") == "pending held-out evaluation"
+               and model_manifest.get("evaluation_report_id") == "not_evaluated"
+               and model_manifest.get("git_sha") == source_git_sha
+               and model_manifest.get("image_digest") == os.environ["TRAINING_IMAGE_DIGEST"]
+               and model_manifest.get("source_model_artifact_sha256") is None
+               and model_manifest.get("selected_training_run_manifest_sha256") is None
+               and model_manifest.get("evaluation_report_sha256") is None
+              and model_manifest.get("label_mapping_version") == "project_graded_v1"
+              and model_manifest.get("training_result", {}).get("fresh_load_verified") is True
+              and model_manifest.get("training_result", {}).get("best_checkpoint")
+              == "candidate/best"
+          ):
+              raise SystemExit("model manifest is not bound to the successful training result")
+          summary_model_hash = summary.get("artifact_hashes", {}).get("model_manifest")
+          if summary_model_hash != "sha256:" + file_hash(model_manifest_path):
+              raise SystemExit("training summary does not checksum-bind its model manifest")
+          Path("validated-model-manifest.json").write_bytes(model_manifest_path.read_bytes())
           if result["dataset_manifest_hash"] != os.environ["DATASET_MANIFEST_HASH"]:
               raise SystemExit("training summary dataset identity differs from the workflow input")
+          best_validation_ndcg = float(result["best_validation_ndcg_at_10"])
+          if not 0 <= best_validation_ndcg <= 1:
+              raise SystemExit("training summary validation nDCG@10 is outside [0, 1]")
+          actual_accelerator = str(result.get("accelerator"))
+          actual_device_type = str(result.get("device_type"))
+          cuda_available = result.get("cuda_available")
+          cuda_device_count = result.get("cuda_device_count")
+          if not (
+              actual_accelerator == os.environ["ACCELERATOR"]
+              and actual_device_type == ("cuda" if actual_accelerator == "gpu" else "cpu")
+              and isinstance(cuda_available, bool)
+              and isinstance(cuda_device_count, int)
+              and cuda_device_count >= 0
+              and cuda_available == (cuda_device_count > 0)
+              and (
+                  actual_accelerator != "gpu"
+                  or (cuda_available and cuda_device_count >= 1)
+              )
+          ):
+              raise SystemExit("training summary does not prove the requested execution device")
           config_hash = str(result["config_hash"])
-          if not config_hash.startswith("sha256:") or len(config_hash) != 71:
+          if not SHA256.fullmatch(config_hash):
               raise SystemExit("training summary has no canonical configuration hash")
           frozen_configs = list(destination.rglob("frozen-experiment.yaml"))
           if len(frozen_configs) != 1:
               raise SystemExit("model archive must contain its frozen experiment configuration")
+          if file_hash(frozen_configs[0]) != os.environ["CONFIG_FILE_SHA256"]:
+              raise SystemExit("model archive frozen configuration differs from the submitted bytes")
+
+          job = json.loads(Path("training-job-evidence.json").read_text(encoding="utf-8"))
+          image = json.loads(Path("training-image-provenance.json").read_text(encoding="utf-8"))
+          cost = json.loads(Path("cost-preflight.json").read_text(encoding="utf-8"))
+          quota = json.loads(
+              Path("managed-spot-quota-preflight.json").read_text(encoding="utf-8")
+          )
+          run_id = os.environ["CLOUD_TRAINING_RUN_ID"]
+          expected_identity = {
+              "training_job_name": run_id,
+              "status": "Completed",
+              "git_sha": source_git_sha,
+              "repository_dirty": False,
+              "dataset_manifest_hash": os.environ["DATASET_MANIFEST_HASH"],
+              "config_file_sha256": os.environ["CONFIG_FILE_SHA256"],
+              "image_uri": os.environ["TRAINING_IMAGE_URI"],
+              "image_digest": os.environ["TRAINING_IMAGE_DIGEST"],
+              "image_source_tag": os.environ["TRAINING_IMAGE_SOURCE_TAG"],
+              "instance_type": os.environ["INSTANCE_TYPE"],
+              "accelerator": os.environ["ACCELERATOR"],
+              "config_role": os.environ["TRAINING_CONFIG_ROLE"],
+              "run_kind": os.environ["RUN_KIND"],
+              "region": os.environ["AWS_REGION"],
+          }
+          for key, expected in expected_identity.items():
+              if job.get(key) != expected:
+                  raise SystemExit(f"cloud training evidence differs at {key}")
+          if job.get("model_artifact_key") != os.environ["MODEL_ARTIFACT_S3_URI"].split("/", 3)[3]:
+              raise SystemExit("SageMaker model artifact key differs from the downloaded candidate")
+          if not (
+              image.get("binding_verified") is True
+              and image.get("git_sha") == source_git_sha
+              and image.get("repository_dirty") is False
+              and image.get("source_tag") == os.environ["TRAINING_IMAGE_SOURCE_TAG"]
+              and image.get("image_uri") == os.environ["TRAINING_IMAGE_URI"]
+              and image.get("image_digest") == os.environ["TRAINING_IMAGE_DIGEST"]
+          ):
+              raise SystemExit("ECR image tag provenance is not bound to the training identity")
+          if not (
+              cost.get("schema_version") == "1.0.0"
+              and cost.get("artifact_type") == "training_cost_preflight"
+              and cost.get("campaign_and_credit_guard_passed") is True
+              and cost.get("region") == os.environ["AWS_REGION"]
+              and cost.get("instance_type") == os.environ["INSTANCE_TYPE"]
+              and cost.get("accelerator") == os.environ["ACCELERATOR"]
+              and cost.get("maximum_out_of_pocket_usd") == "0"
+          ):
+              raise SystemExit("cost preflight is not bound to this training job")
+          expected_quota = {
+              "ml.m5.xlarge": (
+                  "L-4CEE6BA6",
+                  "ml.m5.xlarge for spot training job usage",
+              ),
+              "ml.g4dn.xlarge": (
+                  "L-944F78BB",
+                  "ml.g4dn.xlarge for spot training job usage",
+              ),
+          }[os.environ["INSTANCE_TYPE"]]
+          quota_checked_at = datetime.fromisoformat(
+              str(quota.get("checked_at", "")).replace("Z", "+00:00")
+          )
+          if not (
+              quota.get("schema_version") == "1.0.0"
+              and quota.get("artifact_type")
+              == "sagemaker_managed_spot_quota_preflight"
+              and quota.get("region") == os.environ["AWS_REGION"]
+              and quota.get("service_code") == "sagemaker"
+              and quota.get("instance_type") == os.environ["INSTANCE_TYPE"]
+              and (quota.get("quota_code"), quota.get("quota_name")) == expected_quota
+              and isinstance(quota.get("applied_value"), (int, float))
+              and isfinite(float(quota["applied_value"]))
+              and float(quota["applied_value"]) >= 1
+              and quota.get("required_value") == 1
+              and quota.get("quota_guard_passed") is True
+              and quota_checked_at.tzinfo is not None
+          ):
+              raise SystemExit("managed-spot quota preflight is not bound to this training job")
+
+          for name in (
+              "CANDIDATE_ARTIFACT_SHA256",
+              "CONFIG_FILE_SHA256",
+              "TRAINING_JOB_EVIDENCE_SHA256",
+              "TRAINING_IMAGE_PROVENANCE_SHA256",
+              "COST_PREFLIGHT_SHA256",
+              "MANAGED_SPOT_QUOTA_PREFLIGHT_SHA256",
+          ):
+              if not re.fullmatch(r"[0-9a-f]{64}", os.environ[name]):
+                  raise SystemExit(f"{name} is not a canonical SHA-256 digest")
+
+          estimated_cost = Decimal(str(cost["maximum_job_estimate_usd"]))
+          unit_price = Decimal(str(cost["on_demand_hourly_upper_bound_usd"]))
+          billable_seconds = Decimal(str(job["billable_seconds"]))
+          if not all(
+              value.is_finite() and value >= 0
+              for value in (estimated_cost, unit_price, billable_seconds)
+          ):
+              raise SystemExit("training cost evidence must be finite and non-negative")
+          billable_upper_bound = (billable_seconds * unit_price / Decimal(3600)).quantize(
+              Decimal("0.000001"), rounding=ROUND_UP
+          )
+          started_at = datetime.fromisoformat(str(job["training_start_time"]).replace("Z", "+00:00"))
+          ended_at = datetime.fromisoformat(str(job["end_time"]).replace("Z", "+00:00"))
+          duration_seconds = float(job["training_seconds"])
+          if ended_at < started_at or not isfinite(duration_seconds) or duration_seconds < 0:
+              raise SystemExit("cloud training timing evidence is invalid")
+          reports_prefix = f"{os.environ['RUN_OUTPUT_S3_URI']}reports/"
+          artifact_uris = {
+              "model_artifact": os.environ["MODEL_ARTIFACT_S3_URI"],
+              "frozen_configuration": os.environ["CONFIG_ARTIFACT_S3_URI"],
+              "cloud_training_job_evidence": reports_prefix + "cloud-training-job.json",
+              "training_image_provenance": reports_prefix + "training-image-provenance.json",
+              "cost_preflight": reports_prefix + "cost-preflight.json",
+              "managed_spot_quota_preflight": reports_prefix + "managed-spot-quota-preflight.json",
+          }
+          artifact_checksums = {
+              "model_artifact": "sha256:" + os.environ["CANDIDATE_ARTIFACT_SHA256"],
+              "frozen_configuration": "sha256:" + os.environ["CONFIG_FILE_SHA256"],
+              "cloud_training_job_evidence": "sha256:"
+              + os.environ["TRAINING_JOB_EVIDENCE_SHA256"],
+              "training_image_provenance": "sha256:"
+              + os.environ["TRAINING_IMAGE_PROVENANCE_SHA256"],
+              "cost_preflight": "sha256:" + os.environ["COST_PREFLIGHT_SHA256"],
+              "managed_spot_quota_preflight": "sha256:"
+              + os.environ["MANAGED_SPOT_QUOTA_PREFLIGHT_SHA256"],
+          }
+          manifest = {
+              "schema_version": "1.0.0",
+              "run_id": run_id,
+              "run_type": "training",
+              "git_sha": source_git_sha,
+              "repository_dirty": False,
+              "image_uri": os.environ["TRAINING_IMAGE_URI"],
+              "image_digest": os.environ["TRAINING_IMAGE_DIGEST"],
+              "config_hash": config_hash,
+              "dataset_manifest_hash": result["dataset_manifest_hash"],
+              "cloud_project_alias": os.environ["PROJECT_NAME"],
+              "region": os.environ["AWS_REGION"],
+              "job_id": run_id,
+              "hardware": os.environ["INSTANCE_TYPE"],
+              "accelerator": actual_accelerator,
+              "device_type": actual_device_type,
+              "cuda_available": cuda_available,
+              "cuda_device_count": cuda_device_count,
+              "started_at": job["training_start_time"],
+              "ended_at": job["end_time"],
+              "duration_seconds": duration_seconds,
+              "status": "succeeded",
+              "failure_summary": None,
+              "artifact_uris": artifact_uris,
+              "artifact_checksums": artifact_checksums,
+              "estimated_cost_usd": float(estimated_cost),
+              # AWS does not expose the final managed-spot charge on DescribeTrainingJob.
+              "actual_cost_usd": None,
+          }
+          if set(artifact_uris) != set(artifact_checksums):
+              raise SystemExit("training manifest artifact identities are incomplete")
+          if any(not SHA256.fullmatch(value) for value in artifact_checksums.values()):
+              raise SystemExit("training manifest has a non-canonical artifact checksum")
+          manifest_text = json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+          manifest_sha256 = hashlib.sha256(manifest_text.encode()).hexdigest()
+          Path("run-manifest.json").write_text(manifest_text, encoding="utf-8")
+          Path("run-manifest.sha256").write_text(
+              f"sha256:{manifest_sha256}\n", encoding="utf-8"
+          )
+
           evidence = {
               "schema_version": "1.0.0",
-              "candidate_run_id": os.environ["CLOUD_TRAINING_RUN_ID"],
+              "artifact_type": "candidate_release_inputs",
+              "candidate_run_id": run_id,
               "candidate_model_id": result["candidate_model_id"],
               "candidate_artifact_s3_key": os.environ["MODEL_ARTIFACT_S3_URI"].split("/", 3)[3],
               "candidate_artifact_sha256": os.environ["CANDIDATE_ARTIFACT_SHA256"],
               "candidate_checkpoint_sha256": expected_checkpoint.removeprefix("sha256:"),
               "candidate_training_config_sha256": config_hash,
               "candidate_training_config_path": os.environ["CONFIG_PATH"],
+              "candidate_training_config_s3_key": f"runs/{run_id}/config/experiment.yaml",
+              "candidate_training_config_file_sha256": os.environ["CONFIG_FILE_SHA256"],
               "dataset_manifest_hash": result["dataset_manifest_hash"],
+              "best_validation_ndcg_at_10": best_validation_ndcg,
+              "training_run_kind": os.environ["RUN_KIND"],
+              "training_config_role": os.environ["TRAINING_CONFIG_ROLE"],
+              "git_sha": source_git_sha,
+              "repository_dirty": False,
+              "training_image_uri": os.environ["TRAINING_IMAGE_URI"],
+              "training_image_digest": os.environ["TRAINING_IMAGE_DIGEST"],
+              "training_image_source_tag": os.environ["TRAINING_IMAGE_SOURCE_TAG"],
+              "training_hardware": os.environ["INSTANCE_TYPE"],
+              "training_accelerator": actual_accelerator,
+              "training_region": os.environ["AWS_REGION"],
+              "training_status": "succeeded",
+              "training_billable_on_demand_upper_bound_usd": str(billable_upper_bound),
+              "training_run_manifest_s3_key": f"runs/{run_id}/reports/run-manifest.json",
+              "training_run_manifest_sha256": "sha256:" + manifest_sha256,
+              "source_identity_basis": "clean checkout and exact sha-commit ECR tag-to-digest binding",
           }
           Path("candidate-release-inputs.json").write_text(
               json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8"
           )
           PY
-          aws s3 cp candidate-release-inputs.json "$(cat output-uri.txt)reports/candidate-release-inputs.json" \
-            --checksum-algorithm SHA256 --no-progress
+          PYTHONPATH=src python scripts/validate_training_contracts.py evidence \
+            --config "${CONFIG_PATH}" \
+            --instance-type "${INSTANCE_TYPE}" \
+            --accelerator "${ACCELERATOR}" \
+            --model-manifest validated-model-manifest.json \
+            --run-manifest run-manifest.json \
+            --candidate-release-inputs candidate-release-inputs.json \
+            --cost-preflight cost-preflight.json \
+            --managed-spot-quota-preflight managed-spot-quota-preflight.json \
+            --training-image-provenance training-image-provenance.json \
+            --cloud-training-job-evidence training-job-evidence.json
+          jq -e \
+            --arg run_id "${CLOUD_TRAINING_RUN_ID}" \
+            --arg git_sha "${GITHUB_SHA}" \
+            --arg image "${TRAINING_IMAGE_URI}" \
+            --arg digest "${TRAINING_IMAGE_DIGEST}" \
+            --arg dataset "${DATASET_MANIFEST_HASH}" \
+            --arg hardware "${INSTANCE_TYPE}" \
+            --arg accelerator "${ACCELERATOR}" \
+            --arg region "${AWS_REGION}" \
+            '.run_id == $run_id and .job_id == $run_id and
+             .run_type == "training" and .status == "succeeded" and
+             .git_sha == $git_sha and .repository_dirty == false and
+             .image_uri == $image and .image_digest == $digest and
+             .dataset_manifest_hash == $dataset and .hardware == $hardware and
+             .accelerator == $accelerator and .region == $region and
+             .device_type == (if $accelerator == "gpu" then "cuda" else "cpu" end) and
+             (.cuda_available == ($accelerator == "gpu")) and
+             (if $accelerator == "gpu" then .cuda_device_count >= 1 else .cuda_device_count == 0 end) and
+             (.config_hash | test("^sha256:[0-9a-f]{64}$")) and
+             (.artifact_uris | keys) == (.artifact_checksums | keys) and
+             all(.artifact_checksums[]; test("^sha256:[0-9a-f]{64}$"))' \
+            run-manifest.json >/dev/null
+          manifest_sha256="$(sha256sum run-manifest.json | cut -d' ' -f1)"
+          test "$(cat run-manifest.sha256)" = "sha256:${manifest_sha256}"
+          jq -e \
+            --arg run_id "${CLOUD_TRAINING_RUN_ID}" \
+            --arg manifest "sha256:${manifest_sha256}" \
+            --arg git_sha "${GITHUB_SHA}" \
+            --arg digest "${TRAINING_IMAGE_DIGEST}" \
+            '.schema_version == "1.0.0" and
+             .artifact_type == "candidate_release_inputs" and
+             .candidate_run_id == $run_id and .git_sha == $git_sha and
+             .repository_dirty == false and .training_image_digest == $digest and
+             .training_status == "succeeded" and
+             .training_run_manifest_sha256 == $manifest' \
+            candidate-release-inputs.json >/dev/null
+
+          publication_readback="$(mktemp -d)"
+          trap 'rm -rf -- "${publication_readback}"' EXIT
+          publish_immutable_or_verify_identical() {
+            local source_file="$1"
+            local object_key="$2"
+            local content_type="$3"
+            local local_sha stem existing head put_error
+            local_sha="sha256:$(sha256sum "${source_file}" | cut -d' ' -f1)"
+            stem="$(printf '%s' "${object_key}" | sha256sum | cut -d' ' -f1)"
+            existing="${publication_readback}/${stem}.object"
+            head="${publication_readback}/${stem}.head.json"
+            put_error="${publication_readback}/${stem}.put-error.txt"
+            PYTHONPATH=src python scripts/validate_financial_snapshot.py verify \
+              --cost-preflight cost-preflight.json
+            if ! aws s3api put-object \
+              --bucket "${ARTIFACT_BUCKET}" \
+              --key "${object_key}" \
+              --body "${source_file}" \
+              --content-type "${content_type}" \
+              --checksum-algorithm SHA256 \
+              --metadata "sha256=${local_sha},retention-class=candidate" \
+              --tagging "RetentionClass=candidate" \
+              --if-none-match '*' >/dev/null 2>"${put_error}"; then
+              : # Retry-safe verification below distinguishes identical from divergent objects.
+            fi
+            if ! aws s3api get-object \
+              --bucket "${ARTIFACT_BUCKET}" \
+              --key "${object_key}" \
+              --checksum-mode ENABLED \
+              "${existing}" >/dev/null 2>&1 \
+              || ! cmp -s "${source_file}" "${existing}"; then
+              cat "${put_error}" >&2
+              echo "Immutable training publication differs: ${object_key}" >&2
+              return 1
+            fi
+            aws s3api head-object \
+              --bucket "${ARTIFACT_BUCKET}" \
+              --key "${object_key}" \
+              --checksum-mode ENABLED > "${head}"
+            jq -e --arg content_type "${content_type}" --arg sha "${local_sha}" '
+              .ContentType == $content_type and
+              (.ChecksumSHA256 | type == "string" and length > 0) and
+              .TagCount == 1 and
+              .Metadata == {"retention-class": "candidate", sha256: $sha}' \
+              "${head}" >/dev/null
+          }
+          reports_key="runs/${CLOUD_TRAINING_RUN_ID}/reports"
+          publish_immutable_or_verify_identical cost-preflight.json \
+            "${reports_key}/cost-preflight.json" application/json
+          publish_immutable_or_verify_identical managed-spot-quota-preflight.json \
+            "${reports_key}/managed-spot-quota-preflight.json" application/json
+          publish_immutable_or_verify_identical training-image-provenance.json \
+            "${reports_key}/training-image-provenance.json" application/json
+          publish_immutable_or_verify_identical training-job-evidence.json \
+            "${reports_key}/cloud-training-job.json" application/json
+          publish_immutable_or_verify_identical run-manifest.json \
+            "${reports_key}/run-manifest.json" application/json
+          publish_immutable_or_verify_identical run-manifest.sha256 \
+            "${reports_key}/run-manifest.sha256" text/plain
+          publish_immutable_or_verify_identical candidate-release-inputs.json \
+            "${reports_key}/candidate-release-inputs.json" application/json
+          aws s3api list-objects-v2 \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --prefix "${reports_key}/" \
+            --no-paginate > published-training-reports.json
+          jq -e --arg prefix "${reports_key}/" '
+            .IsTruncated != true and
+            ([.Contents[].Key] | sort) == ([
+              "candidate-release-inputs.json",
+              "cloud-training-job.json",
+              "cost-preflight.json",
+              "managed-spot-quota-preflight.json",
+              "run-manifest.json",
+              "run-manifest.sha256",
+              "training-image-provenance.json"
+            ] | map($prefix + .) | sort)' published-training-reports.json >/dev/null
           without_scheme="${model_uri#s3://}"
           model_bucket="${without_scheme%%/*}"
           model_key="${without_scheme#*/}"
+          PYTHONPATH=src python scripts/validate_financial_snapshot.py verify \
+            --cost-preflight cost-preflight.json
           aws s3api put-object-tagging \
             --bucket "${model_bucket}" \
             --key "${model_key}" \
@@ -488,6 +1221,8 @@ jobs:
             --query 'Contents[].Key' \
             --output text | tr '\t' '\n' | while IFS= read -r key; do
               if [[ -n "${key}" && "${key}" != "None" ]]; then
+                PYTHONPATH=src python scripts/validate_financial_snapshot.py verify \
+                  --cost-preflight cost-preflight.json
                 aws s3api put-object-tagging \
                   --bucket "${ARTIFACT_BUCKET}" \
                   --key "${key}" \
@@ -500,7 +1235,11 @@ jobs:
           name: training-job-evidence-${{ github.run_id }}
           path: |
             cost-preflight.json
+            managed-spot-quota-preflight.json
             candidate-release-inputs.json
+            run-manifest.json
+            run-manifest.sha256
+            training-image-provenance.json
             training-job-evidence.json
           if-no-files-found: warn
           retention-days: 30

@@ -21,11 +21,37 @@ def test_container_contract_is_digest_pinned_and_non_root(filename: str) -> None
     assert all("latest" not in line.casefold() for line in from_lines)
     assert "USER ${APP_UID}:${APP_GID}" in text
     assert "USER root" not in text
+    assert "LICENSE NOTICE" in text
     if filename == "Dockerfile.serve":
         assert 'ENTRYPOINT ["/opt/search-rank-venv/bin/python", "-m", "awslambdaric"]' in text
         assert 'CMD ["search_rank.serving.app.handler"]' in text
+        assert "ARG VITE_DATA_MODE=api" in text
+        assert 'test "${VITE_DATA_MODE}" = "api"' in text
+        assert 'c.data_mode!=="api"' in text
     else:
         assert "ENTRYPOINT" in text
+    if filename == "Dockerfile.train":
+        assert 'ENTRYPOINT ["python", "/app/scripts/container_train.py"]' in text
+        assert "SEARCH_RANK_CHECKPOINT_DIR=/opt/ml/checkpoints" in text
+
+
+def test_ci_executes_installed_training_cli_and_attests_api_mode() -> None:
+    pull_request = (ROOT / ".github/workflows/pull-request.yml").read_text(encoding="utf-8")
+    deploy = (ROOT / ".github/workflows/deploy.yml").read_text(encoding="utf-8")
+
+    assert '--entrypoint python "${image}" -m search_rank.cli --help' in pull_request
+    assert '"${image}" train --help' not in pull_request
+    for name in (
+        "VITE_DATA_MODE",
+        "VITE_API_BASE_URL",
+        "VITE_PUBLIC_RUN_ID",
+        "VITE_DEFAULT_QUERY_ID",
+        "VITE_BASELINE_MODEL_ID",
+        "VITE_CANDIDATE_MODEL_ID",
+    ):
+        assert f'--build-arg {name}="${{{name}}}"' in deploy
+    assert '"${container_id}:/var/task/web/dist/build-config.json"' in deploy
+    assert '.data_mode == "api"' in deploy
 
 
 @pytest.mark.slow
@@ -43,7 +69,19 @@ def test_container_builds_and_executes_documented_probe(filename: str) -> None:
         check=True,
         timeout=1800,
     )
-    if kind in {"train", "eval"}:
+    if kind == "train":
+        probe = [
+            "docker",
+            "run",
+            "--rm",
+            "--entrypoint",
+            "python",
+            tag,
+            "-m",
+            "search_rank.cli",
+            "--help",
+        ]
+    elif kind == "eval":
         probe = ["docker", "run", "--rm", tag, "--help"]
     else:
         probe = [

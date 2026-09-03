@@ -13,6 +13,10 @@ function humanDuration(seconds: number | null) {
   return hours ? `${hours}h ${minutes}m` : `${minutes}m`
 }
 
+function cost(value: number | null) {
+  return value === null ? 'Pending reconciliation' : `$${value.toFixed(2)} USD`
+}
+
 export function ExperimentPage() {
   const { runId = publicConfig.runId } = useParams()
   const resource = useApiResource((signal) => apiClient.getRun(runId, signal), `run:${runId}`)
@@ -52,7 +56,15 @@ export function ExperimentPage() {
           <div><dt>Split manifest</dt><dd><CopyField label="split manifest hash" value={run.split_manifest_hash} /></dd></div>
           <div><dt>Training configuration</dt><dd><CopyField label="configuration hash" value={run.configuration_hash} /></dd></div>
           <div><dt>Code commit</dt><dd><CopyField label="code commit" value={run.code_commit} /></dd></div>
-          <div><dt>Container image</dt><dd><CopyField label="image digest" value={run.image_digest} /></dd></div>
+          {run.training_provenance && run.evaluation_provenance ? <>
+            <div><dt>Trial selection</dt><dd><CopyField label="trial selection hash" value={run.training_provenance.trial_selection_sha256} /></dd></div>
+            <div><dt>Training manifest</dt><dd><CopyField label="training run manifest hash" value={run.training_provenance.run_manifest_sha256} /></dd></div>
+            <div><dt>Training image</dt><dd><CopyField label="training image digest" value={run.training_provenance.image_digest} /></dd></div>
+            <div><dt>Evaluation configuration</dt><dd><CopyField label="evaluation configuration hash" value={run.evaluation_provenance.evaluation_config_hash} /></dd></div>
+            <div><dt>Evaluation image</dt><dd><CopyField label="evaluation image digest" value={run.evaluation_provenance.image_digest} /></dd></div>
+          </> : (
+            <div><dt>Container image</dt><dd><CopyField label="image digest" value={run.image_digest} /></dd></div>
+          )}
           <div><dt>Model artifact</dt><dd><CopyField label="model artifact checksum" value={run.model_artifact_checksum} /></dd></div>
         </dl>
       </section>
@@ -77,17 +89,47 @@ export function ExperimentPage() {
             <div><dt>Training strategy</dt><dd>{run.training_strategy ?? 'Not published'}</dd></div>
           </dl>
         </article>
-        <article className="detail-card">
-          <p className="eyebrow">Execution</p>
-          <h2>Hardware and boundary</h2>
-          <dl>
-            <div><dt>Hardware</dt><dd>{run.hardware_class ?? 'Not recorded'}</dd></div>
-            <div><dt>Region</dt><dd>{run.region ?? 'Not recorded'}</dd></div>
-            <div><dt>Duration</dt><dd>{humanDuration(run.duration_seconds)}</dd></div>
-            <div><dt>Cost</dt><dd>{run.cost_usd == null ? 'Not recorded' : `$${run.cost_usd.toFixed(2)} USD`}</dd></div>
-          </dl>
-          <p className="cost-note"><InfoIcon /> {run.cost_evidence}</p>
-        </article>
+        {run.training_provenance && run.evaluation_provenance ? <>
+          <article className="detail-card">
+            <p className="eyebrow">Selected training</p>
+            <h2>Model creation</h2>
+            <dl>
+              <div><dt>Run</dt><dd>{run.training_provenance.run_id}</dd></div>
+              <div><dt>Hardware</dt><dd>{run.training_provenance.hardware_class}</dd></div>
+              <div><dt>Accelerator</dt><dd>{run.training_provenance.accelerator}</dd></div>
+              <div><dt>Region</dt><dd>{run.training_provenance.region}</dd></div>
+              <div><dt>Runtime</dt><dd>{humanDuration(run.training_provenance.runtime_seconds)}</dd></div>
+              <div><dt>Estimated cost</dt><dd>{cost(run.training_provenance.estimated_cost_usd)}</dd></div>
+              <div><dt>Actual cost</dt><dd>{cost(run.training_provenance.actual_cost_usd)}</dd></div>
+            </dl>
+            <p className="cost-note"><InfoIcon /> {run.training_provenance.cost_evidence}</p>
+          </article>
+          <article className="detail-card">
+            <p className="eyebrow">Held-out evaluation</p>
+            <h2>Independent Processing</h2>
+            <dl>
+              <div><dt>Clean executions</dt><dd>{run.evaluation_provenance.clean_execution_count}</dd></div>
+              <div><dt>Hardware</dt><dd>{run.evaluation_provenance.hardware_class}</dd></div>
+              <div><dt>Region</dt><dd>{run.evaluation_provenance.region}</dd></div>
+              <div><dt>Runtime</dt><dd>{humanDuration(run.evaluation_provenance.runtime_seconds)} total</dd></div>
+              <div><dt>Estimated cost</dt><dd>{cost(run.evaluation_provenance.estimated_cost_usd)}</dd></div>
+              <div><dt>Actual cost</dt><dd>{cost(run.evaluation_provenance.actual_cost_usd)}</dd></div>
+            </dl>
+            <p className="cost-note"><InfoIcon /> {run.evaluation_provenance.cost_evidence}</p>
+          </article>
+        </> : (
+          <article className="detail-card">
+            <p className="eyebrow">Execution</p>
+            <h2>Hardware and boundary</h2>
+            <dl>
+              <div><dt>Hardware</dt><dd>{run.hardware_class ?? 'Not recorded'}</dd></div>
+              <div><dt>Region</dt><dd>{run.region ?? 'Not recorded'}</dd></div>
+              <div><dt>Duration</dt><dd>{humanDuration(run.duration_seconds)}</dd></div>
+              <div><dt>Cost</dt><dd>{run.cost_usd == null ? 'Not recorded' : cost(run.cost_usd)}</dd></div>
+            </dl>
+            <p className="cost-note"><InfoIcon /> {run.cost_evidence}</p>
+          </article>
+        )}
       </section>
 
       <section className="reproduction-card" aria-labelledby="reproduction-title">

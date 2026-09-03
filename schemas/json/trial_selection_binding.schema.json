@@ -1,0 +1,59 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "artifact_type": {
+      "const": "trial_selection_binding",
+      "title": "Artifact Type",
+      "type": "string"
+    },
+    "selection_id": {
+      "pattern": "^trial-selection-[0-9a-f]{20}$",
+      "title": "Selection Id",
+      "type": "string"
+    },
+    "s3_key": {
+      "pattern": "^runs/trial-selection/trial-selection-[0-9a-f]{20}/trial-selection\\.json$",
+      "title": "S3 Key",
+      "type": "string"
+    },
+    "sha256": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Sha256",
+      "type": "string"
+    },
+    "split": {
+      "const": "validation",
+      "title": "Split",
+      "type": "string"
+    },
+    "trial_count": {
+      "const": 3,
+      "title": "Trial Count",
+      "type": "integer"
+    },
+    "test_access_count": {
+      "const": 0,
+      "title": "Test Access Count",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "selection_id",
+    "s3_key",
+    "sha256",
+    "split",
+    "trial_count",
+    "test_access_count"
+  ],
+  "title": "TrialSelectionBinding",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.example.invalid/search-rank/trial_selection_binding.schema.json"
+}

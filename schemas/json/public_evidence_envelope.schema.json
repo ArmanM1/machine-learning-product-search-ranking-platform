@@ -3,21 +3,21 @@
     "CuratedQuerySummary": {
       "additionalProperties": false,
       "properties": {
-        "candidate_count": {
-          "maximum": 40,
-          "minimum": 1,
-          "title": "Candidate Count",
-          "type": "integer"
+        "query_id": {
+          "minLength": 1,
+          "title": "Query Id",
+          "type": "string"
         },
         "query": {
           "minLength": 1,
           "title": "Query",
           "type": "string"
         },
-        "query_id": {
-          "minLength": 1,
-          "title": "Query Id",
-          "type": "string"
+        "candidate_count": {
+          "maximum": 40,
+          "minimum": 1,
+          "title": "Candidate Count",
+          "type": "integer"
         }
       },
       "required": [
@@ -31,63 +31,10 @@
     "PublicEvaluationEvidence": {
       "additionalProperties": false,
       "properties": {
-        "bootstrap_resamples": {
-          "minimum": 10000,
-          "title": "Bootstrap Resamples",
-          "type": "integer"
-        },
-        "bootstrap_seed": {
-          "maximum": 4294967295,
-          "minimum": 0,
-          "title": "Bootstrap Seed",
-          "type": "integer"
-        },
-        "candidate_model_id": {
-          "minLength": 1,
-          "title": "Candidate Model Id",
-          "type": "string"
-        },
-        "delta": {
-          "$ref": "#/$defs/PublicMetricValue"
-        },
         "evidence_mode": {
           "const": "verified",
           "default": "verified",
           "title": "Evidence Mode",
-          "type": "string"
-        },
-        "excluded_query_count": {
-          "minimum": 0,
-          "title": "Excluded Query Count",
-          "type": "integer"
-        },
-        "exclusion_note": {
-          "minLength": 1,
-          "title": "Exclusion Note",
-          "type": "string"
-        },
-        "held_out_query_count": {
-          "minimum": 1,
-          "title": "Held Out Query Count",
-          "type": "integer"
-        },
-        "models": {
-          "items": {
-            "$ref": "#/$defs/PublicModelMetricRow"
-          },
-          "minItems": 2,
-          "title": "Models",
-          "type": "array"
-        },
-        "primary_metric": {
-          "$ref": "#/$defs/PublicMetricValue"
-        },
-        "release_status": {
-          "enum": [
-            "passed",
-            "failed"
-          ],
-          "title": "Release Status",
           "type": "string"
         },
         "report_id": {
@@ -100,25 +47,78 @@
           "title": "Run Id",
           "type": "string"
         },
-        "secondary_metrics": {
-          "items": {
-            "$ref": "#/$defs/PublicMetricComparison"
-          },
-          "title": "Secondary Metrics",
-          "type": "array"
-        },
-        "strongest_baseline": {
-          "$ref": "#/$defs/PublicMetricValue"
+        "candidate_model_id": {
+          "minLength": 1,
+          "title": "Candidate Model Id",
+          "type": "string"
         },
         "strongest_baseline_model_id": {
           "minLength": 1,
           "title": "Strongest Baseline Model Id",
           "type": "string"
         },
+        "release_status": {
+          "enum": [
+            "passed",
+            "failed"
+          ],
+          "title": "Release Status",
+          "type": "string"
+        },
+        "primary_metric": {
+          "$ref": "#/$defs/PublicMetricValue"
+        },
+        "strongest_baseline": {
+          "$ref": "#/$defs/PublicMetricValue"
+        },
+        "delta": {
+          "$ref": "#/$defs/PublicMetricValue"
+        },
+        "held_out_query_count": {
+          "minimum": 1,
+          "title": "Held Out Query Count",
+          "type": "integer"
+        },
+        "bootstrap_resamples": {
+          "minimum": 10000,
+          "title": "Bootstrap Resamples",
+          "type": "integer"
+        },
+        "bootstrap_seed": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "title": "Bootstrap Seed",
+          "type": "integer"
+        },
         "test_access_count": {
           "minimum": 1,
           "title": "Test Access Count",
           "type": "integer"
+        },
+        "excluded_query_count": {
+          "minimum": 0,
+          "title": "Excluded Query Count",
+          "type": "integer"
+        },
+        "exclusion_note": {
+          "minLength": 1,
+          "title": "Exclusion Note",
+          "type": "string"
+        },
+        "models": {
+          "items": {
+            "$ref": "#/$defs/PublicModelMetricRow"
+          },
+          "minItems": 2,
+          "title": "Models",
+          "type": "array"
+        },
+        "secondary_metrics": {
+          "items": {
+            "$ref": "#/$defs/PublicMetricComparison"
+          },
+          "title": "Secondary Metrics",
+          "type": "array"
         }
       },
       "required": [
@@ -142,6 +142,101 @@
       "title": "PublicEvaluationEvidence",
       "type": "object"
     },
+    "PublicEvaluationProvenance": {
+      "additionalProperties": false,
+      "description": "Allowlisted provenance for the two clean held-out Processing executions.",
+      "properties": {
+        "candidate_model_id": {
+          "minLength": 1,
+          "title": "Candidate Model Id",
+          "type": "string"
+        },
+        "candidate_model_artifact_checksum": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Candidate Model Artifact Checksum",
+          "type": "string"
+        },
+        "evaluation_config_hash": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Evaluation Config Hash",
+          "type": "string"
+        },
+        "git_sha": {
+          "pattern": "^[0-9a-f]{40}$",
+          "title": "Git Sha",
+          "type": "string"
+        },
+        "image_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Image Digest",
+          "type": "string"
+        },
+        "hardware_class": {
+          "const": "ml.m5.xlarge",
+          "title": "Hardware Class",
+          "type": "string"
+        },
+        "region": {
+          "const": "us-east-1",
+          "title": "Region",
+          "type": "string"
+        },
+        "clean_execution_count": {
+          "const": 2,
+          "title": "Clean Execution Count",
+          "type": "integer"
+        },
+        "runtime_seconds": {
+          "minimum": 0,
+          "title": "Runtime Seconds",
+          "type": "number"
+        },
+        "runtime_basis": {
+          "const": "processing_job_wall_clock_sum",
+          "title": "Runtime Basis",
+          "type": "string"
+        },
+        "estimated_cost_usd": {
+          "minimum": 0,
+          "title": "Estimated Cost Usd",
+          "type": "number"
+        },
+        "actual_cost_usd": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Actual Cost Usd"
+        },
+        "cost_evidence": {
+          "minLength": 1,
+          "title": "Cost Evidence",
+          "type": "string"
+        }
+      },
+      "required": [
+        "candidate_model_id",
+        "candidate_model_artifact_checksum",
+        "evaluation_config_hash",
+        "git_sha",
+        "image_digest",
+        "hardware_class",
+        "region",
+        "clean_execution_count",
+        "runtime_seconds",
+        "runtime_basis",
+        "estimated_cost_usd",
+        "cost_evidence"
+      ],
+      "title": "PublicEvaluationProvenance",
+      "type": "object"
+    },
     "PublicFailureAnalysis": {
       "additionalProperties": false,
       "properties": {
@@ -151,12 +246,10 @@
           "title": "Evidence Mode",
           "type": "string"
         },
-        "examples": {
-          "items": {
-            "$ref": "#/$defs/PublicFailureExample"
-          },
-          "title": "Examples",
-          "type": "array"
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
         },
         "metric": {
           "const": "graded_ndcg@10",
@@ -169,16 +262,18 @@
           "title": "Minimum Slice Size",
           "type": "integer"
         },
-        "run_id": {
-          "minLength": 1,
-          "title": "Run Id",
-          "type": "string"
-        },
         "slices": {
           "items": {
             "$ref": "#/$defs/PublicSliceResult"
           },
           "title": "Slices",
+          "type": "array"
+        },
+        "examples": {
+          "items": {
+            "$ref": "#/$defs/PublicFailureExample"
+          },
+          "title": "Examples",
           "type": "array"
         }
       },
@@ -194,13 +289,13 @@
     "PublicFailureExample": {
       "additionalProperties": false,
       "properties": {
-        "baseline_metric": {
-          "title": "Baseline Metric",
-          "type": "number"
+        "example_id": {
+          "minLength": 1,
+          "title": "Example Id",
+          "type": "string"
         },
-        "candidate_metric": {
-          "title": "Candidate Metric",
-          "type": "number"
+        "query": {
+          "$ref": "#/$defs/CuratedQuerySummary"
         },
         "category": {
           "enum": [
@@ -213,14 +308,43 @@
           "title": "Category",
           "type": "string"
         },
+        "baseline_metric": {
+          "title": "Baseline Metric",
+          "type": "number"
+        },
+        "candidate_metric": {
+          "title": "Candidate Metric",
+          "type": "number"
+        },
         "delta": {
           "title": "Delta",
           "type": "number"
         },
-        "example_id": {
+        "selection_rule": {
           "minLength": 1,
-          "title": "Example Id",
+          "title": "Selection Rule",
           "type": "string"
+        },
+        "public_product_ids": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Public Product Ids",
+          "type": "array"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notes"
         },
         "interpretation": {
           "anyOf": [
@@ -247,35 +371,6 @@
           ],
           "default": null,
           "title": "Next Experiment"
-        },
-        "notes": {
-          "anyOf": [
-            {
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Notes"
-        },
-        "public_product_ids": {
-          "items": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "title": "Public Product Ids",
-          "type": "array"
-        },
-        "query": {
-          "$ref": "#/$defs/CuratedQuerySummary"
-        },
-        "selection_rule": {
-          "minLength": 1,
-          "title": "Selection Rule",
-          "type": "string"
         }
       },
       "required": [
@@ -293,22 +388,22 @@
     "PublicInterval": {
       "additionalProperties": false,
       "properties": {
-        "confidence_level": {
-          "exclusiveMaximum": 1,
-          "exclusiveMinimum": 0,
-          "title": "Confidence Level",
+        "point_estimate": {
+          "title": "Point Estimate",
           "type": "number"
         },
         "lower": {
           "title": "Lower",
           "type": "number"
         },
-        "point_estimate": {
-          "title": "Point Estimate",
-          "type": "number"
-        },
         "upper": {
           "title": "Upper",
+          "type": "number"
+        },
+        "confidence_level": {
+          "exclusiveMaximum": 1,
+          "exclusiveMinimum": 0,
+          "title": "Confidence Level",
           "type": "number"
         }
       },
@@ -324,23 +419,6 @@
     "PublicMetricComparison": {
       "additionalProperties": false,
       "properties": {
-        "baseline": {
-          "title": "Baseline",
-          "type": "number"
-        },
-        "candidate": {
-          "title": "Candidate",
-          "type": "number"
-        },
-        "delta": {
-          "title": "Delta",
-          "type": "number"
-        },
-        "display_name": {
-          "minLength": 1,
-          "title": "Display Name",
-          "type": "string"
-        },
         "metric": {
           "enum": [
             "graded_ndcg@10",
@@ -352,6 +430,23 @@
           ],
           "title": "Metric",
           "type": "string"
+        },
+        "display_name": {
+          "minLength": 1,
+          "title": "Display Name",
+          "type": "string"
+        },
+        "baseline": {
+          "title": "Baseline",
+          "type": "number"
+        },
+        "candidate": {
+          "title": "Candidate",
+          "type": "number"
+        },
+        "delta": {
+          "title": "Delta",
+          "type": "number"
         }
       },
       "required": [
@@ -367,22 +462,6 @@
     "PublicMetricValue": {
       "additionalProperties": false,
       "properties": {
-        "display_name": {
-          "minLength": 1,
-          "title": "Display Name",
-          "type": "string"
-        },
-        "interval": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/PublicInterval"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
         "metric": {
           "enum": [
             "graded_ndcg@10",
@@ -395,9 +474,25 @@
           "title": "Metric",
           "type": "string"
         },
+        "display_name": {
+          "minLength": 1,
+          "title": "Display Name",
+          "type": "string"
+        },
         "value": {
           "title": "Value",
           "type": "number"
+        },
+        "interval": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PublicInterval"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -412,10 +507,30 @@
       "additionalProperties": false,
       "description": "Measured model values only; unavailable measurements stay null.",
       "properties": {
+        "model_id": {
+          "minLength": 1,
+          "title": "Model Id",
+          "type": "string"
+        },
         "display_name": {
           "minLength": 1,
           "title": "Display Name",
           "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "bm25",
+            "pretrained",
+            "fine_tuned"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "graded_ndcg_at_10": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Graded Ndcg At 10",
+          "type": "number"
         },
         "exact_mrr_at_10": {
           "anyOf": [
@@ -431,7 +546,7 @@
           "default": null,
           "title": "Exact Mrr At 10"
         },
-        "exact_top_1_rate": {
+        "recall_exact_or_substitute_at_10": {
           "anyOf": [
             {
               "maximum": 1,
@@ -443,54 +558,7 @@
             }
           ],
           "default": null,
-          "title": "Exact Top 1 Rate"
-        },
-        "graded_ndcg_at_10": {
-          "maximum": 1,
-          "minimum": 0,
-          "title": "Graded Ndcg At 10",
-          "type": "number"
-        },
-        "graded_ndcg_at_5": {
-          "anyOf": [
-            {
-              "maximum": 1,
-              "minimum": 0,
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Graded Ndcg At 5"
-        },
-        "kind": {
-          "enum": [
-            "bm25",
-            "pretrained",
-            "fine_tuned"
-          ],
-          "title": "Kind",
-          "type": "string"
-        },
-        "model_id": {
-          "minLength": 1,
-          "title": "Model Id",
-          "type": "string"
-        },
-        "p95_inference_latency_ms": {
-          "anyOf": [
-            {
-              "minimum": 0,
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "P95 Inference Latency Ms"
+          "title": "Recall Exact Or Substitute At 10"
         },
         "pairwise_ordinal_accuracy": {
           "anyOf": [
@@ -506,7 +574,7 @@
           "default": null,
           "title": "Pairwise Ordinal Accuracy"
         },
-        "recall_exact_or_substitute_at_10": {
+        "graded_ndcg_at_5": {
           "anyOf": [
             {
               "maximum": 1,
@@ -518,7 +586,34 @@
             }
           ],
           "default": null,
-          "title": "Recall Exact Or Substitute At 10"
+          "title": "Graded Ndcg At 5"
+        },
+        "exact_top_1_rate": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Exact Top 1 Rate"
+        },
+        "p95_inference_latency_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "P95 Inference Latency Ms"
         }
       },
       "required": [
@@ -552,14 +647,14 @@
           "title": "Candidate Graded Ndcg At 10",
           "type": "number"
         },
-        "candidate_minus_baseline_graded_ndcg_at_10": {
-          "title": "Candidate Minus Baseline Graded Ndcg At 10",
-          "type": "number"
-        },
         "strongest_baseline_graded_ndcg_at_10": {
           "maximum": 1,
           "minimum": 0,
           "title": "Strongest Baseline Graded Ndcg At 10",
+          "type": "number"
+        },
+        "candidate_minus_baseline_graded_ndcg_at_10": {
+          "title": "Candidate Minus Baseline Graded Ndcg At 10",
           "type": "number"
         }
       },
@@ -575,121 +670,10 @@
       "additionalProperties": false,
       "description": "Allowlisted public evidence; intentionally omits cloud identifiers/URIs.",
       "properties": {
-        "actual_cost_usd": {
-          "anyOf": [
-            {
-              "minimum": 0,
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Actual Cost Usd"
-        },
-        "base_model_id": {
-          "minLength": 1,
-          "title": "Base Model Id",
-          "type": "string"
-        },
-        "base_model_revision": {
-          "minLength": 1,
-          "title": "Base Model Revision",
-          "type": "string"
-        },
-        "config_hash": {
-          "pattern": "^sha256:[0-9a-f]{64}$",
-          "title": "Config Hash",
-          "type": "string"
-        },
-        "cost_evidence": {
-          "minLength": 1,
-          "title": "Cost Evidence",
-          "type": "string"
-        },
-        "dataset_manifest_hash": {
-          "pattern": "^sha256:[0-9a-f]{64}$",
-          "title": "Dataset Manifest Hash",
-          "type": "string"
-        },
-        "dataset_name": {
-          "minLength": 1,
-          "title": "Dataset Name",
-          "type": "string"
-        },
-        "dataset_version": {
-          "minLength": 1,
-          "title": "Dataset Version",
-          "type": "string"
-        },
-        "duration_seconds": {
-          "minimum": 0,
-          "title": "Duration Seconds",
-          "type": "number"
-        },
         "evidence_mode": {
           "const": "verified",
           "default": "verified",
           "title": "Evidence Mode",
-          "type": "string"
-        },
-        "git_sha": {
-          "maxLength": 64,
-          "minLength": 7,
-          "pattern": "^[0-9a-f]{7,64}$",
-          "title": "Git Sha",
-          "type": "string"
-        },
-        "hardware_class": {
-          "minLength": 1,
-          "title": "Hardware Class",
-          "type": "string"
-        },
-        "image_digest": {
-          "pattern": "^sha256:[0-9a-f]{64}$",
-          "title": "Image Digest",
-          "type": "string"
-        },
-        "intervals": {
-          "$ref": "#/$defs/PublicRunIntervals"
-        },
-        "limitations": {
-          "items": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "title": "Limitations",
-          "type": "array"
-        },
-        "locale": {
-          "const": "us",
-          "title": "Locale",
-          "type": "string"
-        },
-        "metrics": {
-          "$ref": "#/$defs/PublicRunMetrics"
-        },
-        "model_artifact_checksum": {
-          "pattern": "^sha256:[0-9a-f]{64}$",
-          "title": "Model Artifact Checksum",
-          "type": "string"
-        },
-        "prohibited_claims": {
-          "items": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "title": "Prohibited Claims",
-          "type": "array"
-        },
-        "region": {
-          "minLength": 1,
-          "title": "Region",
-          "type": "string"
-        },
-        "reproduction_command": {
-          "minLength": 1,
-          "title": "Reproduction Command",
           "type": "string"
         },
         "run_id": {
@@ -703,14 +687,99 @@
           "title": "Status",
           "type": "string"
         },
+        "config_hash": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Config Hash",
+          "type": "string"
+        },
+        "dataset_manifest_hash": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Dataset Manifest Hash",
+          "type": "string"
+        },
+        "split_manifest_hash": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Split Manifest Hash",
+          "type": "string"
+        },
+        "git_sha": {
+          "maxLength": 64,
+          "minLength": 7,
+          "pattern": "^[0-9a-f]{7,64}$",
+          "title": "Git Sha",
+          "type": "string"
+        },
+        "model_artifact_checksum": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Model Artifact Checksum",
+          "type": "string"
+        },
+        "dataset_name": {
+          "minLength": 1,
+          "title": "Dataset Name",
+          "type": "string"
+        },
+        "dataset_version": {
+          "minLength": 1,
+          "title": "Dataset Version",
+          "type": "string"
+        },
+        "locale": {
+          "const": "us",
+          "title": "Locale",
+          "type": "string"
+        },
+        "base_model_id": {
+          "minLength": 1,
+          "title": "Base Model Id",
+          "type": "string"
+        },
+        "base_model_revision": {
+          "minLength": 1,
+          "title": "Base Model Revision",
+          "type": "string"
+        },
+        "training_strategy": {
+          "minLength": 1,
+          "title": "Training Strategy",
+          "type": "string"
+        },
+        "training_provenance": {
+          "$ref": "#/$defs/PublicTrainingProvenance"
+        },
+        "evaluation_provenance": {
+          "$ref": "#/$defs/PublicEvaluationProvenance"
+        },
+        "metrics": {
+          "$ref": "#/$defs/PublicRunMetrics"
+        },
+        "intervals": {
+          "$ref": "#/$defs/PublicRunIntervals"
+        },
         "test_access_count": {
           "minimum": 1,
           "title": "Test Access Count",
           "type": "integer"
         },
-        "training_strategy": {
+        "limitations": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Limitations",
+          "type": "array"
+        },
+        "prohibited_claims": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Prohibited Claims",
+          "type": "array"
+        },
+        "reproduction_command": {
           "minLength": 1,
-          "title": "Training Strategy",
+          "title": "Reproduction Command",
           "type": "string"
         }
       },
@@ -718,8 +787,8 @@
         "run_id",
         "config_hash",
         "dataset_manifest_hash",
+        "split_manifest_hash",
         "git_sha",
-        "image_digest",
         "model_artifact_checksum",
         "dataset_name",
         "dataset_version",
@@ -727,13 +796,10 @@
         "base_model_id",
         "base_model_revision",
         "training_strategy",
-        "hardware_class",
-        "region",
+        "training_provenance",
+        "evaluation_provenance",
         "metrics",
         "intervals",
-        "duration_seconds",
-        "actual_cost_usd",
-        "cost_evidence",
         "test_access_count",
         "limitations",
         "prohibited_claims",
@@ -745,6 +811,31 @@
     "PublicSliceResult": {
       "additionalProperties": false,
       "properties": {
+        "slice_id": {
+          "minLength": 1,
+          "title": "Slice Id",
+          "type": "string"
+        },
+        "display_name": {
+          "minLength": 1,
+          "title": "Display Name",
+          "type": "string"
+        },
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "query_count": {
+          "minimum": 0,
+          "title": "Query Count",
+          "type": "integer"
+        },
+        "excluded_query_count": {
+          "minimum": 0,
+          "title": "Excluded Query Count",
+          "type": "integer"
+        },
         "baseline_graded_ndcg_at_10": {
           "anyOf": [
             {
@@ -782,20 +873,9 @@
           ],
           "title": "Delta"
         },
-        "description": {
-          "minLength": 1,
-          "title": "Description",
-          "type": "string"
-        },
-        "display_name": {
-          "minLength": 1,
-          "title": "Display Name",
-          "type": "string"
-        },
-        "excluded_query_count": {
-          "minimum": 0,
-          "title": "Excluded Query Count",
-          "type": "integer"
+        "low_sample": {
+          "title": "Low Sample",
+          "type": "boolean"
         },
         "finding": {
           "enum": [
@@ -805,20 +885,6 @@
             "insufficient_data"
           ],
           "title": "Finding",
-          "type": "string"
-        },
-        "low_sample": {
-          "title": "Low Sample",
-          "type": "boolean"
-        },
-        "query_count": {
-          "minimum": 0,
-          "title": "Query Count",
-          "type": "integer"
-        },
-        "slice_id": {
-          "minLength": 1,
-          "title": "Slice Id",
           "type": "string"
         }
       },
@@ -837,23 +903,172 @@
       "title": "PublicSliceResult",
       "type": "object"
     },
+    "PublicTrainingProvenance": {
+      "additionalProperties": false,
+      "description": "Allowlisted provenance for the validation-selected training execution.",
+      "properties": {
+        "trial_selection_id": {
+          "pattern": "^trial-selection-[0-9a-f]{20}$",
+          "title": "Trial Selection Id",
+          "type": "string"
+        },
+        "trial_selection_sha256": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Trial Selection Sha256",
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "run_manifest_sha256": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Run Manifest Sha256",
+          "type": "string"
+        },
+        "selected_model_id": {
+          "minLength": 1,
+          "title": "Selected Model Id",
+          "type": "string"
+        },
+        "selected_model_artifact_checksum": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Selected Model Artifact Checksum",
+          "type": "string"
+        },
+        "config_hash": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Config Hash",
+          "type": "string"
+        },
+        "git_sha": {
+          "pattern": "^[0-9a-f]{40}$",
+          "title": "Git Sha",
+          "type": "string"
+        },
+        "image_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Image Digest",
+          "type": "string"
+        },
+        "hardware_class": {
+          "enum": [
+            "ml.m5.xlarge",
+            "ml.g4dn.xlarge"
+          ],
+          "title": "Hardware Class",
+          "type": "string"
+        },
+        "accelerator": {
+          "enum": [
+            "cpu",
+            "gpu"
+          ],
+          "title": "Accelerator",
+          "type": "string"
+        },
+        "region": {
+          "const": "us-east-1",
+          "title": "Region",
+          "type": "string"
+        },
+        "runtime_seconds": {
+          "minimum": 0,
+          "title": "Runtime Seconds",
+          "type": "number"
+        },
+        "estimated_cost_usd": {
+          "minimum": 0,
+          "title": "Estimated Cost Usd",
+          "type": "number"
+        },
+        "actual_cost_usd": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Actual Cost Usd"
+        },
+        "cost_evidence": {
+          "minLength": 1,
+          "title": "Cost Evidence",
+          "type": "string"
+        }
+      },
+      "required": [
+        "trial_selection_id",
+        "trial_selection_sha256",
+        "run_id",
+        "run_manifest_sha256",
+        "selected_model_id",
+        "selected_model_artifact_checksum",
+        "config_hash",
+        "git_sha",
+        "image_digest",
+        "hardware_class",
+        "accelerator",
+        "region",
+        "runtime_seconds",
+        "estimated_cost_usd",
+        "cost_evidence"
+      ],
+      "title": "PublicTrainingProvenance",
+      "type": "object"
+    },
     "PublicValidationEvaluation": {
       "additionalProperties": false,
       "properties": {
-        "evidence_id": {
-          "minLength": 1,
-          "title": "Evidence Id",
-          "type": "string"
-        },
         "evidence_mode": {
           "const": "validation_only",
           "default": "validation_only",
           "title": "Evidence Mode",
           "type": "string"
         },
+        "evidence_id": {
+          "minLength": 1,
+          "title": "Evidence Id",
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "status": {
+          "const": "validation_only",
+          "default": "validation_only",
+          "title": "Status",
+          "type": "string"
+        },
+        "selected_model_id": {
+          "minLength": 1,
+          "title": "Selected Model Id",
+          "type": "string"
+        },
+        "primary_metric": {
+          "$ref": "#/$defs/PublicMetricValue"
+        },
+        "validation_query_count": {
+          "minimum": 1,
+          "title": "Validation Query Count",
+          "type": "integer"
+        },
         "excluded_query_count": {
           "minimum": 0,
           "title": "Excluded Query Count",
+          "type": "integer"
+        },
+        "test_access_count": {
+          "const": 0,
+          "default": 0,
+          "title": "Test Access Count",
           "type": "integer"
         },
         "held_out": {
@@ -870,40 +1085,10 @@
           "title": "Models",
           "type": "array"
         },
-        "primary_metric": {
-          "$ref": "#/$defs/PublicMetricValue"
-        },
-        "run_id": {
-          "minLength": 1,
-          "title": "Run Id",
-          "type": "string"
-        },
-        "selected_model_id": {
-          "minLength": 1,
-          "title": "Selected Model Id",
-          "type": "string"
-        },
         "selection_note": {
           "minLength": 1,
           "title": "Selection Note",
           "type": "string"
-        },
-        "status": {
-          "const": "validation_only",
-          "default": "validation_only",
-          "title": "Status",
-          "type": "string"
-        },
-        "test_access_count": {
-          "const": 0,
-          "default": 0,
-          "title": "Test Access Count",
-          "type": "integer"
-        },
-        "validation_query_count": {
-          "minimum": 1,
-          "title": "Validation Query Count",
-          "type": "integer"
         }
       },
       "required": [
@@ -928,22 +1113,20 @@
           "title": "Evidence Mode",
           "type": "string"
         },
-        "examples": {
-          "items": {
-            "$ref": "#/$defs/PublicFailureExample"
-          },
-          "maxItems": 0,
-          "title": "Examples",
-          "type": "array"
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "status": {
+          "const": "not_performed",
+          "default": "not_performed",
+          "title": "Status",
+          "type": "string"
         },
         "reason": {
           "minLength": 1,
           "title": "Reason",
-          "type": "string"
-        },
-        "run_id": {
-          "minLength": 1,
-          "title": "Run Id",
           "type": "string"
         },
         "slices": {
@@ -954,11 +1137,13 @@
           "title": "Slices",
           "type": "array"
         },
-        "status": {
-          "const": "not_performed",
-          "default": "not_performed",
-          "title": "Status",
-          "type": "string"
+        "examples": {
+          "items": {
+            "$ref": "#/$defs/PublicFailureExample"
+          },
+          "maxItems": 0,
+          "title": "Examples",
+          "type": "array"
         }
       },
       "required": [
@@ -988,17 +1173,74 @@
       "additionalProperties": false,
       "description": "Truthful pre-held-out release metadata for the bootstrap baseline.",
       "properties": {
-        "actual_cost_usd": {
-          "anyOf": [
-            {
-              "minimum": 0,
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Actual Cost Usd"
+        "evidence_mode": {
+          "const": "validation_only",
+          "default": "validation_only",
+          "title": "Evidence Mode",
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "status": {
+          "const": "validation_only",
+          "default": "validation_only",
+          "title": "Status",
+          "type": "string"
+        },
+        "selected_model_id": {
+          "minLength": 1,
+          "title": "Selected Model Id",
+          "type": "string"
+        },
+        "config_hash": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Config Hash",
+          "type": "string"
+        },
+        "dataset_manifest_hash": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Dataset Manifest Hash",
+          "type": "string"
+        },
+        "split_manifest_hash": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Split Manifest Hash",
+          "type": "string"
+        },
+        "git_sha": {
+          "maxLength": 64,
+          "minLength": 7,
+          "pattern": "^[0-9a-f]{7,64}$",
+          "title": "Git Sha",
+          "type": "string"
+        },
+        "image_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Image Digest",
+          "type": "string"
+        },
+        "model_artifact_checksum": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Model Artifact Checksum",
+          "type": "string"
+        },
+        "dataset_name": {
+          "minLength": 1,
+          "title": "Dataset Name",
+          "type": "string"
+        },
+        "dataset_version": {
+          "minLength": 1,
+          "title": "Dataset Version",
+          "type": "string"
+        },
+        "locale": {
+          "const": "us",
+          "title": "Locale",
+          "type": "string"
         },
         "base_model_id": {
           "anyOf": [
@@ -1012,53 +1254,46 @@
           ],
           "title": "Base Model Id"
         },
-        "config_hash": {
-          "pattern": "^sha256:[0-9a-f]{64}$",
-          "title": "Config Hash",
-          "type": "string"
-        },
-        "cost_evidence": {
+        "hardware_class": {
           "minLength": 1,
-          "title": "Cost Evidence",
+          "title": "Hardware Class",
           "type": "string"
         },
-        "dataset_manifest_hash": {
-          "pattern": "^sha256:[0-9a-f]{64}$",
-          "title": "Dataset Manifest Hash",
-          "type": "string"
-        },
-        "dataset_name": {
+        "region": {
           "minLength": 1,
-          "title": "Dataset Name",
+          "title": "Region",
           "type": "string"
         },
-        "dataset_version": {
-          "minLength": 1,
-          "title": "Dataset Version",
-          "type": "string"
+        "metrics": {
+          "$ref": "#/$defs/PublicValidationRunMetrics"
         },
         "duration_seconds": {
           "minimum": 0,
           "title": "Duration Seconds",
           "type": "number"
         },
-        "evidence_mode": {
-          "const": "validation_only",
-          "default": "validation_only",
-          "title": "Evidence Mode",
-          "type": "string"
+        "actual_cost_usd": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Actual Cost Usd"
         },
-        "git_sha": {
-          "maxLength": 64,
-          "minLength": 7,
-          "pattern": "^[0-9a-f]{7,64}$",
-          "title": "Git Sha",
-          "type": "string"
-        },
-        "hardware_class": {
+        "cost_evidence": {
           "minLength": 1,
-          "title": "Hardware Class",
+          "title": "Cost Evidence",
           "type": "string"
+        },
+        "test_access_count": {
+          "const": 0,
+          "default": 0,
+          "title": "Test Access Count",
+          "type": "integer"
         },
         "held_out_claims_allowed": {
           "const": false,
@@ -1066,9 +1301,9 @@
           "title": "Held Out Claims Allowed",
           "type": "boolean"
         },
-        "image_digest": {
-          "pattern": "^sha256:[0-9a-f]{64}$",
-          "title": "Image Digest",
+        "validation_only_notice": {
+          "minLength": 1,
+          "title": "Validation Only Notice",
           "type": "string"
         },
         "limitations": {
@@ -1080,19 +1315,6 @@
           "title": "Limitations",
           "type": "array"
         },
-        "locale": {
-          "const": "us",
-          "title": "Locale",
-          "type": "string"
-        },
-        "metrics": {
-          "$ref": "#/$defs/PublicValidationRunMetrics"
-        },
-        "model_artifact_checksum": {
-          "pattern": "^sha256:[0-9a-f]{64}$",
-          "title": "Model Artifact Checksum",
-          "type": "string"
-        },
         "prohibited_claims": {
           "items": {
             "minLength": 1,
@@ -1102,41 +1324,9 @@
           "title": "Prohibited Claims",
           "type": "array"
         },
-        "region": {
-          "minLength": 1,
-          "title": "Region",
-          "type": "string"
-        },
         "reproduction_command": {
           "minLength": 1,
           "title": "Reproduction Command",
-          "type": "string"
-        },
-        "run_id": {
-          "minLength": 1,
-          "title": "Run Id",
-          "type": "string"
-        },
-        "selected_model_id": {
-          "minLength": 1,
-          "title": "Selected Model Id",
-          "type": "string"
-        },
-        "status": {
-          "const": "validation_only",
-          "default": "validation_only",
-          "title": "Status",
-          "type": "string"
-        },
-        "test_access_count": {
-          "const": 0,
-          "default": 0,
-          "title": "Test Access Count",
-          "type": "integer"
-        },
-        "validation_only_notice": {
-          "minLength": 1,
-          "title": "Validation Only Notice",
           "type": "string"
         }
       },
@@ -1145,6 +1335,7 @@
         "selected_model_id",
         "config_hash",
         "dataset_manifest_hash",
+        "split_manifest_hash",
         "git_sha",
         "image_digest",
         "model_artifact_checksum",
@@ -1167,21 +1358,14 @@
       "type": "object"
     }
   },
-  "$id": "https://schemas.example.invalid/search-rank/public_evidence_envelope.schema.json",
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "Complete public payload loaded from one immutable, pre-generated artifact.",
   "properties": {
-    "evaluation": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/PublicEvaluationEvidence"
-        },
-        {
-          "$ref": "#/$defs/PublicValidationEvaluation"
-        }
-      ],
-      "title": "Evaluation"
+    "schema_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
     },
     "evidence_mode": {
       "default": "verified",
@@ -1191,17 +1375,6 @@
       ],
       "title": "Evidence Mode",
       "type": "string"
-    },
-    "failure_analysis": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/PublicFailureAnalysis"
-        },
-        {
-          "$ref": "#/$defs/PublicValidationFailureAnalysis"
-        }
-      ],
-      "title": "Failure Analysis"
     },
     "run": {
       "anyOf": [
@@ -1214,11 +1387,27 @@
       ],
       "title": "Run"
     },
-    "schema_version": {
-      "const": "1.0.0",
-      "default": "1.0.0",
-      "title": "Schema Version",
-      "type": "string"
+    "evaluation": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PublicEvaluationEvidence"
+        },
+        {
+          "$ref": "#/$defs/PublicValidationEvaluation"
+        }
+      ],
+      "title": "Evaluation"
+    },
+    "failure_analysis": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PublicFailureAnalysis"
+        },
+        {
+          "$ref": "#/$defs/PublicValidationFailureAnalysis"
+        }
+      ],
+      "title": "Failure Analysis"
     }
   },
   "required": [
@@ -1227,5 +1416,7 @@
     "failure_analysis"
   ],
   "title": "PublicEvidenceEnvelope",
-  "type": "object"
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.example.invalid/search-rank/public_evidence_envelope.schema.json"
 }

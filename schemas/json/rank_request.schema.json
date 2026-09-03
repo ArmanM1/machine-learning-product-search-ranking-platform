@@ -4,12 +4,16 @@
   "additionalProperties": false,
   "properties": {
     "model_id": {
+      "maxLength": 128,
       "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
       "title": "Model Id",
       "type": "string"
     },
     "query_id": {
+      "maxLength": 128,
       "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
       "title": "Query Id",
       "type": "string"
     },

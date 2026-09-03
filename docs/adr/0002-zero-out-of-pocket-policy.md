@@ -19,12 +19,25 @@ A chargeable workflow may proceed only when all of these are true:
 - Campaign spend plus the new estimate and remaining plan is no more than USD 40.
 - The applicable job-hour cap and runtime cap remain satisfied.
 - A protected GitHub environment grants the run-specific approval.
+- A version-2 HMAC receipt binds the financial observation and protected reservation values to the exact
+  workflow, commit, and complete dispatch inputs.
+- The operation atomically reserves its maximum USD and CPU/GPU envelope in the conditional S3 campaign
+  ledger before its first ordinary AWS mutation.
 
 If applicable credit is missing, insufficient, expired, or uncertain, the workflow stops. It does not consume a payment-method contingency.
 
 ## Enforcement limits
 
-AWS Budgets and cost data can lag and are alerts, not hard stops. The controls reduce exposure through one-job dispatch, one instance, hard timeouts, reserved concurrency, storage lifecycle, and no idle hourly services. They cannot mathematically guarantee that AWS never assesses a charge. Therefore every execution still requires a current console check by the owner or operator.
+The owner explicitly waived AWS Budget creation and email confirmation. Terraform retains dormant optional
+actual/forecast budgets for a future explicit decision, but the waiver is not represented as a passed gate.
+Public serving instead has a budget-independent automatic shutdown invocation within 24 hours; the shutdown
+remains armed and recovery is manual.
+
+AWS cost data can lag, conditional reservations are conservative commitments rather than billing locks, and
+shutdown delivery/propagation is not instantaneous. The controls reduce exposure through one-job dispatch,
+one instance, hard timeouts, cumulative fail-closed reservations, reserved concurrency, storage lifecycle,
+and no idle compute. They cannot mathematically guarantee that AWS never assesses a charge. Every execution
+therefore still requires a current console check by the owner or operator.
 
 ## Reconsideration
 

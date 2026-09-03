@@ -1,0 +1,35 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "artifact_type": {
+      "const": "trial_selection_verification",
+      "title": "Artifact Type",
+      "type": "string"
+    },
+    "selection_id": {
+      "pattern": "^trial-selection-[0-9a-f]{20}$",
+      "title": "Selection Id",
+      "type": "string"
+    },
+    "status": {
+      "const": "verified",
+      "title": "Status",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "selection_id",
+    "status"
+  ],
+  "title": "TrialSelectionVerification",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.example.invalid/search-rank/trial_selection_verification.schema.json"
+}

@@ -1,0 +1,104 @@
+{
+  "$defs": {
+    "CuratedProductArtifact": {
+      "additionalProperties": false,
+      "properties": {
+        "product_id": {
+          "minLength": 1,
+          "title": "Product Id",
+          "type": "string"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "esci_label": {
+          "anyOf": [
+            {
+              "enum": [
+                "Exact",
+                "Substitute",
+                "Complement",
+                "Irrelevant"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Esci Label"
+        }
+      },
+      "required": [
+        "product_id",
+        "title",
+        "text"
+      ],
+      "title": "CuratedProductArtifact",
+      "type": "object"
+    },
+    "CuratedQueryArtifact": {
+      "additionalProperties": false,
+      "properties": {
+        "query_id": {
+          "minLength": 1,
+          "title": "Query Id",
+          "type": "string"
+        },
+        "query": {
+          "minLength": 1,
+          "title": "Query",
+          "type": "string"
+        },
+        "products": {
+          "items": {
+            "$ref": "#/$defs/CuratedProductArtifact"
+          },
+          "maxItems": 40,
+          "minItems": 1,
+          "title": "Products",
+          "type": "array"
+        }
+      },
+      "required": [
+        "query_id",
+        "query",
+        "products"
+      ],
+      "title": "CuratedQueryArtifact",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "queries": {
+      "items": {
+        "$ref": "#/$defs/CuratedQueryArtifact"
+      },
+      "minItems": 1,
+      "title": "Queries",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "queries"
+  ],
+  "title": "CuratedQueryCollection",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.example.invalid/search-rank/curated_query_collection.schema.json"
+}

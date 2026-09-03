@@ -1,0 +1,14 @@
+{
+  "accelerator": "gpu",
+  "cpu_hours_used_to_date": "0",
+  "dataset_manifest_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "declared_job_cost_cap_usd": "1.00",
+  "estimated_remaining_non_job_usd": "10.00",
+  "experiment_config_path": "configs/experiments/candidate-v1.yaml",
+  "gpu_hours_used_to_date": "0",
+  "instance_type": "ml.g4dn.xlarge",
+  "maximum_timeout_seconds": "3600",
+  "prepared_data_s3_prefix": "data/processed/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "run_kind": "final",
+  "training_image_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+}

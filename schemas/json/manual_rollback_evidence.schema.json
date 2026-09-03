@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.example.invalid/search-rank/manual_rollback_evidence.schema.json",
+  "additionalProperties": false,
+  "description": "Successful operator-authorized restoration of a versioned public release.",
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "artifact_type": {
+      "const": "manual_rollback_evidence",
+      "title": "Artifact Type",
+      "type": "string"
+    },
+    "restored_release_id": {
+      "minLength": 1,
+      "title": "Restored Release Id",
+      "type": "string"
+    },
+    "restored_model_id": {
+      "minLength": 1,
+      "title": "Restored Model Id",
+      "type": "string"
+    },
+    "from_lambda_version": {
+      "pattern": "^[1-9][0-9]*$",
+      "title": "From Lambda Version",
+      "type": "string"
+    },
+    "to_lambda_version": {
+      "pattern": "^[1-9][0-9]*$",
+      "title": "To Lambda Version",
+      "type": "string"
+    },
+    "restored_pointer_version_id": {
+      "minLength": 1,
+      "title": "Restored Pointer Version Id",
+      "type": "string"
+    },
+    "workflow_commit": {
+      "pattern": "^[0-9a-f]{40}$",
+      "title": "Workflow Commit",
+      "type": "string"
+    },
+    "smoke_test_passed": {
+      "const": true,
+      "title": "Smoke Test Passed",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "restored_release_id",
+    "restored_model_id",
+    "from_lambda_version",
+    "to_lambda_version",
+    "restored_pointer_version_id",
+    "workflow_commit",
+    "smoke_test_passed"
+  ],
+  "title": "ManualRollbackEvidence",
+  "type": "object"
+}

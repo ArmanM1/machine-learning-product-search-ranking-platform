@@ -30,7 +30,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: validation-baseline-run
+  group: aws-financial-operations
   cancel-in-progress: false
 
 env:
@@ -46,7 +46,7 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 300
-    environment: aws-training
+    environment: aws-baseline
     env:
       PREPARED_DATA_S3_PREFIX: ${{ inputs.prepared_data_s3_prefix }}
       DATASET_PROCESSED_SHA256: ${{ inputs.dataset_processed_sha256 }}
@@ -56,6 +56,21 @@ jobs:
       ARTIFACT_BUCKET: ${{ vars.AWS_ARTIFACT_BUCKET }}
       CAMPAIGN_SPEND_TO_DATE_USD: ${{ secrets.AWS_CAMPAIGN_SPEND_TO_DATE_USD }}
       REMAINING_APPLICABLE_CREDIT_USD: ${{ secrets.AWS_REMAINING_APPLICABLE_CREDIT_USD }}
+      FINANCIAL_SNAPSHOT_OBSERVED_AT: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_OBSERVED_AT }}
+      FINANCIAL_SNAPSHOT_RECEIPT_SHA256: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_RECEIPT_SHA256 }}
+      FINANCIAL_SNAPSHOT_HMAC_KEY: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_HMAC_KEY }}
+      FINANCIAL_RESERVATION_MAX_USD: ${{ secrets.AWS_FINANCIAL_RESERVATION_MAX_USD }}
+      FINANCIAL_RESERVATION_REMAINING_COMMITTED_USD: ${{ secrets.AWS_FINANCIAL_RESERVATION_REMAINING_COMMITTED_USD }}
+      FINANCIAL_RESERVATION_CPU_HOURS: ${{ secrets.AWS_FINANCIAL_RESERVATION_CPU_HOURS }}
+      FINANCIAL_RESERVATION_GPU_HOURS: ${{ secrets.AWS_FINANCIAL_RESERVATION_GPU_HOURS }}
+      FINANCIAL_CPU_HOURS_USED_TO_DATE: ${{ secrets.AWS_FINANCIAL_CPU_HOURS_USED_TO_DATE }}
+      FINANCIAL_GPU_HOURS_USED_TO_DATE: ${{ secrets.AWS_FINANCIAL_GPU_HOURS_USED_TO_DATE }}
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_WORKFLOW: baseline
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_INPUTS_JSON: ${{ toJSON(inputs) }}
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_COMMIT_SHA: ${{ github.sha }}
+      FINANCIAL_SNAPSHOT_SOURCE: "aws_billing_and_cost_management_console"
+      FINANCIAL_SNAPSHOT_MAX_AGE_SECONDS: "21600"
+      TF_STATE_BUCKET: ${{ vars.AWS_TERRAFORM_STATE_BUCKET }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -70,6 +85,9 @@ jobs:
           set -euo pipefail
           test "${AUTHORIZATION}" = "RUN VALIDATION BASELINES"
           test "${ALLOW_HELDOUT_EVAL}" = "0"
+          [[ "${GITHUB_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test -z "$(git status --porcelain --untracked-files=all)"
           [[ "${PREPARED_DATA_S3_PREFIX}" =~ ^data/processed/[0-9a-f]{64}/?$ ]]
           [[ "${DATASET_PROCESSED_SHA256}" =~ ^sha256:[0-9a-f]{64}$ ]]
           test "${PREPARED_DATA_S3_PREFIX%/}" = \
@@ -106,10 +124,19 @@ jobs:
           PY
       - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ vars.AWS_BASELINE_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: gha-baselines-${{ github.run_id }}
           mask-aws-account-id: true
+      - name: Atomically reserve the signed campaign capacity
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${TF_STATE_BUCKET:?Missing AWS_TERRAFORM_STATE_BUCKET variable}"
+          python -m pip install --disable-pip-version-check pydantic==2.13.5
+          PYTHONPATH=src python scripts/reserve_financial_capacity.py reserve \
+            --bucket "${TF_STATE_BUCKET}" \
+            --output financial-capacity-reservation.json
       - name: Stage validation data without the held-out object
         shell: bash
         run: |
@@ -153,9 +180,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          export SEARCH_RANK_RUN_ROOT="$(pwd)/baseline-command"
+          SEARCH_RANK_RUN_ROOT="$(pwd)/baseline-command"
+          export SEARCH_RANK_RUN_ROOT
           marker="$(mktemp)"
-          uv run python -m search_rank.cli baseline run --config "${BASELINE_CONFIG_PATH}"
+          SEARCH_RANK_GIT_SHA="${GITHUB_SHA}" \
+            uv run python -m search_rank.cli baseline run --config "${BASELINE_CONFIG_PATH}"
           export BASELINE_MARKER="${marker}"
           uv run python - <<'PY'
           import json
@@ -217,6 +246,8 @@ jobs:
             "${manifest_path}:manifest.json"; do
             local_file="${mapping%%:*}"
             remote_name="${mapping#*:}"
+            PYTHONPATH=src uv run python scripts/validate_financial_snapshot.py emit \
+              --output /dev/null
             aws s3api put-object \
               --bucket "${ARTIFACT_BUCKET}" \
               --key "${prefix}${remote_name}" \
@@ -254,6 +285,8 @@ jobs:
               baseline_config_file_sha256: $config_hash,
               strongest_baseline_id: $strongest,
               heldout_access_count: 0}' > baseline-bootstrap-inputs.json
+          PYTHONPATH=src uv run python scripts/validate_financial_snapshot.py emit \
+            --output /dev/null
           aws s3api put-object \
             --bucket "${ARTIFACT_BUCKET}" \
             --key "${prefix}baseline-bootstrap-inputs.json" \
