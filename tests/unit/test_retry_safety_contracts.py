@@ -40,6 +40,35 @@ def test_workflow_validator_installs_include_the_pinned_yaml_runtime() -> None:
             )
 
 
+def test_hidden_workflow_artifacts_are_explicitly_included() -> None:
+    workflows_with_hidden_uploads: set[str] = set()
+    for workflow_path in sorted(WORKFLOWS.glob("*.yml")):
+        payload = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+        for job in payload.get("jobs", {}).values():
+            for step in job.get("steps", []):
+                if not str(step.get("uses", "")).startswith("actions/upload-artifact@"):
+                    continue
+                upload = step.get("with", {})
+                configured_paths = str(upload.get("path", "")).splitlines()
+                has_hidden_path = any(
+                    any(
+                        component.startswith(".") and component not in {".", ".."}
+                        for component in path.strip().replace("\\", "/").split("/")
+                    )
+                    for path in configured_paths
+                )
+                if has_hidden_path:
+                    workflows_with_hidden_uploads.add(workflow_path.name)
+                    assert upload.get("include-hidden-files") is True, workflow_path.name
+
+    assert workflows_with_hidden_uploads == {
+        "benchmark-serving.yml",
+        "bootstrap-baseline.yml",
+        "freeze-trial-selection.yml",
+        "prepare-data.yml",
+    }
+
+
 def test_training_rerun_reuses_only_the_exact_existing_job() -> None:
     workflow = (WORKFLOWS / "train.yml").read_text(encoding="utf-8")
     submission = workflow.split("name: Upload frozen configuration and submit exactly one job", 1)[
@@ -245,7 +274,7 @@ def test_baseline_bootstrap_recovers_identical_partial_uploads_before_pointer_ca
     )
 
 
-def test_every_post_bootstrap_aws_job_reserves_shared_capacity_immediately_after_oidc() -> None:
+def test_every_post_bootstrap_aws_job_reserves_before_its_first_mutation() -> None:
     workflow_jobs = {
         "baseline.yml": ("baseline",),
         "benchmark-serving.yml": ("benchmark",),
@@ -268,6 +297,29 @@ def test_every_post_bootstrap_aws_job_reserves_shared_capacity_immediately_after
         "FINANCIAL_CPU_HOURS_USED_TO_DATE": ("${{ secrets.AWS_FINANCIAL_CPU_HOURS_USED_TO_DATE }}"),
         "FINANCIAL_GPU_HOURS_USED_TO_DATE": ("${{ secrets.AWS_FINANCIAL_GPU_HOURS_USED_TO_DATE }}"),
         "TF_STATE_BUCKET": "${{ vars.AWS_TERRAFORM_STATE_BUCKET }}",
+    }
+    delayed_reservation_contracts = {
+        ("release.yml", "evaluate-and-promote"): (
+            (
+                "Prove one ml.m5.xlarge Processing instance is available",
+                "Bind the evaluation digest to the evaluated Git commit",
+                "Retrieve current processing price and enforce the zero-spend guard",
+                "Download and verify the frozen candidate and baseline artifacts",
+                "Require the immutable treatment and both validation-only controls",
+                "Capture the required rollback-safe baseline pointer",
+            ),
+            "Run two separately counted clean held-out Processing jobs",
+        ),
+        ("train.yml", "submit"): (
+            (
+                "Bind the immutable training image to this exact commit",
+                "Retrieve current on-demand upper-bound price",
+                "Enforce zero-out-of-pocket campaign guard",
+                "Verify the immutable prepared-dataset identity",
+                "Fail closed on the live managed-spot instance quota",
+            ),
+            "Upload frozen configuration and submit exactly one job",
+        ),
     }
 
     for workflow_name, job_names in workflow_jobs.items():
@@ -295,11 +347,35 @@ def test_every_post_bootstrap_aws_job_reserves_shared_capacity_immediately_after
                 workflow_name,
                 job_name,
             )
-            assert reservation_positions[0] == credential_positions[0] + 1, (
+            credential_position = credential_positions[0]
+            reservation_position = reservation_positions[0]
+            assert credential_position < reservation_position, (workflow_name, job_name)
+
+            delayed_contract = delayed_reservation_contracts.get((workflow_name, job_name))
+            if delayed_contract is None:
+                assert reservation_position == credential_position + 1, (
+                    workflow_name,
+                    job_name,
+                )
+            else:
+                preflight_names, first_mutation_name = delayed_contract
+                step_positions = {
+                    step.get("name"): index for index, step in enumerate(job["steps"])
+                }
+                for preflight_name in preflight_names:
+                    assert (
+                        credential_position < step_positions[preflight_name] < reservation_position
+                    )
+                assert reservation_position + 1 == step_positions[first_mutation_name]
+
+            prior_commands = "\n".join(
+                step.get("run", "") for step in job["steps"][:reservation_position]
+            )
+            assert "validate_financial_reservation" in prior_commands, (
                 workflow_name,
                 job_name,
             )
-            reservation = job["steps"][reservation_positions[0]]["run"]
+            reservation = job["steps"][reservation_position]["run"]
             assert "scripts/reserve_financial_capacity.py reserve" in reservation
             assert '--bucket "${TF_STATE_BUCKET}"' in reservation
             assert "--output financial-capacity-reservation.json" in reservation
@@ -315,6 +391,10 @@ def test_state_bootstrap_is_serialized_and_initializes_the_cas_ledger() -> None:
     }
     job = payload["jobs"]["bootstrap"]
     assert job["environment"] == "aws-state-bootstrap"
+    assert (
+        payload["env"]["STATE_BOOTSTRAP_ALLOWANCE_USD"]
+        == job["env"]["FINANCIAL_RESERVATION_MAX_USD"]
+    )
     for name, value in {
         "FINANCIAL_RESERVATION_MAX_USD": "0.10",
         "FINANCIAL_RESERVATION_REMAINING_COMMITTED_USD": "0",

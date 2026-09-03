@@ -65,7 +65,7 @@ def test_documented_dispatch_examples_pass_exact_validation(workflow: str) -> No
 @pytest.mark.parametrize(
     ("workflow_name", "expected_inputs"),
     (
-        ("train.yml", {"dispatch_config", "authorization"}),
+        ("train.yml", {"dispatch_config", "authorization", "quota_probe_only"}),
         (
             "release.yml",
             {"dispatch_config", "allow_heldout_eval", "authorization"},

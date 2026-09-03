@@ -29,7 +29,7 @@ sys.modules[SPEC.name] = trial_selection
 SPEC.loader.exec_module(trial_selection)
 GIT_SHA = "a" * 40
 IMAGE_DIGEST = "sha256:" + "b" * 64
-DATASET_HASH = "sha256:420735e9bba265ae04797129003258974d8fed9e21272be318de7e49c97e24f6"
+DATASET_HASH = "sha256:814e06ceba032871d1cac66cd4dd59177f4348c9928fdf417f2a2f3218a29525"
 
 
 def _write_json(path: Path, payload: object) -> None:

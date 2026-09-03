@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Atomically reserve bounded AWS campaign capacity in the Terraform state bucket.
 
-The ledger deliberately never releases a reservation. This can reject safe work after enough
-operations, but it cannot make an unsafe operation appear affordable. Every update uses an S3
-ETag compare-and-swap (or If-None-Match for creation), so stale financial snapshots cannot be
-replayed concurrently or sequentially without consuming the shared campaign envelope.
+The ledger deliberately never deletes a reservation. Aggregate commitments are scoped to the exact
+authorization commit while every historical record remains auditable. Every update uses an S3 ETag
+compare-and-swap (or If-None-Match for creation), so stale financial snapshots cannot race within
+one immutable revision's shared campaign envelope.
 """
 
 from __future__ import annotations
@@ -226,11 +226,17 @@ def _load_ledger_bytes(raw: bytes) -> dict[str, Any]:
     return checked
 
 
-def _sum_reserved(ledger: Mapping[str, Any], field: str) -> Decimal:
+def _sum_reserved(
+    ledger: Mapping[str, Any],
+    field: str,
+    *,
+    authorization_commit_sha: str,
+) -> Decimal:
     return sum(
         (
             _decimal(record["signed_reservation"][field], field=field)
             for record in ledger["reservations"].values()
+            if record["authorization_commit_sha"] == authorization_commit_sha
         ),
         Decimal(0),
     )
@@ -280,9 +286,22 @@ def reserve_transition(
     new_gpu = _decimal(signed["reservation_gpu_hours"], field="reservation_gpu_hours")
     spent = _decimal(environment.get(CAMPAIGN_SPEND_ENV), field=CAMPAIGN_SPEND_ENV)
     credit = _decimal(environment.get(REMAINING_CREDIT_ENV), field=REMAINING_CREDIT_ENV)
-    reserved_usd = _sum_reserved(checked, "reservation_max_usd")
-    reserved_cpu = _sum_reserved(checked, "reservation_cpu_hours")
-    reserved_gpu = _sum_reserved(checked, "reservation_gpu_hours")
+    current_revision = scope["authorization_commit_sha"]
+    reserved_usd = _sum_reserved(
+        checked,
+        "reservation_max_usd",
+        authorization_commit_sha=current_revision,
+    )
+    reserved_cpu = _sum_reserved(
+        checked,
+        "reservation_cpu_hours",
+        authorization_commit_sha=current_revision,
+    )
+    reserved_gpu = _sum_reserved(
+        checked,
+        "reservation_gpu_hours",
+        authorization_commit_sha=current_revision,
+    )
     cpu_used = _decimal(signed["cpu_hours_used_to_date"], field="cpu_hours_used_to_date")
     gpu_used = _decimal(signed["gpu_hours_used_to_date"], field="gpu_hours_used_to_date")
 

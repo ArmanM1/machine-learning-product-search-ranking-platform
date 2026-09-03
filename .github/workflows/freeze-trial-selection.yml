@@ -112,6 +112,8 @@ jobs:
           import os
           from decimal import Decimal, InvalidOperation
 
+          from scripts.validate_financial_reservation import validate_reservation_coverage
+
           def amount(name: str) -> Decimal:
               try:
                   value = Decimal(os.environ[name])
@@ -132,6 +134,13 @@ jobs:
               raise SystemExit("validation binding would breach the campaign envelope")
           if credit < allowance + reserve:
               raise SystemExit("applicable credit cannot cover S3 transfer and the reserve")
+          validate_reservation_coverage(
+              os.environ,
+              required_max_usd=allowance,
+              required_remaining_committed_usd=0,
+              required_cpu_hours=0,
+              required_gpu_hours=0,
+          )
           print("Validation-only binding guard passed with a conservative USD 0.25 allowance.")
           PY
       - name: Install the frozen artifact-contract environment
@@ -298,5 +307,6 @@ jobs:
           path: |
             .trial-selection/trial-selection.json
             .trial-selection/publication-receipt.json
+          include-hidden-files: true
           if-no-files-found: warn
           retention-days: 90

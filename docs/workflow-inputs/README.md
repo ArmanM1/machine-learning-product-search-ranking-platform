@@ -14,6 +14,20 @@ gh workflow run train.yml --ref main \
   -f authorization='SUBMIT ONE SAGEMAKER TRAINING JOB'
 ```
 
+To inspect only the fixed SageMaker training and Processing quota allowlist on `main`, use the
+same workflow without a financial reservation or AWS resource mutation:
+
+```bash
+gh workflow run train.yml --ref main \
+  -f dispatch_config='{}' \
+  -f authorization='READ LIVE SAGEMAKER QUOTAS' \
+  -f quota_probe_only=true
+```
+
+The probe ignores `dispatch_config`, assumes the existing `aws-training` OIDC role, and reports
+only each fixed quota code, fixed quota name, and applied numeric value. The normal training job
+and quota-probe job are mutually exclusive.
+
 For the two other workflows, use `release.example.json` or `bootstrap-baseline.example.json` and
 their exact authorization phrase. Release also requires `-f allow_heldout_eval=1` after the frozen
 inputs and access counter have been reviewed.

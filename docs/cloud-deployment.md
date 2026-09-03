@@ -379,12 +379,12 @@ public evidence.
 After OIDC assumption, `scripts/reserve_financial_capacity.py` creates
 `cost-control/ledger.json` with S3 `If-None-Match` or updates the observed version with ETag `If-Match`. IAM
 allows writes only to that object and only with the corresponding conditional header. A conflict rereads and
-retries; the exact workflow/input-digest/commit operation ID is idempotent. The ledger sums all prior maximum
-USD and CPU/GPU reservations against the campaign cap and reserve. Reservations are never released, which
-can reject later safe work but cannot understate the committed envelope. All cost-bearing workflows also use
-the shared `aws-financial-operations` concurrency group. State bootstrap cannot reserve before its bucket
-exists, so it retains its separate USD 0.10 guard and initializes the empty ledger immediately after state
-migration.
+retries; the exact workflow/input-digest/commit operation ID is idempotent. Every reservation remains in the
+append-only audit history. Maximum USD and CPU/GPU reservation totals are calculated only across records
+with the current authorization commit, while the signed authoritative spend and used-hour counters continue
+to constrain every revision. All cost-bearing workflows also use the shared `aws-financial-operations`
+concurrency group. State bootstrap cannot reserve before its bucket exists, so it retains its separate USD
+0.10 guard and initializes the empty ledger immediately after state migration.
 
 `train.yml`, `release.yml`, and `bootstrap-baseline.yml` keep the GitHub manual-dispatch surface
 below its ten-input limit by accepting one strictly validated JSON configuration. Copy the relevant

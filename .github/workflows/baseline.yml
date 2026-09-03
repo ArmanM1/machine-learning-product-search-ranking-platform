@@ -103,6 +103,8 @@ jobs:
           import os
           from decimal import Decimal, InvalidOperation
 
+          from scripts.validate_financial_reservation import validate_reservation_coverage
+
           def amount(name: str) -> Decimal:
               try:
                   value = Decimal(os.environ[name])
@@ -121,6 +123,13 @@ jobs:
               raise SystemExit("Baseline evidence I/O would breach the campaign envelope")
           if credit < allowance + amount("REQUIRED_CREDIT_RESERVE_USD"):
               raise SystemExit("Applicable credit cannot cover baseline I/O and reserve")
+          validate_reservation_coverage(
+              os.environ,
+              required_max_usd=allowance,
+              required_remaining_committed_usd=0,
+              required_cpu_hours=0,
+              required_gpu_hours=0,
+          )
           PY
       - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:

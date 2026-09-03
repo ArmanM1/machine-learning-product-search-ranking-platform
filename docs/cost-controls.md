@@ -67,11 +67,12 @@ After OIDC assumption and before the first ordinary AWS mutation, the workflow a
 signed capacity in `cost-control/ledger.json` in the private Terraform-state bucket. Creation uses
 `If-None-Match`; updates use the current S3 ETag with `If-Match`. The attached IAM policy permits only the
 exact ledger object and requires those conditional headers, while all cost-bearing workflows also share
-the `aws-financial-operations` concurrency group. The ledger sums prior reservations with the new maximum,
-remaining commitment, authoritative spent amount, credit reserve, and CPU/GPU hours. A conflicting stale
-write retries from the new ETag; an exact workflow/commit/input operation ID is idempotent. Reservations
-are deliberately never released, so uncertainty can reject later safe work but cannot make later work look
-cheaper. The one-time state-bucket bootstrap is the exception because the ledger cannot exist before its
+the `aws-financial-operations` concurrency group. The ledger preserves every reservation append-only for
+audit. Its reserved USD and CPU/GPU aggregates are scoped to the exact authorization commit, so every
+immutable revision has its own bounded campaign; the signed authoritative spend and already-used hour
+counters still apply to every new reservation. A conflicting stale write retries from the new ETag; an
+exact workflow/commit/input operation ID is idempotent. Reservations are deliberately never released or
+deleted. The one-time state-bucket bootstrap is the exception because the ledger cannot exist before its
 bucket; it uses its separate USD 0.10 guard and initializes the empty ledger immediately after state
 migration.
 

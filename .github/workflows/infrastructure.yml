@@ -178,6 +178,19 @@ jobs:
           if [[ "${OPERATION}" == "plan" ]]; then
             test "${TARGET_COMMIT}" = "${GITHUB_SHA}"
           fi
+      - name: Bind the signed reservation to the infrastructure allowance
+        shell: bash
+        run: |
+          set -euo pipefail
+          required_max_usd="0"
+          if [[ "${OPERATION}" == "apply" ]]; then
+            required_max_usd="3.00"
+          fi
+          python scripts/validate_financial_reservation.py \
+            --required-max-usd "${required_max_usd}" \
+            --required-remaining-committed-usd 0 \
+            --required-cpu-hours 0 \
+            --required-gpu-hours 0
       - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
