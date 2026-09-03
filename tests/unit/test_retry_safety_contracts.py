@@ -283,6 +283,15 @@ def test_state_bootstrap_is_serialized_and_initializes_the_cas_ledger() -> None:
     }
     job = payload["jobs"]["bootstrap"]
     assert job["environment"] == "aws-state-bootstrap"
+    for name, value in {
+        "FINANCIAL_RESERVATION_MAX_USD": "0.10",
+        "FINANCIAL_RESERVATION_REMAINING_COMMITTED_USD": "0",
+        "FINANCIAL_RESERVATION_CPU_HOURS": "0",
+        "FINANCIAL_RESERVATION_GPU_HOURS": "0",
+        "FINANCIAL_CPU_HOURS_USED_TO_DATE": "0",
+        "FINANCIAL_GPU_HOURS_USED_TO_DATE": "0",
+    }.items():
+        assert job["env"][name] == value
     steps = job["steps"]
     credential_steps = [
         step
