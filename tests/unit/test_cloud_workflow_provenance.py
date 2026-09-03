@@ -508,10 +508,19 @@ def test_deploy_static_and_compensation_paths_are_fail_closed() -> None:
     assert 'exit "${original_status}"' in activation
     assert "disable_first_publication" in deploy
     assert "first-publication-service-disabled.txt" in deploy
-    deployment_lambda_permissions = iam.split('sid    = "VersionedLambdaRelease"', 1)[1].split(
-        "statement {", 1
-    )[0]
+    production_policy = iam.split(
+        'data "aws_iam_policy_document" "github_production_terraform" {', 1
+    )[1].split('data "aws_iam_policy_document" "github_production" {', 1)[0]
+    deployment_lambda_permissions = next(
+        block
+        for block in production_policy.split("statement {")
+        if '"lambda:PublishVersion"' in block
+    )
     assert '"lambda:PutFunctionConcurrency"' in deployment_lambda_permissions
+    assert (
+        'resources = ["arn:${local.partition}:lambda:${var.aws_region}:${local.account_id}:function:${local.name}-api*"]'
+        in deployment_lambda_permissions
+    )
 
 
 def test_first_deploy_keeps_public_serving_private_until_candidate_gates_pass() -> None:

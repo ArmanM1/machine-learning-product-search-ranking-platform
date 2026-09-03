@@ -426,14 +426,12 @@ resource "aws_iam_role" "github_workflow" {
 # bypassing the compare-and-swap protocol even if its application code is modified.
 data "aws_iam_policy_document" "github_financial_ledger" {
   statement {
-    sid       = "ReadExactFinancialLedger"
     effect    = "Allow"
     actions   = ["s3:GetObject"]
     resources = ["arn:${local.partition}:s3:::${local.state_bucket_name}/cost-control/ledger.json"]
   }
 
   statement {
-    sid       = "CreateExactFinancialLedgerWithCas"
     effect    = "Allow"
     actions   = ["s3:PutObject"]
     resources = ["arn:${local.partition}:s3:::${local.state_bucket_name}/cost-control/ledger.json"]
@@ -446,7 +444,6 @@ data "aws_iam_policy_document" "github_financial_ledger" {
   }
 
   statement {
-    sid       = "UpdateExactFinancialLedgerWithCas"
     effect    = "Allow"
     actions   = ["s3:PutObject"]
     resources = ["arn:${local.partition}:s3:::${local.state_bucket_name}/cost-control/ledger.json"]
@@ -460,10 +457,11 @@ data "aws_iam_policy_document" "github_financial_ledger" {
 }
 
 locals {
-  github_financial_ledger_roles = merge(
-    { production = aws_iam_role.github_deployment.id },
-    { for environment, role in aws_iam_role.github_workflow : environment => role.id },
-  )
+  # Production receives this document through github_production so the role has one
+  # inline policy and its complete aggregate size is enforced by one precondition.
+  github_financial_ledger_roles = {
+    for environment, role in aws_iam_role.github_workflow : environment => role.id
+  }
 }
 
 resource "aws_iam_role_policy" "github_financial_ledger" {
@@ -476,27 +474,6 @@ resource "aws_iam_role_policy" "github_financial_ledger" {
 
 data "aws_iam_policy_document" "github_deployment" {
   statement {
-    sid       = "PriceAndIdentityRead"
-    effect    = "Allow"
-    actions   = ["pricing:GetProducts"]
-    resources = ["*"]
-  }
-
-  statement {
-    sid    = "LocateVersionedArtifactAndSiteBuckets"
-    effect = "Allow"
-    actions = [
-      "s3:GetBucketLocation",
-      "s3:GetBucketVersioning",
-    ]
-    resources = [
-      local.artifact_bucket_arn,
-      local.site_bucket_arn,
-    ]
-  }
-
-  statement {
-    sid    = "ListOnlyDeploymentPrefixes"
     effect = "Allow"
     actions = [
       "s3:ListBucket",
@@ -520,7 +497,6 @@ data "aws_iam_policy_document" "github_deployment" {
   }
 
   statement {
-    sid    = "ReadProjectArtifacts"
     effect = "Allow"
     actions = [
       "s3:GetObject",
@@ -534,7 +510,6 @@ data "aws_iam_policy_document" "github_deployment" {
   }
 
   statement {
-    sid    = "WriteControlledArtifactPrefixes"
     effect = "Allow"
     actions = [
       "s3:AbortMultipartUpload",
@@ -548,7 +523,6 @@ data "aws_iam_policy_document" "github_deployment" {
   }
 
   statement {
-    sid    = "ManageStaticReleaseObjects"
     effect = "Allow"
     actions = [
       "s3:AbortMultipartUpload",
@@ -565,21 +539,12 @@ data "aws_iam_policy_document" "github_deployment" {
   }
 
   statement {
-    sid       = "NeverDeleteImmutableStaticReleaseArchives"
     effect    = "Deny"
     actions   = ["s3:DeleteObject"]
     resources = ["${local.site_bucket_arn}/releases/*"]
   }
 
   statement {
-    sid       = "EcrLogin"
-    effect    = "Allow"
-    actions   = ["ecr:GetAuthorizationToken"]
-    resources = ["*"]
-  }
-
-  statement {
-    sid    = "ProjectImageManagement"
     effect = "Allow"
     actions = [
       "ecr:BatchCheckLayerAvailability",
@@ -596,7 +561,6 @@ data "aws_iam_policy_document" "github_deployment" {
   }
 
   statement {
-    sid     = "PassOnlyProjectWorkloadRoles"
     effect  = "Allow"
     actions = ["iam:PassRole"]
     resources = [
@@ -614,55 +578,9 @@ data "aws_iam_policy_document" "github_deployment" {
   }
 
   statement {
-    sid    = "VersionedLambdaRelease"
-    effect = "Allow"
-    actions = [
-      "lambda:GetAlias",
-      "lambda:GetFunction",
-      "lambda:GetFunctionConfiguration",
-      "lambda:GetProvisionedConcurrencyConfig",
-      "lambda:ListAliases",
-      "lambda:ListVersionsByFunction",
-      "lambda:PublishVersion",
-      "lambda:PutFunctionConcurrency",
-      "lambda:UpdateAlias",
-      "lambda:UpdateFunctionCode",
-      "lambda:UpdateFunctionConfiguration",
-    ]
-    resources = ["arn:${local.partition}:lambda:${var.aws_region}:${local.account_id}:function:${local.name}-api*"]
-  }
-
-  statement {
-    sid       = "InvalidateOnlyTaggedProjectDistribution"
-    effect    = "Allow"
-    actions   = ["cloudfront:CreateInvalidation", "cloudfront:GetDistribution"]
-    resources = ["arn:${local.partition}:cloudfront::${local.account_id}:distribution/*"]
-
-    condition {
-      test     = "StringEquals"
-      variable = "aws:ResourceTag/Project"
-      values   = [var.project_name]
-    }
-
-    condition {
-      test     = "StringEquals"
-      variable = "aws:ResourceTag/Environment"
-      values   = [var.environment]
-    }
-  }
-
-  statement {
-    sid       = "InvokeOnlyRegionalProjectCandidate"
     effect    = "Allow"
     actions   = ["execute-api:Invoke"]
     resources = ["arn:${local.partition}:execute-api:${var.aws_region}:${local.account_id}:*/*/*/*"]
-  }
-
-  statement {
-    sid       = "ReadProjectLogs"
-    effect    = "Allow"
-    actions   = ["logs:GetLogEvents", "logs:FilterLogEvents"]
-    resources = ["arn:${local.partition}:logs:${var.aws_region}:${local.account_id}:log-group:/aws/*/${local.name}-*:*"]
   }
 }
 
@@ -1637,17 +1555,12 @@ data "aws_iam_policy_document" "github_production_terraform" {
       "iam:ListRolePolicies",
       "iam:ListRoleTags",
     ]
-    resources = concat(
-      [
-        local.sagemaker_training_role_arn,
-        local.sagemaker_processing_role_arn,
-        local.lambda_role_arn,
-        local.budget_kill_switch_role_arn,
-        local.github_deployment_role_arn,
-      ],
-      values(local.github_workflow_role_arns),
-      [local.github_oidc_provider_arn],
-    )
+    # Read-only refresh access follows the exact environment role namespace already
+    # enforced by the external permissions boundary; identity mutation is absent.
+    resources = [
+      "arn:${local.partition}:iam::${local.account_id}:role/${local.name}-*",
+      local.github_oidc_provider_arn,
+    ]
   }
 
   statement {
@@ -1656,6 +1569,7 @@ data "aws_iam_policy_document" "github_production_terraform" {
       "s3:GetAccelerateConfiguration",
       "s3:GetBucketAcl",
       "s3:GetBucketCORS",
+      "s3:GetBucketLocation",
       "s3:GetBucketLogging",
       "s3:GetBucketObjectLockConfiguration",
       "s3:GetBucketOwnershipControls",
@@ -1663,6 +1577,7 @@ data "aws_iam_policy_document" "github_production_terraform" {
       "s3:GetBucketPublicAccessBlock",
       "s3:GetBucketRequestPayment",
       "s3:GetBucketTagging",
+      "s3:GetBucketVersioning",
       "s3:GetBucketWebsite",
       "s3:GetEncryptionConfiguration",
       "s3:GetLifecycleConfiguration",
@@ -1698,6 +1613,7 @@ data "aws_iam_policy_document" "github_production_terraform" {
       "cloudfront:ListTagsForResource",
       "cloudwatch:DescribeAlarms",
       "cloudwatch:ListTagsForResource",
+      "ecr:GetAuthorizationToken",
       "events:DescribeRule",
       "events:ListTagsForResource",
       "events:ListTargetsByRule",
@@ -1707,6 +1623,7 @@ data "aws_iam_policy_document" "github_production_terraform" {
       "logs:DescribeLogGroups",
       "logs:DescribeMetricFilters",
       "logs:ListTagsForResource",
+      "pricing:GetProducts",
       "sns:GetSubscriptionAttributes",
       "sns:GetTopicAttributes",
       "sns:ListSubscriptionsByTopic",
@@ -1777,7 +1694,7 @@ data "aws_iam_policy_document" "github_production_terraform" {
 
   statement {
     effect  = "Allow"
-    actions = ["cloudfront:PublishFunction", "cloudfront:TagResource", "cloudfront:UntagResource", "cloudfront:UpdateDistribution", "cloudfront:UpdateFunction"]
+    actions = ["cloudfront:CreateInvalidation", "cloudfront:PublishFunction", "cloudfront:TagResource", "cloudfront:UntagResource", "cloudfront:UpdateDistribution", "cloudfront:UpdateFunction"]
     resources = [
       "arn:${local.partition}:cloudfront::${local.account_id}:distribution/*",
       "arn:${local.partition}:cloudfront::${local.account_id}:function/${local.name}-spa-rewrite",
@@ -1806,14 +1723,24 @@ data "aws_iam_policy_document" "github_production_terraform" {
       "lambda:AddPermission",
       "lambda:CreateAlias",
       "lambda:CreateFunction",
+      "lambda:GetAlias",
+      "lambda:GetFunction",
+      "lambda:GetFunctionConfiguration",
+      "lambda:GetProvisionedConcurrencyConfig",
+      "lambda:ListAliases",
+      "lambda:ListVersionsByFunction",
+      "lambda:PublishVersion",
+      "lambda:PutFunctionConcurrency",
       "lambda:TagResource",
       "lambda:UntagResource",
+      "lambda:UpdateAlias",
+      "lambda:UpdateFunctionCode",
+      "lambda:UpdateFunctionConfiguration",
     ]
     resources = ["arn:${local.partition}:lambda:${var.aws_region}:${local.account_id}:function:${local.name}-api*"]
   }
 
   statement {
-    sid    = "ManageOnlyBudgetKillSwitchSubscription"
     effect = "Allow"
     actions = [
       "sns:GetSubscriptionAttributes",
@@ -1828,7 +1755,7 @@ data "aws_iam_policy_document" "github_production_terraform" {
 
   statement {
     effect    = "Allow"
-    actions   = ["logs:CreateLogGroup", "logs:PutMetricFilter", "logs:PutRetentionPolicy", "logs:TagResource", "logs:UntagResource"]
+    actions   = ["logs:CreateLogGroup", "logs:FilterLogEvents", "logs:GetLogEvents", "logs:PutMetricFilter", "logs:PutRetentionPolicy", "logs:TagResource", "logs:UntagResource"]
     resources = local.project_log_resource_arns
   }
 
@@ -1843,6 +1770,7 @@ data "aws_iam_policy_document" "github_production_terraform" {
 data "aws_iam_policy_document" "github_production" {
   source_policy_documents = [
     data.aws_iam_policy_document.github_deployment.minified_json,
+    data.aws_iam_policy_document.github_financial_ledger.minified_json,
     data.aws_iam_policy_document.github_production_terraform.minified_json,
   ]
 }

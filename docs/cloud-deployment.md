@@ -276,7 +276,11 @@ before a partial bucket can be stranded. The role has no bucket-delete permissio
    Recreate the seed for an intentional identity change and delete it again after the reviewed apply. The
    production role has the exact production state/refresh
    subset and bounded serving writes needed by `deploy.yml`, including the one public static-site bucket
-   policy; it has no artifact-bucket-policy or identity mutation.
+   policy; it has no artifact-bucket-policy or identity mutation. Production's conditional ledger,
+   reconciliation, and deployment grants are one rendered inline policy. A Terraform-native CI plan and a
+   resource precondition both enforce the complete minified document below AWS's 10,240-character role
+   quota. Its only compact namespace match is read-only refresh of the exact
+   `product-search-ranking-prod-*` roles already bounded by the external permissions ceiling.
 
    `infrastructure.yml` does not accept a public-serving input and therefore cannot create the public surface for the first time. After backend initialization it inspects state and passes `enable_public_serving=true` only when a public API, CloudFront distribution, production Lambda permission, or site policy already exists. This preserves an existing public deployment during later reviewed reconciliations without bypassing the deployment gates.
 

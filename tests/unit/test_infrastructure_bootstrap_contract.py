@@ -400,6 +400,14 @@ def test_infrastructure_and_production_roles_have_separate_non_escalating_author
     assert "length(data.aws_iam_policy_document.github_terraform.minified_json) <= 10240" in iam
     assert "policy = data.aws_iam_policy_document.github_production.minified_json" in iam
     assert "length(data.aws_iam_policy_document.github_production.minified_json) <= 10240" in iam
+    production_sources = iam.split('data "aws_iam_policy_document" "github_production" {', 1)[
+        1
+    ].split('resource "aws_iam_role_policy" "github_deployment" {', 1)[0]
+    assert (
+        "data.aws_iam_policy_document.github_financial_ledger.minified_json" in production_sources
+    )
+    ledger_roles = iam.split("github_financial_ledger_roles = {", 1)[1].split("\n  }", 1)[0]
+    assert "aws_iam_role.github_deployment" not in ledger_roles
 
     forbidden_identity_actions = {
         "iam:CreateRole",
@@ -412,6 +420,25 @@ def test_infrastructure_and_production_roles_have_separate_non_escalating_author
     }
     assert forbidden_identity_actions.isdisjoint(re.findall(r'"(iam:[A-Za-z]+)"', infrastructure))
     assert forbidden_identity_actions.isdisjoint(re.findall(r'"(iam:[A-Za-z]+)"', production))
+    production_identity_read = next(
+        block
+        for block in production.split("statement {")
+        if '"iam:GetOpenIDConnectProvider"' in block
+    )
+    assert (
+        '"arn:${local.partition}:iam::${local.account_id}:role/${local.name}-*"'
+        in production_identity_read
+    )
+    assert "local.github_oidc_provider_arn" in production_identity_read
+    assert set(re.findall(r'"(iam:[A-Za-z]+)"', production_identity_read)) == {
+        "iam:GetOpenIDConnectProvider",
+        "iam:GetRole",
+        "iam:GetRolePolicy",
+        "iam:ListAttachedRolePolicies",
+        "iam:ListInstanceProfilesForRole",
+        "iam:ListRolePolicies",
+        "iam:ListRoleTags",
+    }
     assert "s3:PutBucketPolicy" not in infrastructure
     assert "s3:DeleteBucketPolicy" not in infrastructure
     site_policy = next(
@@ -451,10 +478,14 @@ def test_infrastructure_and_production_roles_have_separate_non_escalating_author
     ):
         assert f'"{destructive}"' not in infrastructure
 
-    versioned = deployment.split('sid    = "VersionedLambdaRelease"', 1)[1].split("statement {", 1)[
-        0
-    ]
+    versioned = next(
+        block for block in production.split("statement {") if '"lambda:PublishVersion"' in block
+    )
     assert '"lambda:PutFunctionConcurrency"' in versioned
+    assert (
+        'resources = ["arn:${local.partition}:lambda:${var.aws_region}:${local.account_id}:function:${local.name}-api*"]'
+        in versioned
+    )
     assert "local.artifact_bucket_arn" not in site_policy
 
     role_blocks = re.findall(r'resource "aws_iam_role" "[^"]+" \{(.*?)\n\}', iam, re.DOTALL)
@@ -463,6 +494,20 @@ def test_infrastructure_and_production_roles_have_separate_non_escalating_author
         "permissions_boundary = local.project_permissions_boundary_arn" in block
         for block in role_blocks
     )
+
+
+def test_rendered_production_policy_quota_is_enforced_in_terraform_ci() -> None:
+    policy_test = (ROOT / "infra/terraform/environments/prod/policy_size.tftest.hcl").read_text(
+        encoding="utf-8"
+    )
+    pull_request = (ROOT / ".github/workflows/pull-request.yml").read_text(encoding="utf-8")
+    outputs = (ROOT / "infra/terraform/modules/platform/outputs.tf").read_text(encoding="utf-8")
+
+    assert "terraform test" in pull_request
+    assert "github_production_inline_policy_character_count" in outputs
+    assert "output.github_production_inline_policy_character_count <= 10000" in policy_test
+    assert "module.platform.data.aws_caller_identity.current" in policy_test
+    assert 'account_id = "123456789012"' in policy_test
 
 
 def test_heldout_release_role_can_read_only_the_required_live_quota() -> None:

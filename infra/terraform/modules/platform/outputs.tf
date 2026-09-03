@@ -30,6 +30,11 @@ output "github_deployment_role_arn" {
   value       = aws_iam_role.github_deployment.arn
 }
 
+output "github_production_inline_policy_character_count" {
+  description = "Rendered aggregate character count for the production role single inline policy."
+  value       = length(data.aws_iam_policy_document.github_production.minified_json)
+}
+
 output "github_workflow_role_arns" {
   description = "One repository-and-environment-bound GitHub OIDC role ARN per protected workflow environment."
   value = merge(
