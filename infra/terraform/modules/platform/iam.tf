@@ -1214,6 +1214,7 @@ data "aws_iam_policy_document" "github_terraform" {
       "s3:GetBucketWebsite",
       "s3:GetEncryptionConfiguration",
       "s3:GetReplicationConfiguration",
+      "s3:ListBucket",
       "s3:PutLifecycleConfiguration",
       "s3:PutBucketOwnershipControls",
       "s3:PutBucketPublicAccessBlock",
