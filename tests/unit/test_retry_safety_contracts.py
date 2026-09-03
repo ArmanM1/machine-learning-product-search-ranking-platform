@@ -374,8 +374,8 @@ def test_oidc_subjects_and_roles_are_bound_to_exact_workflow_environments() -> N
     assert '${local.github_environment_workflow_files["production"]}@refs/heads/main' in iam
 
     deployment_guide = (ROOT / "docs" / "cloud-deployment.md").read_text(encoding="utf-8")
-    assert 'include_claim_keys = @("environment", "workflow_ref")' in deployment_guide
-    assert '"environment,workflow_ref"' in deployment_guide
+    assert 'include_claim_keys = @("repo", "environment", "workflow_ref")' in deployment_guide
+    assert '"repo,environment,workflow_ref"' in deployment_guide
     assert "job_workflow_ref" not in deployment_guide
 
     for policy, environment in (

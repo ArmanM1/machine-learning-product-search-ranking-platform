@@ -312,6 +312,16 @@ def test_platform_plan_digest_binds_reviewed_commit_and_locked_providers() -> No
     assert 'test "${plan_hash}" = "${APPROVED_PLAN_SHA256}"' in source
 
 
+def test_terraform_lockfiles_cover_linux_and_windows_runners() -> None:
+    for environment in ("bootstrap", "dev", "prod"):
+        lockfile = (
+            ROOT / "infra" / "terraform" / "environments" / environment / ".terraform.lock.hcl"
+        ).read_text(encoding="utf-8")
+        provider_blocks = re.findall(r'provider "[^"]+" \{(.*?)\n\}', lockfile, re.DOTALL)
+        assert provider_blocks
+        assert all(block.count('"h1:') >= 2 for block in provider_blocks)
+
+
 def test_platform_workflow_attests_seed_and_boundary_before_any_plan() -> None:
     source = (ROOT / ".github/workflows/infrastructure.yml").read_text(encoding="utf-8")
     attestation = source.index("Attest the exact deployment identity and first-apply trust root")

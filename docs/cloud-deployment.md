@@ -137,7 +137,8 @@ Use this fail-closed sequence while the verified human session remains available
    with the generated complete state policy. Old-format GitHub tokens will now be rejected; this deliberate
    pause prevents a partially migrated workflow from receiving AWS authority.
 3. Set the repository OIDC customization to immutable subjects with claim keys in exactly this order:
-   `environment`, then `workflow_ref`. Read the setting back and stop if any value differs.
+   `repo`, `environment`, then `workflow_ref`. The explicit `repo` key is required to place the immutable
+   owner/repository-ID segment in the customized subject. Read the setting back and stop if any value differs.
 
 ```powershell
 $oldInlinePolicies = @(
@@ -157,13 +158,13 @@ aws iam put-role-policy `
 $oidcTemplate = @{
   use_default = $false
   use_immutable_subject = $true
-  include_claim_keys = @("environment", "workflow_ref")
+  include_claim_keys = @("repo", "environment", "workflow_ref")
 } | ConvertTo-Json -Compress
 $oidcTemplate | gh api --method PUT "repos/$repository/actions/oidc/customization/sub" --input -
 $oidcReadback = gh api "repos/$repository/actions/oidc/customization/sub" | ConvertFrom-Json
 if ($oidcReadback.use_default -ne $false -or
     $oidcReadback.use_immutable_subject -ne $true -or
-    (($oidcReadback.include_claim_keys -join ",") -ne "environment,workflow_ref")) {
+    (($oidcReadback.include_claim_keys -join ",") -ne "repo,environment,workflow_ref")) {
   throw "Repository OIDC subject customization does not match the required template"
 }
 ```
