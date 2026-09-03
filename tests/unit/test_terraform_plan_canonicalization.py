@@ -11,6 +11,7 @@ from scripts.canonicalize_terraform_plan import (
     CALLER_IDENTITY_ADDRESS,
     VOLATILE_STS_SESSION_SENTINEL,
     TerraformPlanNormalizationError,
+    canonicalize_terraform_plan,
     normalize_volatile_caller_identity,
 )
 
@@ -96,7 +97,7 @@ def _plan(
 
 
 def _workflow_digest(payload: dict[str, Any]) -> str:
-    normalized = normalize_volatile_caller_identity(payload)
+    normalized = canonicalize_terraform_plan(payload)
     normalized.pop("timestamp", None)
     canonical = json.dumps(normalized, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(canonical).hexdigest()
@@ -240,3 +241,87 @@ def test_missing_caller_value_field_fails_closed(missing_field: str) -> None:
         match="missing required fields",
     ):
         normalize_volatile_caller_identity(payload)
+
+
+def test_unordered_relevant_attributes_have_the_same_digest() -> None:
+    first = _plan(session="same")
+    second = copy.deepcopy(first)
+    first["relevant_attributes"] = [
+        {"resource": "module.platform.data.aws_partition.current", "attribute": ["id"]},
+        {
+            "resource": CALLER_IDENTITY_ADDRESS,
+            "attribute": ["account_id"],
+        },
+    ]
+    second["relevant_attributes"] = list(reversed(first["relevant_attributes"]))
+
+    assert _workflow_digest(first) == _workflow_digest(second)
+
+
+@pytest.mark.parametrize(
+    "changed_entry",
+    [
+        {"resource": "module.platform.data.aws_partition.other", "attribute": ["id"]},
+        {"resource": "module.platform.data.aws_partition.current", "attribute": ["partition"]},
+    ],
+)
+def test_relevant_attribute_members_and_paths_remain_hash_bound(
+    changed_entry: dict[str, Any],
+) -> None:
+    original = _plan(session="same")
+    changed = copy.deepcopy(original)
+    original["relevant_attributes"] = [
+        {"resource": "module.platform.data.aws_partition.current", "attribute": ["id"]}
+    ]
+    changed["relevant_attributes"] = [changed_entry]
+
+    assert _workflow_digest(original) != _workflow_digest(changed)
+
+
+def test_relevant_attribute_path_order_and_duplicates_remain_hash_bound() -> None:
+    original = _plan(session="same")
+    reordered_path = copy.deepcopy(original)
+    duplicate = copy.deepcopy(original)
+    entry = {
+        "resource": "module.platform.aws_iam_role_policy.workflow",
+        "attribute": ["policy", 0, "statement"],
+    }
+    original["relevant_attributes"] = [entry]
+    reordered_path["relevant_attributes"] = [{**entry, "attribute": ["statement", 0, "policy"]}]
+    duplicate["relevant_attributes"] = [entry, copy.deepcopy(entry)]
+
+    assert _workflow_digest(original) != _workflow_digest(reordered_path)
+    assert _workflow_digest(original) != _workflow_digest(duplicate)
+
+
+def test_managed_resource_order_is_not_broadly_normalized() -> None:
+    original = _plan(session="same")
+    reordered = copy.deepcopy(original)
+    reordered_resources = reordered["planned_values"]["root_module"]["child_modules"][0][
+        "resources"
+    ]
+    reordered_resources.reverse()
+
+    assert _workflow_digest(original) != _workflow_digest(reordered)
+
+
+@pytest.mark.parametrize(
+    "relevant_attributes",
+    [
+        None,
+        {},
+        ["not-an-object"],
+        [{"resource": 1, "attribute": ["id"]}],
+        [{"resource": CALLER_IDENTITY_ADDRESS, "attribute": "account_id"}],
+        [{"resource": "", "attribute": ["account_id"]}],
+        [{"resource": CALLER_IDENTITY_ADDRESS, "attribute": [True]}],
+        [{"resource": CALLER_IDENTITY_ADDRESS, "attribute": [{}]}],
+        [{"resource": CALLER_IDENTITY_ADDRESS, "attribute": [], "extra": "field"}],
+    ],
+)
+def test_malformed_relevant_attributes_fail_closed(relevant_attributes: object) -> None:
+    payload = _plan(session="same")
+    payload["relevant_attributes"] = relevant_attributes
+
+    with pytest.raises(TerraformPlanNormalizationError, match="relevant_attributes"):
+        canonicalize_terraform_plan(payload)

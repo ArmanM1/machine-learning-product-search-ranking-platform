@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import re
 from typing import Any
 
@@ -20,6 +21,52 @@ _CALLER_VALUE_FIELDS = frozenset({"account_id", "arn", "id", "user_id"})
 
 class TerraformPlanNormalizationError(ValueError):
     """The caller-identity record is not the exact expected Terraform shape."""
+
+
+def _canonical_json_sort_key(value: object) -> str:
+    return json.dumps(
+        value,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+
+def _normalize_relevant_attributes(payload: dict[str, Any]) -> None:
+    if "relevant_attributes" not in payload:
+        return
+    relevant_attributes = payload["relevant_attributes"]
+    if not isinstance(relevant_attributes, list):
+        raise TerraformPlanNormalizationError("Terraform relevant_attributes must be a list")
+    for item in relevant_attributes:
+        if not isinstance(item, dict):
+            raise TerraformPlanNormalizationError(
+                "Terraform relevant_attributes entries must be objects"
+            )
+        if set(item) != {"resource", "attribute"}:
+            raise TerraformPlanNormalizationError(
+                "Terraform relevant_attributes entries must contain exactly resource and attribute"
+            )
+        resource = item["resource"]
+        attribute = item["attribute"]
+        if (
+            not isinstance(resource, str)
+            or not resource
+            or not isinstance(attribute, list)
+            or any(
+                isinstance(segment, bool) or not isinstance(segment, (str, int))
+                for segment in attribute
+            )
+        ):
+            raise TerraformPlanNormalizationError(
+                "Terraform relevant_attributes entries must contain a nonempty resource string "
+                "and an ordered string/integer attribute path"
+            )
+    payload["relevant_attributes"] = sorted(
+        relevant_attributes,
+        key=_canonical_json_sort_key,
+    )
 
 
 def _normalize_assumed_role_arn(value: object, *, account_id: str) -> tuple[str, str]:
@@ -154,4 +201,12 @@ def normalize_volatile_caller_identity(payload: dict[str, Any]) -> dict[str, Any
         raise TerraformPlanNormalizationError(
             "Terraform plan contains no concrete caller identity values"
         )
+    return normalized
+
+
+def canonicalize_terraform_plan(payload: dict[str, Any]) -> dict[str, Any]:
+    """Normalize only documented volatile or unordered Terraform plan metadata."""
+
+    normalized = normalize_volatile_caller_identity(payload)
+    _normalize_relevant_attributes(normalized)
     return normalized

@@ -308,10 +308,45 @@ def test_platform_plan_digest_binds_reviewed_commit_and_locked_providers() -> No
     assert '"terraform_lock_sha256": os.environ["TF_LOCKFILE_SHA256"]' in source
     assert '"provider_selections": version.get("provider_selections", {})' in source
     assert "PYTHONPATH=../../../.. python - <<'PY'" in source
-    assert "normalize_volatile_caller_identity" in source
+    assert "canonicalize_terraform_plan" in source
     assert '"deployment_identity_mode": os.environ["DEPLOYMENT_IDENTITY_MODE"]' in source
     assert '"boundary_policy_sha256": os.environ["BOUNDARY_POLICY_SHA256"]' in source
     assert 'test "${plan_hash}" = "${APPROVED_PLAN_SHA256}"' in source
+
+
+def test_platform_plan_mismatch_artifacts_are_structural_and_redacted_only() -> None:
+    source = (ROOT / ".github/workflows/infrastructure.yml").read_text(encoding="utf-8")
+    workflow = yaml.load(source, Loader=yaml.BaseLoader)
+    upload = next(
+        step
+        for step in workflow["jobs"]["terraform"]["steps"]
+        if str(step.get("uses", "")).startswith("actions/upload-artifact@")
+    )
+    uploaded_paths = set(upload["with"]["path"].splitlines())
+
+    assert upload["if"] == "always()"
+    assert upload["with"]["if-no-files-found"] == "ignore"
+    assert uploaded_paths == {
+        "infra/terraform/environments/${{ inputs.environment }}/reviewed-plan.txt",
+        "infra/terraform/environments/${{ inputs.environment }}/reviewed-plan.sha256",
+        ("infra/terraform/environments/${{ inputs.environment }}/reviewed-plan.diagnostics.json"),
+    }
+    assert not any(
+        forbidden in path
+        for path in uploaded_paths
+        for forbidden in ("private", "canonical", "tfplan")
+    )
+    diagnostics = source[
+        source.index("          diagnostics = {") : source.index(
+            '          Path("reviewed-plan.canonical.json")'
+        )
+    ]
+    assert "sha256" not in diagnostics
+    assert '"variables"' not in diagnostics
+    assert '"planned_values"' not in diagnostics
+    assert '"prior_state"' not in diagnostics
+    assert "plan_step_succeeded=false" in source
+    assert "rm -f reviewed.tfplan" in source
 
 
 def test_terraform_lockfiles_cover_linux_and_windows_runners() -> None:
