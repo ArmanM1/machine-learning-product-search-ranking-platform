@@ -754,7 +754,7 @@ def build_trust(
     provider = f"arn:aws:iam::{account_id}:oidc-provider/token.actions.githubusercontent.com"
     immutable_subject = (
         f"repo:{owner}@{owner_id}/{REPOSITORY_NAME}@{repository_id}:"
-        f"environment:{github_environment}:job_workflow_ref:{owner}/{REPOSITORY_NAME}/"
+        f"environment:{github_environment}:workflow_ref:{owner}/{REPOSITORY_NAME}/"
         f".github/workflows/{workflow_file}@refs/heads/main"
     )
     document = {

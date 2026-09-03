@@ -129,13 +129,15 @@ either trust document at the other workflow, and do not attempt to keep a permis
 Use this fail-closed sequence while the verified human session remains available:
 
 1. Create and protect the `aws-state-bootstrap` GitHub environment. Set its
-   `AWS_BOOTSTRAP_ROLE_ARN` variable to the existing state role, its state-bucket variable, and its protected
-   state-bootstrap financial snapshot secrets. Do not reuse the `aws-infrastructure` environment.
+   `AWS_BOOTSTRAP_ROLE_ARN` variable to the existing state role, set the immutable repository-ID variables,
+   and add its protected state-bootstrap financial snapshot secrets. The workflow derives and verifies the
+   deterministic state-bucket name after assuming the role; do not add a state-bucket variable here or reuse
+   the `aws-infrastructure` environment.
 2. Replace the existing state role's trust with `state-bootstrap-trust.json` and replace its inline policy
    with the generated complete state policy. Old-format GitHub tokens will now be rejected; this deliberate
    pause prevents a partially migrated workflow from receiving AWS authority.
 3. Set the repository OIDC customization to immutable subjects with claim keys in exactly this order:
-   `environment`, then `job_workflow_ref`. Read the setting back and stop if any value differs.
+   `environment`, then `workflow_ref`. Read the setting back and stop if any value differs.
 
 ```powershell
 $oldInlinePolicies = @(
@@ -155,13 +157,13 @@ aws iam put-role-policy `
 $oidcTemplate = @{
   use_default = $false
   use_immutable_subject = $true
-  include_claim_keys = @("environment", "job_workflow_ref")
+  include_claim_keys = @("environment", "workflow_ref")
 } | ConvertTo-Json -Compress
 $oidcTemplate | gh api --method PUT "repos/$repository/actions/oidc/customization/sub" --input -
 $oidcReadback = gh api "repos/$repository/actions/oidc/customization/sub" | ConvertFrom-Json
 if ($oidcReadback.use_default -ne $false -or
     $oidcReadback.use_immutable_subject -ne $true -or
-    (($oidcReadback.include_claim_keys -join ",") -ne "environment,job_workflow_ref")) {
+    (($oidcReadback.include_claim_keys -join ",") -ne "environment,workflow_ref")) {
   throw "Repository OIDC subject customization does not match the required template"
 }
 ```
