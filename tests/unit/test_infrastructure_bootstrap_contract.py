@@ -487,6 +487,15 @@ def test_infrastructure_and_production_roles_have_separate_non_escalating_author
     }
     assert "s3:PutBucketPolicy" not in infrastructure
     assert "s3:DeleteBucketPolicy" not in infrastructure
+    project_bucket_reconciliation = next(
+        block for block in infrastructure.split("statement {") if '"s3:CreateBucket"' in block
+    )
+    assert '"s3:ListBucket"' in project_bucket_reconciliation
+    assert "local.artifact_bucket_arn" in project_bucket_reconciliation
+    assert "local.site_bucket_arn" in project_bucket_reconciliation
+    assert "local.state_bucket_name" not in project_bucket_reconciliation
+    assert '"s3:GetObject"' not in project_bucket_reconciliation
+    assert '"*"' not in project_bucket_reconciliation
     site_policy = next(
         block
         for block in production.split("statement {")
