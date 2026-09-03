@@ -22,6 +22,10 @@ output "github_deployment_role_arn" {
   value = module.platform.github_deployment_role_arn
 }
 
+output "github_production_inline_policy_character_count" {
+  value = module.platform.github_production_inline_policy_character_count
+}
+
 output "github_workflow_role_arns" {
   value = module.platform.github_workflow_role_arns
 }

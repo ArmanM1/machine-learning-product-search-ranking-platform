@@ -67,7 +67,11 @@ inline-policy, or boundary mutation and explicitly denies artifact-bucket-policy
 infrastructure role therefore reconciles services only. The production role has only production state/refresh
 and bounded serving authority; its one bucket-policy grant targets the intentionally public static-site bucket,
 while it has no artifact-bucket-policy access. Neither role can use a mutable proxy role or bucket policy to
-reach held-out/private artifacts. The
+reach held-out/private artifacts. Its serving, reconciliation, and conditional financial-ledger statements
+are rendered into one inline policy whose complete minified document is tested and preconditioned below
+AWS's 10,240-character role quota. Read-only identity refresh uses only the exact
+product-search-ranking-prod-* role namespace plus the exact GitHub OIDC provider; the external boundary
+enforces the same namespace and identity mutation remains absent. The
 exact temporary environment seed can define only the deterministic project roles and base services; it has
 no project-bucket-policy mutation at all. It may read only its own definition and the selected boundary for
 live attestation, cannot modify either trust root, and is deleted immediately after handoff. The workflow binds
