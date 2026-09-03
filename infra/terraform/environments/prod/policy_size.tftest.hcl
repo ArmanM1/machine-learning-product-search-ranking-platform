@@ -46,4 +46,9 @@ run "production_inline_policy_fits_aws_role_quota" {
     condition     = output.github_production_inline_policy_character_count <= 10000
     error_message = "The rendered production inline policy exceeds the 10,000-character engineering budget below AWS's 10,240-character role quota."
   }
+
+  assert {
+    condition     = output.github_infrastructure_inline_policy_character_count <= 10000
+    error_message = "The rendered infrastructure inline policy exceeds the 10,000-character engineering budget below AWS's 10,240-character role quota."
+  }
 }

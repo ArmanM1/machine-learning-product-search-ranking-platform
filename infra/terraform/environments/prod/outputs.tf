@@ -26,6 +26,10 @@ output "github_production_inline_policy_character_count" {
   value = module.platform.github_production_inline_policy_character_count
 }
 
+output "github_infrastructure_inline_policy_character_count" {
+  value = module.platform.github_infrastructure_inline_policy_character_count
+}
+
 output "github_workflow_role_arns" {
   value = module.platform.github_workflow_role_arns
 }

@@ -434,7 +434,15 @@ def test_infrastructure_and_production_roles_have_separate_non_escalating_author
 
     assert 'role   = aws_iam_role.github_workflow["aws-infrastructure"].id' in iam
     assert "policy = data.aws_iam_policy_document.github_terraform.minified_json" in iam
-    assert "length(data.aws_iam_policy_document.github_terraform.minified_json) <= 10240" in iam
+    assert "length(data.aws_iam_policy_document.github_terraform.minified_json) <= 10000" in iam
+    infrastructure_sources = iam.split('data "aws_iam_policy_document" "github_terraform" {', 1)[
+        1
+    ].split('resource "aws_iam_role_policy" "github_terraform" {', 1)[0]
+    assert (
+        "data.aws_iam_policy_document.github_financial_ledger.minified_json"
+        in infrastructure_sources
+    )
+    assert "sid" not in infrastructure_sources
     assert "policy = data.aws_iam_policy_document.github_production.minified_json" in iam
     assert "length(data.aws_iam_policy_document.github_production.minified_json) <= 10240" in iam
     production_sources = iam.split('data "aws_iam_policy_document" "github_production" {', 1)[
@@ -445,6 +453,7 @@ def test_infrastructure_and_production_roles_have_separate_non_escalating_author
     )
     ledger_roles = iam.split("github_financial_ledger_roles = {", 1)[1].split("\n  }", 1)[0]
     assert "aws_iam_role.github_deployment" not in ledger_roles
+    assert 'if environment != "aws-infrastructure"' in ledger_roles
 
     forbidden_identity_actions = {
         "iam:CreateRole",
@@ -533,7 +542,7 @@ def test_infrastructure_and_production_roles_have_separate_non_escalating_author
     )
 
 
-def test_rendered_production_policy_quota_is_enforced_in_terraform_ci() -> None:
+def test_rendered_quota_sensitive_policy_sizes_are_enforced_in_terraform_ci() -> None:
     policy_test = (ROOT / "infra/terraform/environments/prod/policy_size.tftest.hcl").read_text(
         encoding="utf-8"
     )
@@ -542,7 +551,9 @@ def test_rendered_production_policy_quota_is_enforced_in_terraform_ci() -> None:
 
     assert "terraform test" in pull_request
     assert "github_production_inline_policy_character_count" in outputs
+    assert "github_infrastructure_inline_policy_character_count" in outputs
     assert "output.github_production_inline_policy_character_count <= 10000" in policy_test
+    assert "output.github_infrastructure_inline_policy_character_count <= 10000" in policy_test
     assert "module.platform.data.aws_caller_identity.current" in policy_test
     assert 'account_id = "123456789012"' in policy_test
 
