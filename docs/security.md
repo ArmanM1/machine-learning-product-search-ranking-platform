@@ -48,7 +48,7 @@ Writes its pre-created CloudWatch log group and reads `s3://<artifact-bucket>/pu
 ### GitHub workflow roles
 
 Each protected environment has a separate role and trust policy bound to the immutable subject
-`repo:<owner>@<owner-id>/<repository>@<repository-id>:environment:<name>:workflow_ref:<repository>/.github/workflows/<file>@refs/heads/main`, exact repository/ref claims, and the `sts.amazonaws.com` audience. The repository OIDC customization must enable immutable subjects with `environment` and then `workflow_ref`; migration and readback are required before first use. `workflow_ref` is present for every workflow run, including these top-level workflows. The state-bootstrap and platform-seed trusts are separate generated documents for `bootstrap-infrastructure.yml` and `infrastructure.yml` respectively.
+`repo:<owner>@<owner-id>/<repository>@<repository-id>:environment:<name>:workflow_ref:<repository>/.github/workflows/<file>@refs/heads/main`, exact repository/ref claims, and the `sts.amazonaws.com` audience. The repository OIDC customization must enable immutable subjects with `repo`, `environment`, and then `workflow_ref`; the explicit `repo` key creates the immutable repository segment in a customized subject. Migration and readback are required before first use. `workflow_ref` is present for every workflow run, including these top-level workflows. The state-bootstrap and platform-seed trusts are separate generated documents for `bootstrap-infrastructure.yml` and `infrastructure.yml` respectively.
 
 The data role can create only content-addressed prepared data and sanitized handoff evidence; it cannot submit a job or change a release. The image role can push only project images. The dedicated baseline role cannot submit SageMaker jobs. The training role can stage only its four named train/validation inputs and submit only training jobs. The trial-selection role can freeze only validation-selection evidence. Baseline-release can create the initial validation-only bundle/pointer; heldout-release alone can submit Processing jobs and advance counted release objects. Production can deploy, while production-benchmark has only its bounded read/request/evidence authority and cannot deploy or roll back. Infrastructure reconciles project Terraform resources. No baseline or benchmark authority is shared with training or production merely for convenience.
 
@@ -103,7 +103,7 @@ The financial observation time, spend, credit, reservation maximum/commitment, C
 
 - [x] Owner MFA decision recorded. MFA was declined as an accepted exception; strict PRD conformance remains unmet, and zero root access keys were observed.
 - [ ] `aws sts get-caller-identity` succeeds via temporary credentials; public evidence is redacted.
-- [ ] Repository OIDC customization readback is immutable and includes `environment`, then `workflow_ref`; every AWS trust matches one exact owner/repository identity, protected environment, workflow file, and `main`.
+- [ ] Repository OIDC customization readback is immutable and includes `repo`, `environment`, then `workflow_ref`; every AWS trust matches one exact owner/repository identity, protected environment, workflow file, and `main`.
 - [ ] A fork pull request cannot obtain an AWS token.
 - [ ] S3 public-access blocks and bucket policies are inspected after apply.
 - [ ] Lambda effective policy contains no raw-data access.
