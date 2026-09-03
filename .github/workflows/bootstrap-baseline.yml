@@ -505,5 +505,6 @@ jobs:
             baseline-bootstrap-summary.json
             baseline-promotion-pointer.json
             baseline-publication-evidence.json
+          include-hidden-files: true
           if-no-files-found: warn
           retention-days: 90

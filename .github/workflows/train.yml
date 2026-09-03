@@ -8,9 +8,14 @@ on:
         required: true
         type: string
       authorization:
-        description: Type SUBMIT ONE SAGEMAKER TRAINING JOB after reviewing the estimate
+        description: Type the exact authorization phrase for training or the read-only quota probe
         required: true
         type: string
+      quota_probe_only:
+        description: Read the fixed live SageMaker quota allowlist without submitting a job
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -29,7 +34,7 @@ env:
 
 jobs:
   submit:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && inputs.quota_probe_only == false
     runs-on: ubuntu-latest
     timeout-minutes: 360
     environment: aws-training
@@ -1252,3 +1257,74 @@ jobs:
             training-job-evidence.json
           if-no-files-found: warn
           retention-days: 30
+
+  quota-probe:
+    if: github.ref == 'refs/heads/main' && inputs.quota_probe_only == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: aws-training
+    steps:
+      - name: Validate explicit read-only quota authorization
+        env:
+          AUTHORIZATION: ${{ inputs.authorization }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${AUTHORIZATION}" = "READ LIVE SAGEMAKER QUOTAS"
+      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-training-quota-probe-${{ github.run_id }}
+          mask-aws-account-id: true
+      - name: Report the fixed live SageMaker quota allowlist
+        shell: bash
+        run: |
+          set -euo pipefail
+          quota_codes=(
+            L-944F78BB
+            L-4CEE6BA6
+            L-0307F515
+            L-29688C85
+            L-4A823FAB
+            L-0CE343FE
+            L-DABA7ED5
+          )
+          quota_names=(
+            "ml.g4dn.xlarge for spot training job usage"
+            "ml.m5.xlarge for spot training job usage"
+            "ml.m5.xlarge for processing job usage"
+            "ml.m5.large for spot training job usage"
+            "ml.m5.2xlarge for spot training job usage"
+            "ml.t3.medium for processing job usage"
+            "ml.t3.xlarge for processing job usage"
+          )
+          error_file="$(mktemp)"
+          trap 'rm -f -- "${error_file}"' EXIT
+          {
+            echo "### Live SageMaker quota probe"
+            echo
+            echo "| Quota code | Fixed quota name | Applied value |"
+            echo "|---|---|---:|"
+          } >> "${GITHUB_STEP_SUMMARY}"
+          for index in "${!quota_codes[@]}"; do
+            quota_code="${quota_codes[${index}]}"
+            quota_name="${quota_names[${index}]}"
+            if ! applied_value="$(aws service-quotas get-service-quota \
+              --region "${AWS_REGION}" \
+              --service-code sagemaker \
+              --quota-code "${quota_code}" \
+              --query 'Quota.Value' \
+              --output text 2>"${error_file}")"; then
+              echo "A fixed SageMaker quota lookup failed." >&2
+              exit 1
+            fi
+            [[ "${applied_value}" =~ ^[0-9]+([.][0-9]+)?$ ]] || {
+              echo "A fixed SageMaker quota returned a non-numeric applied value." >&2
+              exit 1
+            }
+            printf '%s | %s | %s\n' "${quota_code}" "${quota_name}" "${applied_value}"
+            printf '| `%s` | %s | `%s` |\n' \
+              "${quota_code}" "${quota_name}" "${applied_value}" \
+              >> "${GITHUB_STEP_SUMMARY}"
+          done

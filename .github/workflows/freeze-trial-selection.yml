@@ -307,5 +307,6 @@ jobs:
           path: |
             .trial-selection/trial-selection.json
             .trial-selection/publication-receipt.json
+          include-hidden-files: true
           if-no-files-found: warn
           retention-days: 90

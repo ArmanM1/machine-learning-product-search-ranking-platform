@@ -233,8 +233,9 @@ jobs:
             printf '%s' "${decision_pointer_etag}" > promotion-decision-etag.txt
             printf '%s' "${decision_pointer_version}" > promotion-decision-version.txt
             # A rerun of an already activated release is a safe no-op at the
-            # pointer boundary. A first activation must still be based on the
-            # exact version captured by the release decision.
+            # pointer boundary. A first activation must still be based on the exact
+            # prior pointer bytes captured by the release decision; a rollback may
+            # have restored those bytes under a newer VersionId.
             if cmp --silent promotion-pointer.json previous-promotion-pointer.json; then
               pointer_requires_advance=0
             else
@@ -242,12 +243,34 @@ jobs:
               jq -e \
                 --arg release "$(jq -er '.release_id' previous-promotion-pointer.json)" \
                 --arg model "$(jq -er '.model_id' previous-promotion-pointer.json)" \
-                --arg version "${previous_pointer_version}" \
                 '.evidence_mode == "verified" and
                  .previous.release_id == $release and
                  .previous.model_id == $model and
-                 .previous.pointer_version_id == $version' \
+                 (.previous.pointer_version_id | type == "string" and length > 0)' \
                 promotion-pointer.json >/dev/null
+              decision_previous_pointer_version="$(
+                jq -er '.previous.pointer_version_id' promotion-pointer.json
+              )"
+              ((${#decision_previous_pointer_version} >= 1 &&
+                ${#decision_previous_pointer_version} <= 1024))
+              [[ "${decision_previous_pointer_version}" =~ ^[A-Za-z0-9._=+/-]+$ ]]
+              if [[ "${decision_previous_pointer_version}" != "${previous_pointer_version}" ]]; then
+                aws s3api get-object \
+                  --bucket "${ARTIFACT_BUCKET}" \
+                  --key "${current_pointer_key}" \
+                  --version-id "${decision_previous_pointer_version}" \
+                  decision-bound-previous-promotion-pointer.json \
+                  > decision-bound-previous-promotion-pointer-get.json
+                jq -e \
+                  --arg version "${decision_previous_pointer_version}" \
+                  '.VersionId == $version' \
+                  decision-bound-previous-promotion-pointer-get.json >/dev/null
+                cmp --silent previous-promotion-pointer.json \
+                  decision-bound-previous-promotion-pointer.json || {
+                    echo "Current promotion pointer bytes differ from the decision-bound prior pointer." >&2
+                    exit 1
+                  }
+              fi
             fi
           else
             if ! grep -Eq 'NoSuchKey|Not Found|404' promotion-decision-get-error.txt; then

@@ -98,6 +98,54 @@ def test_training_oidc_role_can_describe_only_the_training_repository() -> None:
     assert 'resources = ["*"]' in quota_statement
 
 
+def test_main_only_training_quota_probe_is_fixed_read_only_and_mutually_exclusive() -> None:
+    workflow = yaml.safe_load((WORKFLOWS / "train.yml").read_text(encoding="utf-8"))
+    submit = workflow["jobs"]["submit"]
+    probe = workflow["jobs"]["quota-probe"]
+
+    assert submit["if"] == ("github.ref == 'refs/heads/main' && inputs.quota_probe_only == false")
+    assert probe["if"] == ("github.ref == 'refs/heads/main' && inputs.quota_probe_only == true")
+    assert probe["environment"] == "aws-training"
+    assert probe["timeout-minutes"] == 10
+    authorization = probe["steps"][0]
+    assert authorization["env"] == {"AUTHORIZATION": "${{ inputs.authorization }}"}
+    assert 'test "${AUTHORIZATION}" = "READ LIVE SAGEMAKER QUOTAS"' in authorization["run"]
+
+    credentials = probe["steps"][1]
+    assert str(credentials["uses"]).startswith("aws-actions/configure-aws-credentials@")
+    assert credentials["with"]["role-to-assume"] == "${{ vars.AWS_DEPLOY_ROLE_ARN }}"
+    assert credentials["with"]["mask-aws-account-id"] is True
+
+    report = probe["steps"][2]["run"]
+    quota_allowlist = {
+        "L-944F78BB": "ml.g4dn.xlarge for spot training job usage",
+        "L-4CEE6BA6": "ml.m5.xlarge for spot training job usage",
+        "L-0307F515": "ml.m5.xlarge for processing job usage",
+        "L-29688C85": "ml.m5.large for spot training job usage",
+        "L-4A823FAB": "ml.m5.2xlarge for spot training job usage",
+        "L-0CE343FE": "ml.t3.medium for processing job usage",
+        "L-DABA7ED5": "ml.t3.xlarge for processing job usage",
+    }
+    for code, name in quota_allowlist.items():
+        assert report.count(code) == 1
+        assert report.count(name) == 1
+    assert "aws service-quotas get-service-quota" in report
+    assert "--query 'Quota.Value'" in report
+    assert "--output text" in report
+    assert "${quota_code}" in report
+    assert "${quota_name}" in report
+    assert "${applied_value}" in report
+    for forbidden in (
+        "reserve_financial_capacity",
+        "aws s3",
+        "aws ecr",
+        "aws sagemaker",
+        "put-object",
+        "create-training-job",
+    ):
+        assert forbidden not in report
+
+
 def test_training_inline_python_is_syntactically_valid() -> None:
     workflow = yaml.safe_load((WORKFLOWS / "train.yml").read_text(encoding="utf-8"))
     scripts = [
@@ -352,6 +400,28 @@ def test_deploy_advances_staged_decision_only_after_production_verification() ->
     assert 'cmp -s "${source_file}" "${existing}"' in decision_publication
     assert "--key promoted/current.json" not in decision_publication
     assert 'decision_pointer_key="promoted/decisions/${RELEASE_ID}.json"' in deploy
+    promotion_check = deploy.split("name: Verify promotion and build immutable serving image", 1)[
+        1
+    ].split("name: Reconcile the private candidate serving infrastructure", 1)[0]
+    assert "jq -er '.previous.pointer_version_id' promotion-pointer.json" in promotion_check
+    assert '--arg version "${previous_pointer_version}"' not in promotion_check
+    drift_guard = (
+        'if [[ "${decision_previous_pointer_version}" != "${previous_pointer_version}" ]]; then'
+    )
+    assert drift_guard in promotion_check
+    drift_check = promotion_check.split(drift_guard, 1)[1].split("\n              fi", 1)[0]
+    assert '--version-id "${decision_previous_pointer_version}"' in drift_check
+    assert "'.VersionId == $version'" in drift_check
+    assert (
+        "cmp --silent previous-promotion-pointer.json \\\n"
+        "                  decision-bound-previous-promotion-pointer.json || {" in drift_check
+    )
+    assert (
+        "Current promotion pointer bytes differ from the decision-bound prior pointer."
+        in drift_check
+    )
+    assert "exit 1" in drift_check
+    assert "set +e" not in drift_check
     assert "if: steps.production_verification.outcome == 'success'" in deploy
     assert deploy.index("Verify the activated API and complete browser flow") < deploy.index(
         "Advance the live pointer only after production verification passes"

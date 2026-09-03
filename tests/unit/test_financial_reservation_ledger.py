@@ -140,6 +140,86 @@ def test_existing_reservations_are_counted_against_later_operations() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("reservation_field", "first_value", "second_value", "message"),
+    (
+        ("FINANCIAL_RESERVATION_MAX_USD", "20", "21", "campaign cap"),
+        ("FINANCIAL_RESERVATION_CPU_HOURS", "6", "5", "CPU-hour cap"),
+        ("FINANCIAL_RESERVATION_GPU_HOURS", "12", "9", "GPU-hour cap"),
+    ),
+)
+def test_same_revision_reservations_aggregate_against_every_cap(
+    reservation_field: str,
+    first_value: str,
+    second_value: str,
+    message: str,
+) -> None:
+    first = _environment(**{reservation_field: first_value})
+    ledger, _ = reserve_financial_capacity.reserve_transition(
+        reserve_financial_capacity.empty_ledger(now=NOW), first, now=NOW
+    )
+    second = _environment(
+        **{
+            "FINANCIAL_SNAPSHOT_AUTHORIZATION_INPUTS_JSON": ('{"authorization":"GO","run":"two"}'),
+            reservation_field: second_value,
+        }
+    )
+
+    with pytest.raises(reserve_financial_capacity.FinancialReservationError, match=message):
+        reserve_financial_capacity.reserve_transition(
+            ledger,
+            second,
+            now=NOW + timedelta(seconds=1),
+        )
+
+
+def test_prior_revision_reservations_remain_auditable_without_consuming_new_totals() -> None:
+    first = _environment(
+        FINANCIAL_RESERVATION_MAX_USD="39",
+        FINANCIAL_RESERVATION_CPU_HOURS="9",
+        FINANCIAL_RESERVATION_GPU_HOURS="19",
+    )
+    ledger, _ = reserve_financial_capacity.reserve_transition(
+        reserve_financial_capacity.empty_ledger(now=NOW), first, now=NOW
+    )
+    first_operation = validate_financial_snapshot.authorization_scope(first)[
+        "authorization_operation_id"
+    ]
+    first_record = copy.deepcopy(ledger["reservations"][first_operation])
+    second = _environment(
+        FINANCIAL_SNAPSHOT_AUTHORIZATION_COMMIT_SHA="b" * 40,
+        FINANCIAL_RESERVATION_MAX_USD="39",
+        FINANCIAL_RESERVATION_CPU_HOURS="9",
+        FINANCIAL_RESERVATION_GPU_HOURS="19",
+    )
+
+    updated, idempotent = reserve_financial_capacity.reserve_transition(
+        ledger,
+        second,
+        now=NOW + timedelta(seconds=1),
+    )
+
+    assert idempotent is False
+    assert len(updated["reservations"]) == 2
+    assert updated["reservations"][first_operation] == first_record
+    assert (
+        reserve_financial_capacity.verify_reservation(
+            updated,
+            first,
+            now=NOW + timedelta(seconds=2),
+        )
+        == updated
+    )
+    assert (
+        reserve_financial_capacity.verify_reservation(
+            updated,
+            second,
+            now=NOW + timedelta(seconds=2),
+        )
+        == updated
+    )
+
+
 def test_verify_requires_an_exact_reserved_operation() -> None:
     environment = _environment()
     empty = reserve_financial_capacity.empty_ledger(now=NOW)

@@ -40,6 +40,35 @@ def test_workflow_validator_installs_include_the_pinned_yaml_runtime() -> None:
             )
 
 
+def test_hidden_workflow_artifacts_are_explicitly_included() -> None:
+    workflows_with_hidden_uploads: set[str] = set()
+    for workflow_path in sorted(WORKFLOWS.glob("*.yml")):
+        payload = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+        for job in payload.get("jobs", {}).values():
+            for step in job.get("steps", []):
+                if not str(step.get("uses", "")).startswith("actions/upload-artifact@"):
+                    continue
+                upload = step.get("with", {})
+                configured_paths = str(upload.get("path", "")).splitlines()
+                has_hidden_path = any(
+                    any(
+                        component.startswith(".") and component not in {".", ".."}
+                        for component in path.strip().replace("\\", "/").split("/")
+                    )
+                    for path in configured_paths
+                )
+                if has_hidden_path:
+                    workflows_with_hidden_uploads.add(workflow_path.name)
+                    assert upload.get("include-hidden-files") is True, workflow_path.name
+
+    assert workflows_with_hidden_uploads == {
+        "benchmark-serving.yml",
+        "bootstrap-baseline.yml",
+        "freeze-trial-selection.yml",
+        "prepare-data.yml",
+    }
+
+
 def test_training_rerun_reuses_only_the_exact_existing_job() -> None:
     workflow = (WORKFLOWS / "train.yml").read_text(encoding="utf-8")
     submission = workflow.split("name: Upload frozen configuration and submit exactly one job", 1)[

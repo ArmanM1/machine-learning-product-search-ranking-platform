@@ -2,9 +2,9 @@
   "base_model_id": "cross-encoder/ms-marco-MiniLM-L6-v2",
   "base_model_license": "Apache-2.0",
   "base_model_revision": "233902d25c440f23af6f7d6e94d2946bac0bee0a",
-  "config_hash": "sha256:3985d846ec08e6c0818e3f6a6df904f3b5261975d6e46cebf800ceaa60dc3944",
+  "config_hash": "sha256:597ea69bcfc9dea3db3a817d29a7ee550cfc20fcf4d3bcc688a0295b1dd0f071",
   "config_id": "candidate-title-ablation-v1",
-  "dataset_manifest_hash": "sha256:420735e9bba265ae04797129003258974d8fed9e21272be318de7e49c97e24f6",
+  "dataset_manifest_hash": "sha256:814e06ceba032871d1cac66cd4dd59177f4348c9928fdf417f2a2f3218a29525",
   "deterministic_mode": true,
   "early_stopping": {
     "enabled": true,

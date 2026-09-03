@@ -656,5 +656,6 @@ jobs:
         with:
           name: data-preparation-handoff-${{ github.run_id }}-${{ github.run_attempt }}
           path: .data-prepare-evidence/
+          include-hidden-files: true
           if-no-files-found: warn
           retention-days: 90
