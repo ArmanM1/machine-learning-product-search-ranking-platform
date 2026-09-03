@@ -307,6 +307,8 @@ def test_platform_plan_digest_binds_reviewed_commit_and_locked_providers() -> No
     assert '"reviewed_commit_sha": os.environ["TARGET_COMMIT"]' in source
     assert '"terraform_lock_sha256": os.environ["TF_LOCKFILE_SHA256"]' in source
     assert '"provider_selections": version.get("provider_selections", {})' in source
+    assert "PYTHONPATH=../../../.. python - <<'PY'" in source
+    assert "normalize_volatile_caller_identity" in source
     assert '"deployment_identity_mode": os.environ["DEPLOYMENT_IDENTITY_MODE"]' in source
     assert '"boundary_policy_sha256": os.environ["BOUNDARY_POLICY_SHA256"]' in source
     assert 'test "${plan_hash}" = "${APPROVED_PLAN_SHA256}"' in source
