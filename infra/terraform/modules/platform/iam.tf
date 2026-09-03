@@ -309,7 +309,7 @@ data "aws_iam_policy_document" "github_assume_role" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["${local.github_immutable_subject_prefix}:environment:production:job_workflow_ref:${var.github_repository}/.github/workflows/${local.github_environment_workflow_files["production"]}@refs/heads/main"]
+      values   = ["${local.github_immutable_subject_prefix}:environment:production:workflow_ref:${var.github_repository}/.github/workflows/${local.github_environment_workflow_files["production"]}@refs/heads/main"]
     }
 
     condition {
@@ -382,7 +382,7 @@ data "aws_iam_policy_document" "github_workflow_assume_role" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["${local.github_immutable_subject_prefix}:environment:${each.key}:job_workflow_ref:${var.github_repository}/.github/workflows/${local.github_environment_workflow_files[each.key]}@refs/heads/main"]
+      values   = ["${local.github_immutable_subject_prefix}:environment:${each.key}:workflow_ref:${var.github_repository}/.github/workflows/${local.github_environment_workflow_files[each.key]}@refs/heads/main"]
     }
 
     condition {

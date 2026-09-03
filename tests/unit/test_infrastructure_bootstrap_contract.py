@@ -229,7 +229,7 @@ def test_seed_trust_uses_immutable_repository_identity_and_one_environment() -> 
         "token.actions.githubusercontent.com:repository_owner_id": OWNER_ID,
         "token.actions.githubusercontent.com:sub": (
             f"repo:{OWNER}@{OWNER_ID}/machine-learning-product-search-ranking-platform"
-            f"@{REPOSITORY_ID}:environment:aws-infrastructure:job_workflow_ref:"
+            f"@{REPOSITORY_ID}:environment:aws-infrastructure:workflow_ref:"
             f"{OWNER}/machine-learning-product-search-ranking-platform/.github/workflows/"
             "infrastructure.yml@refs/heads/main"
         ),
@@ -240,10 +240,12 @@ def test_seed_trust_uses_immutable_repository_identity_and_one_environment() -> 
         "token.actions.githubusercontent.com:sub"
     ]
     assert state_subject.endswith(
-        ":environment:aws-state-bootstrap:job_workflow_ref:"
+        ":environment:aws-state-bootstrap:workflow_ref:"
         f"{OWNER}/machine-learning-product-search-ranking-platform/.github/workflows/"
         "bootstrap-infrastructure.yml@refs/heads/main"
     )
+    assert "job_workflow_ref" not in json.dumps(trust, sort_keys=True)
+    assert "job_workflow_ref" not in json.dumps(state_trust, sort_keys=True)
 
 
 def test_state_bootstrap_preflights_live_authority_before_fixed_six_resource_apply() -> None:

@@ -368,9 +368,16 @@ def test_oidc_subjects_and_roles_are_bound_to_exact_workflow_environments() -> N
     iam = (ROOT / "infra" / "terraform" / "modules" / "platform" / "iam.tf").read_text(
         encoding="utf-8"
     )
-    assert ":job_workflow_ref:${var.github_repository}/.github/workflows/" in iam
+    assert ":workflow_ref:${var.github_repository}/.github/workflows/" in iam
+    assert "job_workflow_ref" not in iam
     assert "${local.github_environment_workflow_files[each.key]}@refs/heads/main" in iam
     assert '${local.github_environment_workflow_files["production"]}@refs/heads/main' in iam
+
+    deployment_guide = (ROOT / "docs" / "cloud-deployment.md").read_text(encoding="utf-8")
+    assert 'include_claim_keys = @("environment", "workflow_ref")' in deployment_guide
+    assert '"environment,workflow_ref"' in deployment_guide
+    assert "job_workflow_ref" not in deployment_guide
+
     for policy, environment in (
         ("github_baseline", "aws-baseline"),
         ("github_trial_selection", "aws-trial-selection"),
