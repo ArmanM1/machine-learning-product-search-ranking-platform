@@ -310,6 +310,14 @@ jobs:
           BOUNDARY_POLICY_SHA256: ${{ steps.identity.outputs.boundary_sha256 }}
         run: |
           set -euo pipefail
+          plan_step_succeeded=false
+          cleanup_plan_files() {
+            rm -f current-state.private.json reviewed-plan.private.json reviewed-plan.canonical.json terraform-version.private.json
+            if [[ "${plan_step_succeeded}" != "true" ]]; then
+              rm -f reviewed.tfplan
+            fi
+          }
+          trap cleanup_plan_files EXIT
           terraform fmt -check -recursive ../../
           lockfile_sha256_before="$(sha256sum .terraform.lock.hcl | cut -d' ' -f1)"
           terraform init -input=false \
@@ -390,10 +398,10 @@ jobs:
           import os
           from pathlib import Path
 
-          from scripts.canonicalize_terraform_plan import normalize_volatile_caller_identity
+          from scripts.canonicalize_terraform_plan import canonicalize_terraform_plan
 
           source = Path("reviewed-plan.private.json")
-          payload = normalize_volatile_caller_identity(
+          payload = canonicalize_terraform_plan(
               json.loads(source.read_text(encoding="utf-8"))
           )
           version = json.loads(Path("terraform-version.private.json").read_text(encoding="utf-8"))
@@ -438,8 +446,50 @@ jobs:
               "boundary_policy_sha256": os.environ["BOUNDARY_POLICY_SHA256"],
               "plan": payload,
           }
+          def resource_structure(change: object) -> dict[str, object]:
+              if not isinstance(change, dict):
+                  raise SystemExit("Terraform change records must be objects")
+              change_body = change.get("change")
+              if not isinstance(change_body, dict):
+                  raise SystemExit("Terraform change records must contain a change object")
+              return {
+                  key: change.get(key)
+                  for key in (
+                      "address",
+                      "previous_address",
+                      "module_address",
+                      "mode",
+                      "type",
+                      "name",
+                      "index",
+                      "deposed",
+                      "provider_name",
+                      "action_reason",
+                  )
+                  if key in change
+              } | {"actions": change_body.get("actions")}
+
+          diagnostics = {
+              "schema_version": "1.0.0",
+              "plan_top_level_keys": sorted(payload),
+              "relevant_attributes": payload.get("relevant_attributes", []),
+              "resource_change_structure": [
+                  resource_structure(change)
+                  for change in payload.get("resource_changes", [])
+              ],
+              "resource_drift_structure": [
+                  resource_structure(change)
+                  for change in payload.get("resource_drift", [])
+              ],
+              "plan_flags": {
+                  key: payload.get(key) for key in ("applyable", "complete", "errored")
+              },
+          }
           Path("reviewed-plan.canonical.json").write_text(
               json.dumps(canonical, sort_keys=True, separators=(",", ":")), encoding="utf-8"
+          )
+          Path("reviewed-plan.diagnostics.json").write_text(
+              json.dumps(diagnostics, indent=2, sort_keys=True) + "\n", encoding="utf-8"
           )
           PY
           plan_hash="$(sha256sum reviewed-plan.canonical.json | cut -d' ' -f1)"
@@ -458,10 +508,14 @@ jobs:
             echo "Boundary policy SHA-256: \`${BOUNDARY_POLICY_SHA256}\`"
             echo "Apply requires this exact hash in a separate protected dispatch."
           } >> "${GITHUB_STEP_SUMMARY}"
-          if [[ "${OPERATION}" == "apply" ]]; then
-            test "${plan_hash}" = "${APPROVED_PLAN_SHA256}"
-          fi
           rm -f reviewed-plan.private.json reviewed-plan.canonical.json terraform-version.private.json
+          if [[ "${OPERATION}" == "apply" ]]; then
+            test "${plan_hash}" = "${APPROVED_PLAN_SHA256}" || {
+              echo "Canonical plan fingerprint differs from the separately reviewed plan." >&2
+              exit 1
+            }
+          fi
+          plan_step_succeeded=true
       - name: Apply the exact reviewed plan
         if: inputs.operation == 'apply'
         working-directory: infra/terraform/environments/${{ inputs.environment }}
@@ -474,9 +528,12 @@ jobs:
             ../../../../scripts/validate_financial_snapshot.py emit --output /dev/null
           terraform apply -input=false -auto-approve reviewed.tfplan
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
         with:
           name: terraform-${{ inputs.environment }}-${{ inputs.operation }}-${{ github.run_id }}
           path: |
             infra/terraform/environments/${{ inputs.environment }}/reviewed-plan.txt
             infra/terraform/environments/${{ inputs.environment }}/reviewed-plan.sha256
+            infra/terraform/environments/${{ inputs.environment }}/reviewed-plan.diagnostics.json
+          if-no-files-found: ignore
           retention-days: 30
