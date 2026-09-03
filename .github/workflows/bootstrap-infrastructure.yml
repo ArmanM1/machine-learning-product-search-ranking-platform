@@ -149,7 +149,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install the protected financial snapshot validator dependency
-        run: python -m pip install --disable-pip-version-check pydantic==2.13.5
+        run: python -m pip install --disable-pip-version-check pydantic==2.13.5 PyYAML==6.0.3
 
       - name: Prove the selected revision belongs to main
         shell: bash

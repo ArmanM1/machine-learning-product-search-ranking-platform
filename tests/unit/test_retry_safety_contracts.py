@@ -8,6 +8,38 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = ROOT / ".github" / "workflows"
 
 
+def test_workflow_validator_installs_include_the_pinned_yaml_runtime() -> None:
+    for workflow_path in sorted(WORKFLOWS.glob("*.yml")):
+        payload = yaml.load(workflow_path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+        for job_name, job in payload.get("jobs", {}).items():
+            steps = job.get("steps", [])
+            validator_install_positions = []
+            for index, step in enumerate(steps):
+                run = step.get("run", "")
+                if "pip install" in run and "pydantic==2.13.5" in run:
+                    validator_install_positions.append(index)
+                    assert "PyYAML==6.0.3" in run, (workflow_path.name, job_name)
+
+            if not validator_install_positions:
+                continue
+            python_setup_positions = [
+                index
+                for index, step in enumerate(steps)
+                if step.get("uses")
+                == "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97"
+            ]
+            assert len(python_setup_positions) == 1, (workflow_path.name, job_name)
+            setup_step = steps[python_setup_positions[0]]
+            assert setup_step.get("with", {}).get("python-version") == "3.11", (
+                workflow_path.name,
+                job_name,
+            )
+            assert python_setup_positions[0] < min(validator_install_positions), (
+                workflow_path.name,
+                job_name,
+            )
+
+
 def test_training_rerun_reuses_only_the_exact_existing_job() -> None:
     workflow = (WORKFLOWS / "train.yml").read_text(encoding="utf-8")
     submission = workflow.split("name: Upload frozen configuration and submit exactly one job", 1)[
