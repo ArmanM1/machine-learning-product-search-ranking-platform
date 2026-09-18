@@ -42,10 +42,11 @@ installation and rejects the whole object unless:
 - config roles, hardware/accelerator pairs, baseline membership, and runtime ceilings agree; and
 - protected bucket and ECR variables are present and valid before derived URIs are exported.
 
-The release object also carries the exact committed baseline-config path and byte checksum. Before
-held-out access, the release workflow requires the baseline command to come from the same clean Git
-commit being evaluated and recomputes the baseline config's semantic hash from those checked-out
-bytes. A baseline run from an older commit, a dirty tree, or different config fails closed.
+The release object also carries the exact baseline-evidence Git SHA, committed baseline-config path,
+and byte checksum. Before held-out access, the release workflow binds the baseline command to that
+explicit clean 40-character revision and recomputes the baseline config's semantic hash from the
+currently checked-out bytes. This permits an immutable baseline from an earlier reviewed revision
+while rejecting an unpinned revision, dirty baseline evidence, or different config bytes.
 
 Only after all checks pass are the normalized values appended to `GITHUB_ENV`. The workflow records
 a canonical `DISPATCH_CONFIG_SHA256`, so reviewers can bind the unpacked input set without relying

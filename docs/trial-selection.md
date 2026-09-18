@@ -21,7 +21,7 @@ The immutable selection artifact records exactly three official final-comparison
 3. Repeat with the title-only config, `run_kind=ablation`, and its committed `training_config_role=title_only_control`.
 4. Retain each run's immutable `candidate-release-inputs.json`, `run-manifest.json`, and model archive key plus SHA-256.
 5. Dispatch `freeze-trial-selection.yml` with the three candidate-release-input keys and byte-level SHA-256 values. Type the exact authorization phrase only after reviewing those sources.
-6. Copy `docs/workflow-inputs/release.example.json`, replace its frozen fields including `trial_selection_s3_key` and `trial_selection_sha256`, and pass the compact JSON to `release.yml`. The release workflow verifies the selection before it captures the baseline pointer, reserves either access-counter value, or submits a SageMaker Processing job.
+6. Copy `docs/workflow-inputs/release.example.json`, replace its frozen fields including `trial_selection_s3_key`, `trial_selection_sha256`, and `baseline_evidence_git_sha` (the exact revision recorded by the frozen baseline command), and pass the compact JSON to `release.yml`. The release workflow verifies the selection and baseline provenance before it captures the baseline pointer, reserves either access-counter value, or submits a SageMaker Processing job.
 
 `freeze-trial-selection.yml` sets `ALLOW_HELDOUT_EVAL=0`. It never downloads `test.parquet`, and the model-archive reader rejects held-out/test filenames. The artifact itself must say `split=validation`, `test_access_count=0`, and `heldout_accessed=false`.
 

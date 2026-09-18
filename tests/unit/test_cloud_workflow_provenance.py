@@ -248,15 +248,17 @@ def test_split_manifest_identity_is_derived_and_bound_across_release_surfaces() 
     assert "release.split_manifest_hash == public_run.split_manifest_hash" in validator
 
 
-def test_release_binds_baseline_evidence_to_current_clean_commit_and_config() -> None:
+def test_release_binds_baseline_evidence_to_explicit_clean_commit_and_config() -> None:
     release = (WORKFLOWS / "release.yml").read_text(encoding="utf-8")
     validator = (ROOT / "scripts" / "validate_release_artifacts.py").read_text(encoding="utf-8")
 
     assert 'test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"' in release
     assert 'test -z "$(git status --porcelain --untracked-files=all)"' in release
+    assert '[[ "${BASELINE_EVIDENCE_GIT_SHA}" =~ ^[0-9a-f]{40}$ ]]' in release
     assert 'test "${BASELINE_CONFIG_PATH}" = "configs/experiments/baselines-v1.yaml"' in release
     assert '--baseline-config-file-sha256 "${BASELINE_CONFIG_FILE_SHA256}"' in release
-    assert '--expected-git-sha "${GITHUB_SHA}"' in release
+    assert '--expected-git-sha "${BASELINE_EVIDENCE_GIT_SHA}"' in release
+    assert '--expected-git-sha "${GITHUB_SHA}"' not in release
     assert "baseline-evidence" in release
     assert "CommandSummary.model_validate_json" in validator
     assert "BaselineSummary.model_validate_json" in validator
