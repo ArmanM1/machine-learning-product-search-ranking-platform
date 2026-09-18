@@ -402,7 +402,7 @@ def test_builder_projects_only_measured_values_and_preserves_negative_result() -
         ServiceState._validate_evidence_binding(evidence, conflated)
 
 
-def test_builder_projects_slice_intervals_and_withholds_inadequate_intervals() -> None:
+def test_builder_projects_intervals_for_adequate_and_low_sample_slices() -> None:
     report = _report().model_copy(
         update={
             "slice_results": [
@@ -424,11 +424,11 @@ def test_builder_projects_slice_intervals_and_withholds_inadequate_intervals() -
                     slice_name="8_plus_tokens",
                     query_count=12,
                     excluded_query_count=0,
-                    candidate_value=None,
-                    baseline_value=None,
-                    point_estimate=None,
-                    ci_lower=None,
-                    ci_upper=None,
+                    candidate_value=0.51,
+                    baseline_value=0.54,
+                    point_estimate=-0.03,
+                    ci_lower=-0.11,
+                    ci_upper=0.05,
                     adequate_sample_size=False,
                     finding="insufficient_data",
                 ),
@@ -440,7 +440,8 @@ def test_builder_projects_slice_intervals_and_withholds_inadequate_intervals() -
 
     measured, inadequate = evidence.failure_analysis.slices
     assert (measured.ci_lower, measured.ci_upper) == (-0.01, 0.04)
-    assert (inadequate.ci_lower, inadequate.ci_upper) == (None, None)
+    assert inadequate.low_sample is True
+    assert (inadequate.ci_lower, inadequate.ci_upper) == (-0.11, 0.05)
 
 
 def test_builder_refuses_non_heldout_evidence() -> None:

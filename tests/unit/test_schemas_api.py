@@ -278,18 +278,17 @@ def test_public_slice_intervals_are_optional_complete_and_ordered() -> None:
     with pytest.raises(ValidationError, match="ci_lower must not exceed ci_upper"):
         PublicEvidenceEnvelope.model_validate(values)
 
-    inadequate = public_evidence_values()
-    inadequate_slice = inadequate["failure_analysis"]["slices"][0]  # type: ignore[index]
-    inadequate_slice.update(
+    slice_result.update(
         {
-            "ci_lower": -0.01,
-            "ci_upper": 0.04,
+            "ci_lower": -0.12,
+            "ci_upper": 0.08,
             "low_sample": True,
             "finding": "insufficient_data",
         }
     )
-    with pytest.raises(ValidationError, match="low-sample slices cannot publish"):
-        PublicEvidenceEnvelope.model_validate(inadequate)
+    low_sample = PublicEvidenceEnvelope.model_validate(values)
+    assert low_sample.failure_analysis.slices[0].ci_lower == -0.12
+    assert low_sample.failure_analysis.slices[0].ci_upper == 0.08
 
 
 def test_both_public_run_modes_require_a_canonical_split_manifest_hash() -> None:
