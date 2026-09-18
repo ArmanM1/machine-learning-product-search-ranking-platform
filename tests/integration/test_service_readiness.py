@@ -18,7 +18,11 @@ from search_rank.schemas.api import (
     PublicValidationRunSummary,
 )
 from search_rank.serving.app import create_app
-from search_rank.serving.dependencies import ServiceSettings, ServiceState
+from search_rank.serving.dependencies import (
+    OperationalEvidenceUnavailable,
+    ServiceSettings,
+    ServiceState,
+)
 from search_rank.serving.public_evidence import (
     build_validation_public_evidence,
     write_public_evidence,
@@ -652,6 +656,24 @@ def test_operational_evidence_is_pending_until_the_canonical_record_exists(
             "ChecksumMode": "ENABLED",
         }
     ]
+
+
+def test_access_denied_becomes_unavailable_after_the_publication_window() -> None:
+    settings = ServiceSettings(
+        service_version=OPERATIONS_GIT_SHA,
+        artifact_bucket="private-artifact-bucket",
+        lambda_function_version="2",
+    )
+    state = ServiceState(
+        settings,
+        release_manifest=_strict_validation_manifest(evaluation_report_id="report-tiny"),
+        s3_client=_FakeS3(error_code="AccessDenied"),
+    )
+    assert state.operational_evidence().status == "pending"
+    assert state.operational_access_denied_at is not None
+    state.operational_access_denied_at -= 121
+    with pytest.raises(OperationalEvidenceUnavailable, match="access remained denied"):
+        state.operational_evidence()
 
 
 def test_operational_evidence_returns_only_the_sanitized_deployed_measurements() -> None:
