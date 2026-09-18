@@ -228,6 +228,11 @@ def test_split_manifest_identity_is_derived_and_bound_across_release_surfaces() 
 
     assert '"split_manifest_hash": split_manifest_hash' in prepare
     assert '.split_manifest_hash | select(test("^sha256:[0-9a-f]{64}$"))' in bootstrap
+    download = bootstrap.split("name: Download and checksum-verify validation evidence only", 1)[
+        1
+    ].split("name: Build and verify the typed validation-only bundle", 1)[0]
+    assert "printf 'SPLIT_MANIFEST_HASH=%s\\n'" in download
+    assert '>> "${GITHUB_ENV}"' in download
     assert '.split_manifest_hash | select(test("^sha256:[0-9a-f]{64}$"))' in release
     assert ".result.split_manifest_hash == $split" in release
     assert ".split_manifest_hash == $split" in release
