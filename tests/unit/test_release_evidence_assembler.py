@@ -439,6 +439,7 @@ def _write_deployment_stage(
     _write(stage_root / "deployment-evidence.json", evidence)
     _write(stage_root / "promotion-pointer.json", pointer)
     _write(stage_root / "previous-promotion-pointer.json", previous_pointer)
+    _write(stage_root / "active-promotion-pointer.json", pointer)
     return stage_root
 
 
@@ -831,10 +832,12 @@ def test_assembler_requires_the_exact_baseline_stage(tmp_path: Path) -> None:
 def test_assembler_rejects_redeploying_different_pointer_bytes(tmp_path: Path) -> None:
     root = tmp_path / "local-evidence"
     _fixture(root)
-    path = root / DEPLOYMENT_SHA / "redeploy-winner" / "promotion-pointer.json"
+    stage_root = root / DEPLOYMENT_SHA / "redeploy-winner"
+    path = stage_root / "promotion-pointer.json"
     pointer = _read(path)
     pointer["evaluation_report_id"] = "different-report"
     _write(path, pointer)
+    _write(stage_root / "active-promotion-pointer.json", pointer)
 
     with pytest.raises(assembler.ReleaseEvidenceError, match="pointer bytes differ"):
         _assemble(root)
@@ -855,6 +858,94 @@ def test_assembler_requires_a_fresh_redeployment_runtime_version(tmp_path: Path)
     _write(handoff_path, handoff)
 
     with pytest.raises(assembler.ReleaseEvidenceError, match="fresh Lambda version"):
+        _assemble(root)
+
+
+@pytest.mark.parametrize("stage", ("deploy-baseline", "deploy-winner", "redeploy-winner"))
+def test_assembler_requires_every_deployment_to_publish_a_new_runtime_version(
+    tmp_path: Path, stage: str
+) -> None:
+    root = tmp_path / "local-evidence"
+    _fixture(root)
+    stage_root = root / DEPLOYMENT_SHA / stage
+    evidence_path = stage_root / "deployment-evidence.json"
+    evidence = _read(evidence_path)
+    evidence["production_lambda_version"] = evidence["previous_lambda_version"]
+    evidence["controlled_cold_start"]["identifiers"]["function_version"] = evidence[
+        "previous_lambda_version"
+    ]
+    evidence["controlled_cold_start"]["control_proof"]["previous_candidate_version"] = "999"
+    _write(evidence_path, evidence)
+    handoff_path = stage_root / "_handoff.json"
+    handoff = _read(handoff_path)
+    handoff["production_lambda_version"] = handoff["previous_lambda_version"]
+    _write(handoff_path, handoff)
+
+    with pytest.raises(
+        assembler.ReleaseEvidenceError, match="did not publish a new Lambda version"
+    ):
+        _assemble(root)
+
+
+def test_assembler_requires_rollback_to_change_the_runtime_version(tmp_path: Path) -> None:
+    root = tmp_path / "local-evidence"
+    _fixture(root)
+    stage_root = root / DEPLOYMENT_SHA / "rollback"
+    evidence_path = stage_root / "rollback-evidence.json"
+    evidence = _read(evidence_path)
+    evidence["from_lambda_version"] = evidence["to_lambda_version"]
+    _write(evidence_path, evidence)
+    handoff_path = stage_root / "_handoff.json"
+    handoff = _read(handoff_path)
+    handoff["from_lambda_version"] = handoff["to_lambda_version"]
+    _write(handoff_path, handoff)
+
+    with pytest.raises(assembler.ReleaseEvidenceError, match="rollback did not change"):
+        _assemble(root)
+
+
+def test_positive_gate_requires_the_deployed_baseline_to_be_the_strongest(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "local-evidence"
+    _fixture(root)
+    release_root = root / SOURCE_SHA / "release"
+    previous_path = release_root / "previous-pointer.json"
+    previous = _read(previous_path)
+    previous["model_id"] = "different-baseline"
+    previous["bundle_s3_key"] = "promoted/different-baseline/"
+    _write(previous_path, previous)
+    pointer_path = release_root / "promotion-pointer.json"
+    pointer = _read(pointer_path)
+    pointer["previous"]["model_id"] = "different-baseline"
+    _write(pointer_path, pointer)
+    handoff_path = release_root / "_handoff.json"
+    handoff = _read(handoff_path)
+    handoff["previous_model_id"] = "different-baseline"
+    _write(handoff_path, handoff)
+
+    with pytest.raises(assembler.ReleaseEvidenceError, match="evaluated strongest baseline"):
+        _assemble(root)
+
+
+def test_assembler_requires_active_promotion_pointer_proof(tmp_path: Path) -> None:
+    root = tmp_path / "local-evidence"
+    _fixture(root)
+    (root / DEPLOYMENT_SHA / "deploy-winner" / "active-promotion-pointer.json").unlink()
+
+    with pytest.raises(assembler.ReleaseEvidenceError, match="required evidence is absent"):
+        _assemble(root)
+
+
+def test_assembler_rejects_tampered_active_promotion_pointer_proof(tmp_path: Path) -> None:
+    root = tmp_path / "local-evidence"
+    _fixture(root)
+    path = root / DEPLOYMENT_SHA / "deploy-winner" / "active-promotion-pointer.json"
+    pointer = _read(path)
+    pointer["evaluation_report_id"] = "different-report"
+    _write(path, pointer)
+
+    with pytest.raises(assembler.ReleaseEvidenceError, match="active promotion pointer differs"):
         _assemble(root)
 
 

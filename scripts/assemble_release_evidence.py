@@ -439,11 +439,26 @@ def _deployment_files(
         PromotionPointer,
         f"{stage} previous pointer",
     )
+    active = _model(
+        stage_root / "active-promotion-pointer.json",
+        PromotionPointer,
+        f"{stage} active promotion pointer",
+    )
     origin = deployment.production_api_smoke.base_url_origin
     _require(deployment.code_commit == deployment_sha, f"{stage} deployment source differs")
     _require(
+        deployment.production_lambda_version != deployment.previous_lambda_version,
+        f"{stage} did not publish a new Lambda version",
+    )
+    _require(
         pointer.release_id == deployment.release_id and pointer.model_id == deployment.model_id,
         f"{stage} pointer and deployment identity differ",
+    )
+    _require(
+        active == pointer
+        and _sha256(stage_root / "active-promotion-pointer.json")
+        == _sha256(stage_root / "promotion-pointer.json"),
+        f"{stage} active promotion pointer differs from the deployed pointer",
     )
     _require(CLOUDFRONT.fullmatch(origin) is not None, f"{stage} public origin is not CloudFront")
     expected = {
@@ -475,6 +490,10 @@ def _rollback_files(
         rollback_root / "rollback-evidence.json", ManualRollbackEvidence, "rollback evidence"
     )
     _require(evidence.workflow_commit == deployment_sha, "rollback source identity differs")
+    _require(
+        evidence.from_lambda_version != evidence.to_lambda_version,
+        "rollback did not change the Lambda version",
+    )
     _require_handoff_values(
         handoff,
         {
@@ -731,6 +750,11 @@ def assemble(
     release_prior = release_pointer.previous
     _require(release_prior is not None, "release promotion pointer lacks its prior release")
     assert release_prior is not None
+    if evaluation.release_gate_results.passed:
+        _require(
+            previous_pointer.model_id == evaluation.primary_metric.strongest_baseline_id,
+            "positive release gate rollback target is not the evaluated strongest baseline",
+        )
     baseline, baseline_deployment, baseline_pointer, baseline_previous, baseline_root = (
         _deployment_files(
             evidence_root,
