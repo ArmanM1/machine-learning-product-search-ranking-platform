@@ -6,6 +6,7 @@ import logging
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, NoReturn
@@ -51,6 +52,10 @@ FAILURE_CATEGORIES: frozenset[str] = frozenset(
     }
 )
 FAILURE_DIAGNOSTIC_ENV = "SEARCH_RANK_TRAINING_FAILURE_PATH"
+_ACTIVE_STAGE: ContextVar[TrainingStage | None] = ContextVar(
+    "search_rank_training_stage",
+    default=None,
+)
 
 
 class TrainingStageFailure(RuntimeError):
@@ -150,8 +155,12 @@ class TrainingStageTracker:
 def training_stage(stage: TrainingStage) -> Iterator[None]:
     """Report a stage and redact its exception when a container path is configured."""
 
+    if _ACTIVE_STAGE.get() == stage:
+        yield
+        return
     tracker = TrainingStageTracker(stage)
     tracker.start()
+    token = _ACTIVE_STAGE.set(stage)
     try:
         yield
     except TrainingStageFailure:
@@ -163,6 +172,8 @@ def training_stage(stage: TrainingStage) -> Iterator[None]:
         raise
     else:
         tracker.complete()
+    finally:
+        _ACTIVE_STAGE.reset(token)
 
 
 def fail_tracked_stage(tracker: TrainingStageTracker, error: Exception) -> NoReturn:

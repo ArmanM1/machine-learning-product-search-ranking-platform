@@ -113,3 +113,23 @@ def test_success_breadcrumb_has_no_execution_identifier(
         ("training_stage", {"stage": "data_load", "status": "started"}),
         ("training_stage", {"stage": "data_load", "status": "succeeded"}),
     ]
+
+
+def test_nested_same_stage_emits_one_breadcrumb_pair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.delenv(FAILURE_DIAGNOSTIC_ENV, raising=False)
+    monkeypatch.setattr(
+        diagnostics,
+        "log_event",
+        lambda _logger, event, **context: events.append((event, context)),
+    )
+
+    with training_stage("device_preflight"), training_stage("device_preflight"):
+        pass
+
+    assert events == [
+        ("training_stage", {"stage": "device_preflight", "status": "started"}),
+        ("training_stage", {"stage": "device_preflight", "status": "succeeded"}),
+    ]

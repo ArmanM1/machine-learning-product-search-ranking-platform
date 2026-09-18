@@ -6,9 +6,17 @@ from typing import Any
 
 import pandas as pd
 import pytest
+from pydantic import ValidationError
 
 import search_rank.cli as cli
 from search_rank.training import TrainingRuntime
+
+
+def _validation_error() -> ValidationError:
+    return ValidationError.from_exception_data(
+        "Fixture",
+        [{"type": "missing", "loc": ("required",), "input": {}}],
+    )
 
 
 def _experiment(*, hard_sources: list[str]) -> Any:
@@ -57,6 +65,43 @@ def test_device_preflight_runs_before_any_dataset_load(
         cli.train(Path("experiment.yaml"), Path("manifest.json"))
 
     assert sequence == ["preflight:auto", "data_load"]
+
+
+@pytest.mark.parametrize(
+    ("error_factory", "category"),
+    (
+        (lambda: OSError("private/path"), "io_failure"),
+        (lambda: ValueError("private/path"), "contract_violation"),
+        (_validation_error, "contract_violation"),
+        (lambda: RuntimeError("private/path"), "runtime_failure"),
+        (lambda: AssertionError("private/path"), "contract_violation"),
+    ),
+)
+def test_all_caught_preflight_errors_write_bounded_managed_diagnostic(
+    error_factory: Any,
+    category: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failure = tmp_path / "output" / "failure"
+    monkeypatch.setenv("SEARCH_RANK_TRAINING_FAILURE_PATH", str(failure))
+    monkeypatch.setenv("SEARCH_RANK_RUN_ROOT", str(tmp_path / "runs"))
+    monkeypatch.setenv("SEARCH_RANK_LATEST_ROOT", str(tmp_path / "latest"))
+    monkeypatch.setattr(
+        cli,
+        "load_frozen_experiment",
+        lambda _: (_ for _ in ()).throw(error_factory()),
+    )
+
+    with pytest.raises(cli.typer.Exit):
+        cli.train(Path("private-config-path.yaml"), Path("private-manifest-path.json"))
+
+    assert failure.read_text(encoding="utf-8") == (
+        f"phase=device_preflight; error_type={category}; exit_code=1\n"
+    )
+    summaries = "".join(path.read_text(encoding="utf-8") for path in tmp_path.rglob("*.json"))
+    assert "private/path" not in summaries
+    assert "private-config-path" not in failure.read_text(encoding="utf-8")
 
 
 def test_mining_cross_encoder_receives_resolved_device_and_is_released(

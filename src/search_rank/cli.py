@@ -905,35 +905,38 @@ def train(
     configure_logging()
     run = CommandRun("train", str(config))
     try:
-        experiment = load_frozen_experiment(config)
-        cloud_hardware = os.environ.get("SEARCH_RANK_HARDWARE_CLASS")
-        declared_accelerator = os.environ.get("SEARCH_RANK_ACCELERATOR")
-        training_device = "auto"
-        if cloud_hardware is not None or declared_accelerator is not None:
-            if cloud_hardware is None or declared_accelerator is None:
-                raise ValueError(
-                    "cloud hardware and accelerator declarations must be provided together"
-                )
-            if experiment.requested_hardware != cloud_hardware:
-                raise ValueError(
-                    "frozen experiment requested_hardware differs from the runtime instance"
-                )
-            expected_accelerator = {
-                "ml.m5.xlarge": "cpu",
-                "ml.g4dn.xlarge": "gpu",
-            }.get(cloud_hardware)
-            if expected_accelerator is None or declared_accelerator != expected_accelerator:
-                raise ValueError("runtime instance and accelerator declarations are inconsistent")
-            training_device = "cuda" if declared_accelerator == "gpu" else "cpu"
-        training_runtime = preflight_training_runtime(experiment, device=training_device)
-        cloud_job_id = os.environ.get("SEARCH_RANK_CLOUD_RUN_ID", "unavailable")
-        training_log_context = TrainingLogContext(
-            run_id=cloud_job_id if cloud_job_id != "unavailable" else run.run_id,
-            job_id=cloud_job_id,
-            git_sha=os.environ.get("SEARCH_RANK_GIT_SHA", "unavailable"),
-            image_digest=os.environ.get("SEARCH_RANK_TRAINING_IMAGE_DIGEST", "unavailable"),
-            hardware_class=cloud_hardware or "local-runtime",
-        )
+        with training_stage("device_preflight"):
+            experiment = load_frozen_experiment(config)
+            cloud_hardware = os.environ.get("SEARCH_RANK_HARDWARE_CLASS")
+            declared_accelerator = os.environ.get("SEARCH_RANK_ACCELERATOR")
+            training_device = "auto"
+            if cloud_hardware is not None or declared_accelerator is not None:
+                if cloud_hardware is None or declared_accelerator is None:
+                    raise ValueError(
+                        "cloud hardware and accelerator declarations must be provided together"
+                    )
+                if experiment.requested_hardware != cloud_hardware:
+                    raise ValueError(
+                        "frozen experiment requested_hardware differs from the runtime instance"
+                    )
+                expected_accelerator = {
+                    "ml.m5.xlarge": "cpu",
+                    "ml.g4dn.xlarge": "gpu",
+                }.get(cloud_hardware)
+                if expected_accelerator is None or declared_accelerator != expected_accelerator:
+                    raise ValueError(
+                        "runtime instance and accelerator declarations are inconsistent"
+                    )
+                training_device = "cuda" if declared_accelerator == "gpu" else "cpu"
+            training_runtime = preflight_training_runtime(experiment, device=training_device)
+            cloud_job_id = os.environ.get("SEARCH_RANK_CLOUD_RUN_ID", "unavailable")
+            training_log_context = TrainingLogContext(
+                run_id=cloud_job_id if cloud_job_id != "unavailable" else run.run_id,
+                job_id=cloud_job_id,
+                git_sha=os.environ.get("SEARCH_RANK_GIT_SHA", "unavailable"),
+                image_digest=os.environ.get("SEARCH_RANK_TRAINING_IMAGE_DIGEST", "unavailable"),
+                hardware_class=cloud_hardware or "local-runtime",
+            )
         with training_stage("data_load"):
             manifest, _ = load_dataset_manifest(dataset_manifest)
             manifest_hash = manifest.processed_checksum
