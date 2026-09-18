@@ -2,6 +2,9 @@ import { expect, test } from '@playwright/test'
 
 test('reviewer lands on the ranking action and opens evidence', async ({ page }) => {
   await page.goto('/')
+  await expect(page.getByRole('link', { name: 'Rerank workspace home', exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Rank', exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Evidence', exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: /compare product rankings/i })).toBeVisible()
   await expect(page.getByText(/illustrative fixture/i).first()).toBeVisible()
   await expect(page.getByRole('heading', { name: /quiet keyboard for office/i })).toBeVisible()
@@ -15,6 +18,12 @@ test('reviewer lands on the ranking action and opens evidence', async ({ page })
   await expect(page.getByRole('heading', { level: 1, name: 'Evidence' })).toBeVisible()
   await page.getByRole('link', { name: 'Evaluation', exact: true }).first().click()
   await expect(page.getByRole('heading', { name: /aggregate evidence/i })).toBeVisible()
+
+  await page.getByRole('link', { name: 'Failures', exact: true }).first().click()
+  await expect(page.getByRole('heading', { name: /the losses stay in the room/i })).toBeVisible()
+
+  await page.getByRole('link', { name: 'Run details', exact: true }).first().click()
+  await expect(page.getByRole('heading', { name: /follow the result back to its source/i })).toBeVisible()
 })
 
 test('failure filters and experiment provenance work on a narrow viewport', async ({ page }) => {
