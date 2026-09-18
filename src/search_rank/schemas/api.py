@@ -391,6 +391,8 @@ class PublicSliceResult(ContractModel):
     baseline_graded_ndcg_at_10: UnitFloat | None
     candidate_graded_ndcg_at_10: UnitFloat | None
     delta: FiniteFloat | None
+    ci_lower: FiniteFloat | None = None
+    ci_upper: FiniteFloat | None = None
     low_sample: bool
     finding: Literal["improvement", "regression", "uncertain", "insufficient_data"]
 
@@ -408,8 +410,18 @@ class PublicSliceResult(ContractModel):
             assert baseline is not None and candidate is not None and delta is not None
             if abs(candidate - baseline - delta) > 1e-9:
                 raise ValueError("slice delta must equal candidate - baseline")
+        interval = (self.ci_lower, self.ci_upper)
+        if (interval[0] is None) != (interval[1] is None):
+            raise ValueError("slice confidence interval must have both bounds or neither")
+        if interval[0] is not None and interval[1] is not None:
+            if interval[0] > interval[1]:
+                raise ValueError("ci_lower must not exceed ci_upper")
+            if any(value is None for value in values):
+                raise ValueError("slice confidence interval requires measured slice values")
         if self.low_sample == (self.finding != "insufficient_data"):
             raise ValueError("low_sample must match an insufficient_data finding")
+        if self.low_sample and any(value is not None for value in interval):
+            raise ValueError("low-sample slices cannot publish a confidence interval")
         return self
 
 

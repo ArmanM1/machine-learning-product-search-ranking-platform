@@ -23,6 +23,7 @@ from search_rank.schemas.evaluation import (
     MetricResult,
     PairedDifference,
     RuntimeResult,
+    SliceResult,
 )
 from search_rank.serving.dependencies import ServiceState
 from search_rank.serving.public_evidence import (
@@ -399,6 +400,47 @@ def test_builder_projects_only_measured_values_and_preserves_negative_result() -
         match=r"execution provenance differs|training hardware and accelerator do not match",
     ):
         ServiceState._validate_evidence_binding(evidence, conflated)
+
+
+def test_builder_projects_slice_intervals_and_withholds_inadequate_intervals() -> None:
+    report = _report().model_copy(
+        update={
+            "slice_results": [
+                SliceResult(
+                    dimension="query_token_length",
+                    slice_name="2_tokens",
+                    query_count=40,
+                    excluded_query_count=0,
+                    candidate_value=0.62,
+                    baseline_value=0.60,
+                    point_estimate=0.02,
+                    ci_lower=-0.01,
+                    ci_upper=0.04,
+                    adequate_sample_size=True,
+                    finding="uncertain",
+                ),
+                SliceResult(
+                    dimension="query_token_length",
+                    slice_name="8_plus_tokens",
+                    query_count=12,
+                    excluded_query_count=0,
+                    candidate_value=None,
+                    baseline_value=None,
+                    point_estimate=None,
+                    ci_lower=None,
+                    ci_upper=None,
+                    adequate_sample_size=False,
+                    finding="insufficient_data",
+                ),
+            ]
+        }
+    )
+
+    evidence = build_public_evidence(report, _run(report), _queries(), minimum_slice_size=30)
+
+    measured, inadequate = evidence.failure_analysis.slices
+    assert (measured.ci_lower, measured.ci_upper) == (-0.01, 0.04)
+    assert (inadequate.ci_lower, inadequate.ci_upper) == (None, None)
 
 
 def test_builder_refuses_non_heldout_evidence() -> None:

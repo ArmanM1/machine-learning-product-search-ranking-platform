@@ -389,6 +389,8 @@ export const apiClient = {
         baseline_ndcg_at_10: slice.baseline_graded_ndcg_at_10,
         candidate_ndcg_at_10: slice.candidate_graded_ndcg_at_10,
         delta: slice.delta,
+        ci_lower: slice.ci_lower ?? null,
+        ci_upper: slice.ci_upper ?? null,
         low_sample: slice.low_sample,
       })),
       examples: run.failure_analysis.examples.map((example) => {

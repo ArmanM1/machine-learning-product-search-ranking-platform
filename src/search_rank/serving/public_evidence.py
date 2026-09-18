@@ -179,6 +179,8 @@ def _public_failure_analysis(
             baseline_graded_ndcg_at_10=item.baseline_value,
             candidate_graded_ndcg_at_10=item.candidate_value,
             delta=item.point_estimate,
+            ci_lower=item.ci_lower,
+            ci_upper=item.ci_upper,
             low_sample=not item.adequate_sample_size,
             finding=item.finding,
         )

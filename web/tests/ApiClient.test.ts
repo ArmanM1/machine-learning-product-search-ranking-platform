@@ -75,6 +75,42 @@ describe('API client contract', () => {
     vi.unstubAllEnvs()
     vi.unstubAllGlobals()
   })
+
+  it('projects legacy verified slices without confidence interval fields', async () => {
+    vi.resetModules()
+    vi.stubEnv('VITE_DATA_MODE', 'api')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        evidence_mode: 'verified',
+        failure_analysis: {
+          evidence_mode: 'verified',
+          run_id: 'legacy-run',
+          minimum_slice_size: 30,
+          slices: [{
+            slice_id: 'query_token_length:2_tokens',
+            display_name: 'Two-token queries',
+            description: 'Predeclared query-token-length slice.',
+            query_count: 40,
+            excluded_query_count: 0,
+            baseline_graded_ndcg_at_10: 0.6,
+            candidate_graded_ndcg_at_10: 0.62,
+            delta: 0.02,
+            low_sample: false,
+            finding: 'uncertain',
+          }],
+          examples: [],
+        },
+      }),
+    }))
+    const { apiClient: apiModeClient } = await import('../src/api/client')
+
+    const projected = await apiModeClient.getFailures('legacy-run')
+
+    expect(projected.slices[0]).toMatchObject({ ci_lower: null, ci_upper: null })
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
+  })
 })
 
 describe('negative release overview', () => {
