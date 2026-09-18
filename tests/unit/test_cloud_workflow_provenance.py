@@ -396,6 +396,20 @@ def test_benchmark_validates_then_immutably_publishes_and_revalidates_readback()
     assert 'prefix="public/${RELEASE_ID}/performance/github-' not in workflow
 
 
+def test_benchmark_preserves_direct_server_serialization_measurements() -> None:
+    serving = (ROOT / "src/search_rank/serving/app.py").read_text(encoding="utf-8")
+    workflow = (WORKFLOWS / "benchmark-serving.yml").read_text(encoding="utf-8")
+
+    assert '"x-search-rank-serialization-ms"' in serving
+    assert "time.perf_counter_ns()" in serving
+    assert 'JSONResponse(content=body.model_dump(mode="json"))' in serving
+    assert 'SERIALIZATION_LATENCY_HEADER = "x-search-rank-serialization-ms"' in workflow
+    assert "serialization_header = response.headers.get(SERIALIZATION_LATENCY_HEADER)" in workflow
+    assert '"serialization_ms": serialization_ms' in workflow
+    assert '"serialization_latency_ms": latency_summary(serialization)' in workflow
+    assert "a successful request has invalid serialization latency" in workflow
+
+
 def _serving_model_tag(model_id: str, release_manifest_sha256: str) -> str:
     slug = model_id.replace("@", "-at-")[:80]
     identity = hashlib.sha256(model_id.encode()).hexdigest()[:12]

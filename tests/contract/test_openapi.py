@@ -43,6 +43,14 @@ def test_openapi_preserves_versioned_ranking_request_and_response_models() -> No
     request_schema = operation["requestBody"]["content"]["application/json"]["schema"]
     assert request_schema == {"$ref": "#/components/schemas/RankRequest"}
     assert _reference(operation, "200") == "#/components/schemas/RankResponse"
+    serialization_header = operation["responses"]["200"]["headers"][
+        "x-search-rank-serialization-ms"
+    ]
+    assert serialization_header["schema"] == {
+        "type": "number",
+        "format": "double",
+        "minimum": 0.0,
+    }
     for status in ("400", "404", "409", "422"):
         assert _reference(operation, status) == "#/components/schemas/ApiError"
 

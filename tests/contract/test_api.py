@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import math
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -91,6 +92,10 @@ def test_rank_is_bounded_to_curated_query() -> None:
         )
         assert response.status_code == 200
         assert [item["product_id"] for item in response.json()["results"]] == ["p2", "p1"]
+        serialization_ms = float(response.headers["x-search-rank-serialization-ms"])
+        assert math.isfinite(serialization_ms)
+        assert serialization_ms >= 0
+        assert "serialization_ms" not in response.json()
         assert (
             api.post(
                 "/api/v1/rank", json={"query_id": "unknown", "model_id": "candidate-v1", "top_k": 2}

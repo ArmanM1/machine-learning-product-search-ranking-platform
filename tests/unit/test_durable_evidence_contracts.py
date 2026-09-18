@@ -430,6 +430,7 @@ def sample_summary(count: int, *, success_count: int | None = None) -> dict[str,
                 "throttled": False,
                 "end_to_end_ms": float(ordinal),
                 "model_ms": float(ordinal) / 2,
+                "serialization_ms": float(ordinal) / 4,
             }
             if ordinal <= success_count
             else {
@@ -439,6 +440,7 @@ def sample_summary(count: int, *, success_count: int | None = None) -> dict[str,
                 "throttled": False,
                 "end_to_end_ms": float(ordinal),
                 "model_ms": None,
+                "serialization_ms": None,
                 "error_category": "http_error",
             }
         )
@@ -470,6 +472,9 @@ def sample_summary(count: int, *, success_count: int | None = None) -> dict[str,
         ),
         "model_latency_ms": (
             summary([sample["model_ms"] for sample in successful]) if successful else None
+        ),
+        "serialization_latency_ms": (
+            summary([sample["serialization_ms"] for sample in successful]) if successful else None
         ),
         "samples": samples,
     }
@@ -577,10 +582,11 @@ def performance_report() -> dict[str, Any]:
         },
         "interpretation": {
             "latency_claim": (
-                "Warm public CloudFront end-to-end and model latency over successful responses "
-                "after explicit warmups. The primary 40-candidate, concurrency-one condition "
-                "has at least 199 successes from 200 attempts (error rate below one percent); "
-                "every secondary condition has at least 20 successes. The controlled candidate "
+                "Warm public CloudFront end-to-end, model, and in-process "
+                "response-serialization latency over successful responses after explicit "
+                "warmups. The primary 40-candidate, concurrency-one condition has at least "
+                "199 successes from 200 attempts (error rate below one percent); every "
+                "secondary condition has at least 20 successes. The controlled candidate "
                 "cold start is reported separately."
             ),
             "throughput_claim_eligible": False,
@@ -593,6 +599,7 @@ def performance_report() -> dict[str, Any]:
             "No scaling claim.",
             "Cold is one sample.",
             "Client timing includes network work.",
+            "Serialization timing excludes network work.",
             "No held-out data is accessed.",
         ],
     }
@@ -616,6 +623,11 @@ def test_performance_report_requires_exact_matrix_and_recomputes_raw_aggregates(
     invalid = deepcopy(performance_report())
     invalid["conditions"][0]["measured"]["success_count"] = 199
     with pytest.raises(ValidationError, match="success/error totals"):
+        PerformanceReport.model_validate(invalid)
+
+    invalid = deepcopy(performance_report())
+    invalid["conditions"][0]["measured"]["serialization_latency_ms"]["p95"] = 48.0
+    with pytest.raises(ValidationError, match=r"serialization_latency_ms\.p95"):
         PerformanceReport.model_validate(invalid)
 
     invalid = deepcopy(performance_report())

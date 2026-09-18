@@ -82,6 +82,17 @@ The phase excludes file writes, UTF-8 transport, API Gateway, Lambda, and networ
 those costs remain part of the separately measured end-to-end serving latency and must not
 be attributed to serialization.
 
+The deployed rank route also measures response serialization directly. After a validated
+`RankResponse` exists, the service times its Pydantic JSON-mode export and final JSON byte
+rendering, then returns only the finite duration in the
+`x-search-rank-serialization-ms` response header. The response body is unchanged. The fixed
+post-deployment benchmark requires that header on every successful sample and publishes the
+raw durations plus p50/p95/p99 summaries beside, not derived from, model and end-to-end
+latency. This provides release-specific serialization evidence without subtracting unrelated
+gateway or network work and without reopening held-out data. A release frozen before the
+offline evaluator gained its serialization phase must keep its evaluation report immutable;
+its serving measurement belongs only to the separately checksum-bound performance report.
+
 The public run contract keeps the validation-selected SageMaker training execution and the two held-out SageMaker Processing executions in distinct records. Each record publishes its own image digest, hardware, region, runtime, estimate, actual cost when reconciled, and cost-evidence note. Training runtime is taken from the checksummed selected `RunManifest`; evaluation runtime is the sum of the two Processing-job wall-clock intervals. These durations are never added together or presented under one hardware label.
 
 The validation-only bootstrap baseline executes directly with the locked Python environment on the declared GitHub-hosted runner. Its published `image_digest` binds the reviewed evaluation container and source revision used by the protected evidence chain; it is not represented as the runtime that executed the baseline.
