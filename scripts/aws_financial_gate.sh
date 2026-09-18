@@ -28,10 +28,25 @@ case "${1:-} ${2:-}" in
 esac
 
 if [[ "${requires_financial_gate}" -eq 1 ]]; then
-  PYTHONPATH="${GITHUB_WORKSPACE}/src" \
-    uv run --project "${GITHUB_WORKSPACE}" --frozen --no-dev python \
-    "${GITHUB_WORKSPACE}/scripts/validate_financial_snapshot.py" emit --output /dev/null
+  snapshot_required="${FINANCIAL_SNAPSHOT_REQUIRED:-true}"
   reservation_required="${FINANCIAL_CAPACITY_RESERVATION_REQUIRED:-true}"
+  case "${snapshot_required}" in
+    true)
+      PYTHONPATH="${GITHUB_WORKSPACE}/src" \
+        uv run --project "${GITHUB_WORKSPACE}" --frozen --no-dev python \
+        "${GITHUB_WORKSPACE}/scripts/validate_financial_snapshot.py" emit --output /dev/null
+      ;;
+    false)
+      if [[ "${reservation_required}" != "false" ]]; then
+        echo "A financial reservation cannot be required when snapshot checks are disabled" >&2
+        exit 2
+      fi
+      ;;
+    *)
+      echo "FINANCIAL_SNAPSHOT_REQUIRED must be true or false" >&2
+      exit 2
+      ;;
+  esac
   case "${reservation_required}" in
     true)
       PYTHONPATH="${GITHUB_WORKSPACE}/src" \

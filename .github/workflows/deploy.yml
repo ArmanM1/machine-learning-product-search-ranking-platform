@@ -52,10 +52,11 @@ jobs:
     environment: production
     env:
       # The owner explicitly authorized this public-demo deployment without the
-      # append-only PRD reservation ledger. Fresh signed financial snapshots,
-      # the exact authorization phrase, bounded infrastructure, and automatic
+      # PRD financial snapshot and reservation-ledger gates. The exact
+      # authorization phrase, bounded infrastructure, and automatic
       # public-serving expiry remain enforced.
       FINANCIAL_CAPACITY_RESERVATION_REQUIRED: "false"
+      FINANCIAL_SNAPSHOT_REQUIRED: "false"
       RELEASE_ID: ${{ inputs.release_id }}
       MODEL_ID: ${{ inputs.model_id }}
       AUTHORIZATION: ${{ inputs.authorization }}
