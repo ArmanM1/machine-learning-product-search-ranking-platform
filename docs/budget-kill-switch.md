@@ -1,13 +1,14 @@
 # Production public-cost kill switch
 
-Status: implemented in Terraform, handler code, and local tests; no live apply or trip is claimed.
+Status: implemented in Terraform, handler code, and tests. The base foundation is applied with public serving
+disabled, so the conditional expiry resources are not yet instantiated and no live trip is claimed.
 
 ## Owner waiver and automatic expiry
 
 The owner explicitly waived AWS Budget creation and email confirmation. That waiver is recorded
-as a deliberate PRD exception; it is never represented as a passed budget gate. Public production
-serving therefore has a budget-independent, no-idle-compute expiry as its primary automatic safety
-control. An exact EventBridge rule invokes the shutdown command no later than 24 hours after the
+as a deliberate PRD exception; it is never represented as a passed budget gate. When public production
+serving is enabled, it therefore has a budget-independent, no-idle-compute expiry as its primary automatic
+safety control. An exact EventBridge rule invokes the shutdown command no later than 24 hours after the
 public resources are created. Both `ACTUAL` and `FORECASTED` AWS Budgets notifications at USD 10
 remain available as an optional second trigger if budgets are enabled later.
 

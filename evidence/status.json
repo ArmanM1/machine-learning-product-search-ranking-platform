@@ -19,7 +19,11 @@
     ],
     "budget_thresholds_approved": true,
     "budget_destination_confirmation_reported": true,
-    "exact_budget_address_received": false
+    "exact_budget_address_received": false,
+    "budget_creation_and_email_setup_later_waived": true,
+    "aws_budgets_enabled": false,
+    "project_budget_object_created": false,
+    "budget_notification_email_configured": false
   },
   "local_configuration_validation": {
     "terraform_format_and_validate": true,
@@ -72,5 +76,5 @@
   "public_demo_url": null,
   "current_release_id": null,
   "evidence_manifest_sha256": null,
-  "note": "The owner authorized the remaining bounded AWS work despite the acknowledged absence of a hard USD 0 guarantee. Bootstrap and production Terraform are applied, a post-apply plan found no drift, live quota probes confirm the selected training and processing capacity, and the clean cloud data-preparation workflow published the current dataset and split identities recorded in evidence/cloud/live-data-preparation.json. Two historical local validation scoring processes reproduced all six quality vectors and every rank and score exactly, but their uncontrolled p95 timings varied, so the broad baselines_verified flag remains false until the protected cloud baseline completes. No release evidence mode is current until an immutable bundle is published; candidate training, held-out evaluation, public deployment, benchmark, rollback, and redeployment remain pending."
+  "note": "The owner authorized the remaining bounded AWS work despite the acknowledged absence of a hard USD 0 guarantee. Early budget-threshold approval and a reported destination confirmation were later superseded by the owner's explicit waiver of AWS Budget creation and email setup; no project Budget object or notification email is configured. Bootstrap and production Terraform are applied, a post-apply plan found no drift, live quota probes confirm the selected training and processing capacity, and the clean cloud data-preparation workflow published the current dataset and split identities recorded in evidence/cloud/live-data-preparation.json. Two historical local validation scoring processes reproduced all six quality vectors and every rank and score exactly, but their uncontrolled p95 timings varied, so the broad baselines_verified flag remains false until the protected cloud baseline completes. No release evidence mode is current until an immutable bundle is published; candidate training, held-out evaluation, public deployment, benchmark, rollback, and redeployment remain pending."
 }

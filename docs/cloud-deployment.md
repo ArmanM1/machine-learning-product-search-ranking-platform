@@ -4,7 +4,8 @@ Status: bootstrap and production Terraform are applied in `us-east-1`; all 57 ma
 
 ## Prerequisite evidence
 
-Do not run an apply until all fields below are recorded privately and the bounded plan is explicitly approved:
+Before the initial apply or any future reconciliation that may mutate state, require every field below to be
+recorded privately and the bounded plan to be explicitly approved:
 
 - AWS account identity and account plan.
 - The recorded owner-approved MFA exception, zero root access keys, and a verified non-root temporary-credential path. MFA will not be configured or requested again.
