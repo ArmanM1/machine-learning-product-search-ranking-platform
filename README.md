@@ -1,34 +1,113 @@
 # Machine Learning Product Search Ranking Platform
 
-An implementation and evidence framework for a reproducible experiment that reranks supplied product candidates for ambiguous shopping queries.
+[![Pull request checks](https://github.com/ArmanM1/machine-learning-product-search-ranking-platform/actions/workflows/pull-request.yml/badge.svg)](https://github.com/ArmanM1/machine-learning-product-search-ranking-platform/actions/workflows/pull-request.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-111111.svg)](LICENSE)
+[![Python 3.11](https://img.shields.io/badge/Python-3.11-3776AB.svg)](pyproject.toml)
+[![React 19](https://img.shields.io/badge/React-19-61DAFB.svg)](web/package.json)
 
-> **Implementation status:** active build, not a completed PRD release. No quality, latency, cloud-execution, deployment, or cost result is claimed until its corresponding evidence gate passes.
+An end-to-end applied-ML system for reranking supplied product candidates for ambiguous shopping queries. It turns Amazon Shopping Queries ESCI data into reproducible baselines, a fine-tuned cross-encoder, paired evaluation evidence, and a public serverless comparison experience.
 
-The planned controlled experiment is designed to compare deterministic controls, BM25, an unchanged pretrained cross-encoder, and a task-fine-tuned cross-encoder on the US-English portion of Amazon's public Shopping Queries ESCI dataset. Its evidence contract covers query-level metrics, paired confidence intervals, ablations, failures, runtime, and artifact provenance. The scope is candidate reranking—not full-catalog retrieval or a live marketplace.
+The project is deliberately more than a notebook: immutable artifacts, held-out access controls, ablations, promotion gates, rollback, infrastructure as code, and a recruiter-friendly evidence UI are part of the same versioned release path.
 
-## Guardrails
+![Minimalist product-search evidence interface in illustrative fixture mode](docs/assets/overview-fixture.png)
 
-- The official test set is inaccessible to normal local and CI commands.
-- Raw data and model artifacts are not committed.
-- Cloud writes require an operation-scoped, HMAC-bound financial snapshot and an atomic reservation in
-  the private S3 campaign ledger before the first mutation. Pricing and service-specific limits remain
-  separate fail-closed checks.
-- GitHub OIDC roles are bound to one protected environment and one workflow file on `main`; baseline,
-  trial-selection, benchmark, training, and deployment authority are not shared.
-- The owner waived AWS Budget creation and email confirmation. Public serving therefore uses an automatic
-  24-hour expiry and a least-privilege shutdown handler, but neither promotional credit nor these controls
-  can provide a hard USD 0 billing guarantee.
-- The AWS owner declined root MFA; this is recorded as a security deviation and prevents strict conformance with the original Milestone 0 acceptance criterion.
-- No resume-ready result exists while this notice remains.
+> UI preview captured from the repository's clearly labeled fixture mode. The final evidence commit replaces illustrative values with verified release artifacts and publishes the live CloudFront URL.
 
-## Local development
+## What this demonstrates
+
+- **Learning to rank:** BM25 and an unchanged pretrained cross-encoder are compared with a task-fine-tuned cross-encoder on identical candidate groups.
+- **Credible evaluation:** query-level graded nDCG, paired bootstrap confidence intervals, deterministic ranking artifacts, latency distributions, slices, wins, losses, and two controlled ablations.
+- **Leakage-resistant release engineering:** validation selects the model; the official test split is available only to two separately counted clean release jobs after trial selection is frozen.
+- **Production ML operations:** content-addressed data, digest-pinned containers, SageMaker Managed Spot training, immutable S3 evidence, promotion/retention decisions, Lambda aliases, CloudFront, rollback, and automatic public-serving expiry.
+- **Software quality:** typed Python and TypeScript, contract and integration tests, container/IaC/dependency scans, least-privilege GitHub OIDC roles, and Terraform drift checks.
+
+## System flow
+
+```mermaid
+flowchart LR
+    A[Amazon ESCI<br/>checksummed source] --> B[Deterministic<br/>query-level splits]
+    B --> C[BM25 + pretrained<br/>validation baselines]
+    B --> D[Fine-tuned cross-encoder<br/>+ two ablations]
+    C --> E[Frozen three-trial<br/>selection]
+    D --> E
+    E --> F[Two clean held-out<br/>Processing jobs]
+    F --> G{Quality and<br/>latency gate}
+    G -->|pass| H[Promote candidate]
+    G -->|fail| I[Retain baseline]
+    H --> J[Lambda + API Gateway<br/>+ CloudFront demo]
+    I --> J
+    J --> K[Benchmark · rollback<br/>· exact redeployment]
+```
+
+The serving surface reranks a known list of candidates; it is not a full-catalog retrieval engine or marketplace.
+
+## Stack
+
+| Layer | Technologies |
+|---|---|
+| Ranking | PyTorch, Transformers, sentence-transformers, BM25, scikit-learn |
+| Data and evidence | pandas, PyArrow, Pydantic, NumPy/SciPy, immutable JSON/Parquet artifacts |
+| API and UI | FastAPI, AWS Lambda container images, API Gateway, React, TypeScript, Vite |
+| Cloud | SageMaker Training/Processing, S3, ECR, CloudFront, EventBridge, CloudWatch |
+| Delivery | Terraform, GitHub Actions OIDC, pytest, Vitest, Playwright, Ruff, mypy, Trivy, Checkov |
+
+## Public API
+
+The same-origin demo exposes a small, evidence-first contract:
+
+| Route | Purpose |
+|---|---|
+| `GET /healthz` | Process health |
+| `GET /readyz` | Loaded model and release readiness |
+| `GET /api/v1/models` | Active model and comparison systems |
+| `GET /api/v1/queries` | Curated public query set |
+| `POST /api/v1/rank` | Rerank a supplied candidate list |
+| `GET /api/v1/comparisons/{query_id}` | Side-by-side ranking movement |
+| `GET /api/v1/evaluation` | Sanitized quality and latency evidence |
+
+See [API documentation](docs/api.md) for schemas, limits, and error behavior.
+
+## Run the local preview
+
+Prerequisites: Python 3.11, Node.js, npm, and [uv](https://docs.astral.sh/uv/).
 
 ```powershell
-python -m uv sync --extra dev
-python -m uv run pytest
-python -m uv run search-rank --help
-npm --prefix web install
+uv sync --frozen --extra dev
+uv run pytest
+
+npm --prefix web ci
+npm --prefix web run lint
+npm --prefix web test
 npm --prefix web run dev
 ```
 
-Full reproduction and verified results will be added only after the relevant milestone artifacts exist.
+Open `http://localhost:5173`. The default frontend mode uses explicit fixtures, labels every value as illustrative, and never presents them as measured results. Set the deployment-time `VITE_DATA_MODE=api` configuration to bind the UI to a verified public release.
+
+## Reproduce the evidence path
+
+```powershell
+uv run search-rank --help
+uv run python scripts/validate_experiment_config.py configs/experiments/candidate-v1.yaml
+uv run pytest tests/unit tests/contract tests/integration
+```
+
+Cloud writes are intentionally restricted to protected GitHub environments on `main`; see [cloud deployment](docs/cloud-deployment.md) for the exact workflow inputs and artifact handoffs.
+
+## Engineering notes
+
+- [Architecture](docs/architecture.md)
+- [Data card](docs/data-card.md)
+- [Model card](docs/model-card.md)
+- [Evaluation protocol](docs/evaluation.md)
+- [Reproducibility](docs/reproducibility.md)
+- [Security model](docs/security.md)
+- [Failure analysis](docs/failure-analysis.md)
+- [Requirements traceability](docs/requirements-traceability.md)
+
+## Current evidence boundary
+
+The AWS platform and content-addressed prepared dataset are live. Result-bearing claims—held-out quality, latency, selected model, public URL, and rollback proof—are published only after their automated gates complete. Machine-readable status lives in [`evidence/status.json`](evidence/status.json); fixture values in the screenshot are not portfolio claims.
+
+## License and data
+
+Project code is released under the [MIT License](LICENSE). The Amazon Shopping Queries ESCI source dataset has its own Apache-2.0 licensing and attribution requirements; raw data and trained artifacts are not committed to this repository. See the [license review](docs/license-review.md) and [data card](docs/data-card.md).
