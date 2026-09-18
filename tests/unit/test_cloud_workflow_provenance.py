@@ -473,7 +473,14 @@ def test_deploy_browser_checks_use_real_mode_status_and_candidate_canary() -> No
     assert deploy.count("verified: 'Verified release'") >= 2
     assert deploy.count("validation_only: 'Validation-only evidence'") >= 2
     assert "printf 'RELEASE_EVIDENCE_MODE=%s\\n'" in deploy
-    assert "await page.getByText(expectedStatus, { exact: true }).waitFor()" in deploy
+    assert deploy.count(
+        "await page.locator('.release-state').filter({ hasText: expectedStatus }).waitFor()"
+    ) == 3
+    assert deploy.count("name: 'Rerank workspace home', exact: true") == 3
+    assert deploy.count("/Compare product rankings|Inspect the selected baseline/i") == 3
+    assert "Compare a query" not in deploy
+    assert "name: 'Experiment', exact: true" not in deploy
+    assert deploy.count("name: 'Run details', exact: true") == 2
     assert "restore_canary_alias()" in deploy
     assert "trap 'restore_canary_alias \"$?\"' EXIT" in deploy
     assert "page.route(`${origin.origin}/**`" in deploy
@@ -705,9 +712,14 @@ def test_manual_rollback_is_prebound_smoked_then_cas_advanced_and_compensated() 
     assert "rollback-browser-desktop.png" in rollback
     assert "rollback-browser-mobile.png" in rollback
     assert "ROLLBACK_HAS_FINE_TUNED_CANDIDATE" in rollback
-    assert "await compare.waitFor()" in rollback
+    assert "await compare.waitFor()" not in rollback
+    assert "name: 'Rerank workspace home', exact: true" in rollback
+    assert "name: 'Run details', exact: true" in rollback
     assert "await labels.uncheck()" in rollback
-    assert "await page.getByRole('link', { name: 'Failures', exact: true }).click()" in rollback
+    assert (
+        "await page.getByRole('link', { name: 'Failures', exact: true }).first().click()"
+        in rollback
+    )
 
 
 def test_manual_rollback_resolves_live_infrastructure_from_protected_state() -> None:
