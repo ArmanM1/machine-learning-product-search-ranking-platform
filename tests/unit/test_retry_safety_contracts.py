@@ -73,7 +73,7 @@ def test_training_rerun_reuses_only_the_exact_existing_job() -> None:
     workflow = (WORKFLOWS / "train.yml").read_text(encoding="utf-8")
     submission = workflow.split("name: Upload frozen configuration and submit exactly one job", 1)[
         1
-    ].split("name: Wait for completion and capture sanitized evidence", 1)[0]
+    ].split("name: Refresh AWS credentials for training poll 1", 1)[0]
 
     assert 'run_token="h$(printf \'%s\' "${GITHUB_RUN_ID}" | sha256sum | cut -c1-16)"' in submission
     assert 'run_id="${PROJECT_NAME}-${ENVIRONMENT_NAME}-${RUN_KIND}-${run_token}"' in submission
@@ -82,17 +82,20 @@ def test_training_rerun_reuses_only_the_exact_existing_job() -> None:
     assert submission.index("aws sagemaker describe-training-job") < submission.index(
         "aws sagemaker create-training-job"
     )
-    for exact_field in (
-        ".AlgorithmSpecification == $expected[0].AlgorithmSpecification",
-        ".InputDataConfig == $expected[0].InputDataConfig",
-        ".OutputDataConfig == $expected[0].OutputDataConfig",
-        ".ResourceConfig == $expected[0].ResourceConfig",
-        ".StoppingCondition == $expected[0].StoppingCondition",
-        ".CheckpointConfig == $expected[0].CheckpointConfig",
-        ".Environment == $expected[0].Environment",
-        "($expected[0].Tags | sort_by(.Key, .Value))",
+    assert "scripts/validate_existing_training_job.py stamp" in submission
+    assert "--request training-job.json" in submission
+    assert submission.index("scripts/validate_existing_training_job.py stamp") < submission.index(
+        "aws sagemaker create-training-job"
+    )
+    for validation_argument in (
+        "scripts/validate_existing_training_job.py validate",
+        "--expected-request training-job.json",
+        '--description "${description}"',
+        "--tags existing-training-tags.json",
     ):
-        assert exact_field in submission
+        assert validation_argument in submission
+    assert ".InputDataConfig == $expected[0].InputDataConfig" not in submission
+    assert ".Tags | sort_by(.Key, .Value)" not in submission
     assert "InProgress|Stopping|Completed" in submission
     assert "Existing training job is terminal and unsuccessful" in submission
 
@@ -380,10 +383,14 @@ def test_every_post_bootstrap_aws_job_reserves_before_its_first_mutation() -> No
                 for index, step in enumerate(job["steps"])
                 if step.get("name") == "Atomically reserve the signed campaign capacity"
             ]
-            assert len(credential_positions) == len(reservation_positions) == 1, (
+            assert len(reservation_positions) == 1, (
                 workflow_name,
                 job_name,
             )
+            if (workflow_name, job_name) == ("train.yml", "submit"):
+                assert len(credential_positions) == 9
+            else:
+                assert len(credential_positions) == 1, (workflow_name, job_name)
             credential_position = credential_positions[0]
             reservation_position = reservation_positions[0]
             assert credential_position < reservation_position, (workflow_name, job_name)

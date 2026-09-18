@@ -45,6 +45,7 @@ jobs:
       FINANCIAL_SNAPSHOT_OBSERVED_AT: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_OBSERVED_AT }}
       FINANCIAL_SNAPSHOT_RECEIPT_SHA256: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_RECEIPT_SHA256 }}
       FINANCIAL_SNAPSHOT_HMAC_KEY: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_HMAC_KEY }}
+      TRAINING_REQUEST_CONTRACT_HMAC_KEY: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_HMAC_KEY }}
       FINANCIAL_RESERVATION_MAX_USD: ${{ secrets.AWS_FINANCIAL_RESERVATION_MAX_USD }}
       FINANCIAL_RESERVATION_REMAINING_COMMITTED_USD: ${{ secrets.AWS_FINANCIAL_RESERVATION_REMAINING_COMMITTED_USD }}
       FINANCIAL_RESERVATION_CPU_HOURS: ${{ secrets.AWS_FINANCIAL_RESERVATION_CPU_HOURS }}
@@ -555,27 +556,18 @@ jobs:
                 {Key: "CodeCommit", Value: $commit}
               ]
             }' > training-job.json
+          python scripts/validate_existing_training_job.py stamp \
+            --request training-job.json
 
           validate_existing_training_job() {
             local description="$1"
             local arn status
-            jq -e --slurpfile expected training-job.json '
-              .TrainingJobName == $expected[0].TrainingJobName and
-              .RoleArn == $expected[0].RoleArn and
-              .AlgorithmSpecification == $expected[0].AlgorithmSpecification and
-              .InputDataConfig == $expected[0].InputDataConfig and
-              .OutputDataConfig == $expected[0].OutputDataConfig and
-              .ResourceConfig == $expected[0].ResourceConfig and
-              .StoppingCondition == $expected[0].StoppingCondition and
-              .EnableManagedSpotTraining == $expected[0].EnableManagedSpotTraining and
-              .CheckpointConfig == $expected[0].CheckpointConfig and
-              .Environment == $expected[0].Environment' "${description}" >/dev/null
             arn="$(jq -er '.TrainingJobArn' "${description}")"
             aws sagemaker list-tags --resource-arn "${arn}" > existing-training-tags.json
-            jq -e --slurpfile expected training-job.json '
-              (.Tags | sort_by(.Key, .Value)) ==
-              ($expected[0].Tags | sort_by(.Key, .Value))' \
-              existing-training-tags.json >/dev/null
+            python scripts/validate_existing_training_job.py validate \
+              --expected-request training-job.json \
+              --description "${description}" \
+              --tags existing-training-tags.json
             status="$(jq -er '.TrainingJobStatus' "${description}")"
             case "${status}" in
               InProgress|Stopping|Completed) ;;
@@ -606,15 +598,100 @@ jobs:
           fi
           printf '%s' "${run_id}" > job-name.txt
           printf '%s' "${output_uri}" > output-uri.txt
-      - name: Wait for completion and capture sanitized evidence
+      - name: Refresh AWS credentials for training poll 1
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-train-poll-1-${{ github.run_id }}
+          mask-aws-account-id: true
+      - name: Poll training status in bounded window 1
+        id: training-poll-1
+        uses: ./.github/actions/poll-sagemaker-training
+      - name: Refresh AWS credentials for training poll 2
+        if: steps.training-poll-1.outputs.terminal != 'true'
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-train-poll-2-${{ github.run_id }}
+          mask-aws-account-id: true
+      - name: Poll training status in bounded window 2
+        id: training-poll-2
+        if: steps.training-poll-1.outputs.terminal != 'true'
+        uses: ./.github/actions/poll-sagemaker-training
+      - name: Refresh AWS credentials for training poll 3
+        if: steps.training-poll-1.outputs.terminal != 'true' && steps.training-poll-2.outputs.terminal != 'true'
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-train-poll-3-${{ github.run_id }}
+          mask-aws-account-id: true
+      - name: Poll training status in bounded window 3
+        id: training-poll-3
+        if: steps.training-poll-1.outputs.terminal != 'true' && steps.training-poll-2.outputs.terminal != 'true'
+        uses: ./.github/actions/poll-sagemaker-training
+      - name: Refresh AWS credentials for training poll 4
+        if: steps.training-poll-1.outputs.terminal != 'true' && steps.training-poll-2.outputs.terminal != 'true' && steps.training-poll-3.outputs.terminal != 'true'
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-train-poll-4-${{ github.run_id }}
+          mask-aws-account-id: true
+      - name: Poll training status in bounded window 4
+        id: training-poll-4
+        if: steps.training-poll-1.outputs.terminal != 'true' && steps.training-poll-2.outputs.terminal != 'true' && steps.training-poll-3.outputs.terminal != 'true'
+        uses: ./.github/actions/poll-sagemaker-training
+      - name: Refresh AWS credentials for training poll 5
+        if: steps.training-poll-1.outputs.terminal != 'true' && steps.training-poll-2.outputs.terminal != 'true' && steps.training-poll-3.outputs.terminal != 'true' && steps.training-poll-4.outputs.terminal != 'true'
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-train-poll-5-${{ github.run_id }}
+          mask-aws-account-id: true
+      - name: Poll training status in bounded window 5
+        id: training-poll-5
+        if: steps.training-poll-1.outputs.terminal != 'true' && steps.training-poll-2.outputs.terminal != 'true' && steps.training-poll-3.outputs.terminal != 'true' && steps.training-poll-4.outputs.terminal != 'true'
+        uses: ./.github/actions/poll-sagemaker-training
+      - name: Refresh AWS credentials for training poll 6
+        if: steps.training-poll-1.outputs.terminal != 'true' && steps.training-poll-2.outputs.terminal != 'true' && steps.training-poll-3.outputs.terminal != 'true' && steps.training-poll-4.outputs.terminal != 'true' && steps.training-poll-5.outputs.terminal != 'true'
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-train-poll-6-${{ github.run_id }}
+          mask-aws-account-id: true
+      - name: Poll training status in bounded window 6
+        id: training-poll-6
+        if: steps.training-poll-1.outputs.terminal != 'true' && steps.training-poll-2.outputs.terminal != 'true' && steps.training-poll-3.outputs.terminal != 'true' && steps.training-poll-4.outputs.terminal != 'true' && steps.training-poll-5.outputs.terminal != 'true'
+        uses: ./.github/actions/poll-sagemaker-training
+      - name: Refresh AWS credentials for training poll 7
+        if: steps.training-poll-1.outputs.terminal != 'true' && steps.training-poll-2.outputs.terminal != 'true' && steps.training-poll-3.outputs.terminal != 'true' && steps.training-poll-4.outputs.terminal != 'true' && steps.training-poll-5.outputs.terminal != 'true' && steps.training-poll-6.outputs.terminal != 'true'
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-train-poll-7-${{ github.run_id }}
+          mask-aws-account-id: true
+      - name: Poll training status in bounded window 7
+        id: training-poll-7
+        if: steps.training-poll-1.outputs.terminal != 'true' && steps.training-poll-2.outputs.terminal != 'true' && steps.training-poll-3.outputs.terminal != 'true' && steps.training-poll-4.outputs.terminal != 'true' && steps.training-poll-5.outputs.terminal != 'true' && steps.training-poll-6.outputs.terminal != 'true'
+        uses: ./.github/actions/poll-sagemaker-training
+      - name: Refresh AWS credentials for final training evidence
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-train-evidence-${{ github.run_id }}
+          mask-aws-account-id: true
+      - name: Capture completion and sanitized evidence
         shell: bash
         run: |
           set -euo pipefail
           job_name="$(cat job-name.txt)"
-          set +e
-          aws sagemaker wait training-job-completed-or-stopped --training-job-name "${job_name}"
-          waiter_status=$?
-          set -e
           aws sagemaker describe-training-job --training-job-name "${job_name}" > training-job-description-private.json
           job_arn="$(jq -r '.TrainingJobArn' training-job-description-private.json)"
           [[ "${job_arn}" =~ ^arn:aws:sagemaker:us-east-1:[0-9]{12}:training-job/[A-Za-z0-9-]+$ ]]
@@ -712,7 +789,7 @@ jobs:
             model_artifact_key: (.ModelArtifacts.S3ModelArtifacts | ltrimstr($artifact_prefix))
           }' training-job-description-private.json > training-job-evidence.json
           status="$(jq -r '.status' training-job-evidence.json)"
-          if [[ "${waiter_status}" -ne 0 || "${status}" != "Completed" ]]; then
+          if [[ "${status}" != "Completed" ]]; then
             echo "Training job did not complete successfully; inspect private AWS logs." >&2
             exit 1
           fi
