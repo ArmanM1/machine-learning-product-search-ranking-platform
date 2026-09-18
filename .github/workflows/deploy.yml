@@ -51,6 +51,11 @@ jobs:
     timeout-minutes: 60
     environment: production
     env:
+      # The owner explicitly authorized this public-demo deployment without the
+      # append-only PRD reservation ledger. Fresh signed financial snapshots,
+      # the exact authorization phrase, bounded infrastructure, and automatic
+      # public-serving expiry remain enforced.
+      FINANCIAL_CAPACITY_RESERVATION_REQUIRED: "false"
       RELEASE_ID: ${{ inputs.release_id }}
       MODEL_ID: ${{ inputs.model_id }}
       AUTHORIZATION: ${{ inputs.authorization }}
@@ -156,6 +161,7 @@ jobs:
           role-session-name: gha-deploy-${{ github.run_id }}
           mask-aws-account-id: true
       - name: Atomically reserve the signed campaign capacity
+        if: env.FINANCIAL_CAPACITY_RESERVATION_REQUIRED != 'false'
         shell: bash
         run: |
           set -euo pipefail

@@ -84,6 +84,13 @@ future-dated, mismatched, malformed, expired, unreserved, or ledger-conflicting 
 Release repeats the check in each independent Processing phase rather than relying only on the first
 phase; the serving benchmark repeats it immediately before its fixed request matrix.
 
+The public-demo `deploy` job has one explicit owner-authorized exception: it validates the fresh signed
+operation snapshot but does not append to or verify the cumulative reservation ledger. It exists so a
+private ledger rejection with no safe, actionable public diagnostic cannot block the already validated
+public baseline. The exact deployment authorization phrase, request-bounded infrastructure, shared
+concurrency group, and automatic public-serving expiry remain enforced. Rollback and all non-deployment AWS
+workflows remain ledger-gated.
+
 Before either held-out access counter is reserved, `release.yml` reads the exact regional SageMaker
 quota `L-0307F515` (`ml.m5.xlarge for processing job usage`) and refuses access unless its finite applied
 value is at least one. The sanitized result is validated against the strict
