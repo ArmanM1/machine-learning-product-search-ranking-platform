@@ -65,7 +65,6 @@ jobs:
       FINANCIAL_SNAPSHOT_MAX_AGE_SECONDS: "86400"
       TF_STATE_BUCKET: ${{ vars.AWS_TERRAFORM_STATE_BUCKET }}
       ARTIFACT_BUCKET: ${{ vars.AWS_ARTIFACT_BUCKET }}
-      LAMBDA_FUNCTION_NAME: ${{ vars.AWS_LAMBDA_FUNCTION_NAME }}
       BENCHMARK_RUN_ID: github-${{ github.run_id }}-attempt-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -84,7 +83,6 @@ jobs:
           [[ "${RELEASE_ID}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{2,62}$ ]]
           [[ "${MODEL_ID}" =~ ^[A-Za-z0-9][A-Za-z0-9._@-]{2,99}$ ]]
           : "${ARTIFACT_BUCKET:?Missing AWS_ARTIFACT_BUCKET variable}"
-          : "${LAMBDA_FUNCTION_NAME:?Missing AWS_LAMBDA_FUNCTION_NAME variable}"
           mkdir -p .benchmark-evidence
           PYTHONPATH=src python scripts/validate_financial_snapshot.py emit \
             --output .benchmark-evidence/financial-snapshot.json
@@ -304,6 +302,7 @@ jobs:
           manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
           checksums = json.loads(Path("bundle-checksums.json").read_text(encoding="utf-8"))
           public = json.loads(Path("public-evidence.json").read_text(encoding="utf-8"))
+          deployment = json.loads(Path("deployment-evidence.json").read_text(encoding="utf-8"))
           objects = json.loads(Path("promoted-bundle-objects.json").read_text(encoding="utf-8"))
           expected_release = os.environ["RELEASE_ID"]
           expected_model = os.environ["MODEL_ID"]
@@ -411,6 +410,33 @@ jobs:
               raise SystemExit("public run and release Git identities differ")
           if run.get("model_artifact_checksum") != model_checksum:
               raise SystemExit("public run and promoted model checksums differ")
+
+          controlled_cold_start = deployment.get("controlled_cold_start")
+          identifiers = (
+              controlled_cold_start.get("identifiers")
+              if isinstance(controlled_cold_start, dict)
+              else None
+          )
+          function_name = (
+              identifiers.get("function_name") if isinstance(identifiers, dict) else None
+          )
+          if (
+              deployment.get("schema_version") != "1.0.0"
+              or deployment.get("artifact_type") != "deployment_evidence"
+              or deployment.get("release_id") != expected_release
+              or deployment.get("model_id") != expected_model
+              or deployment.get("smoke_tests_passed") is not True
+              or not isinstance(identifiers, dict)
+              or identifiers.get("release_id") != expected_release
+              or identifiers.get("model_id") != expected_model
+              or identifiers.get("region") != os.environ["AWS_REGION"]
+              or identifiers.get("alias") != "candidate"
+              or identifiers.get("function_version")
+              != deployment.get("production_lambda_version")
+              or not isinstance(function_name, str)
+              or re.fullmatch(r"[A-Za-z0-9_-]{1,64}", function_name) is None
+          ):
+              raise SystemExit("deployment evidence does not bind a valid live Lambda target")
           if mode == "validation_only":
               if (
                   run.get("status") != "validation_only"
@@ -455,6 +481,7 @@ jobs:
               handle.write(f"DATASET_MANIFEST_HASH={dataset_hash}\n")
               handle.write(f"SPLIT_MANIFEST_HASH={split_hash}\n")
               handle.write(f"MODEL_ARTIFACT_CHECKSUM={model_checksum}\n")
+              handle.write(f"LAMBDA_FUNCTION_NAME={function_name}\n")
           PY
       - name: Verify the live bounded Lambda configuration
         shell: bash

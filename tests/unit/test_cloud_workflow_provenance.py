@@ -560,6 +560,16 @@ def test_manual_rollback_resolves_live_infrastructure_from_protected_state() -> 
     assert "CLOUDFRONT_URL: ${{ vars.AWS_CLOUDFRONT_URL }}" not in rollback_job
 
 
+def test_benchmark_resolves_live_lambda_from_bound_deployment_evidence() -> None:
+    benchmark = (WORKFLOWS / "benchmark-serving.yml").read_text(encoding="utf-8")
+
+    assert 'deployment = json.loads(Path("deployment-evidence.json")' in benchmark
+    assert 'handle.write(f"LAMBDA_FUNCTION_NAME={function_name}\\n")' in benchmark
+    assert "deployment evidence does not bind a valid live Lambda target" in benchmark
+    assert "LAMBDA_FUNCTION_NAME: ${{ vars.AWS_LAMBDA_FUNCTION_NAME }}" not in benchmark
+    assert "terraform output -raw lambda_function_name" not in benchmark
+
+
 def test_deploy_static_and_compensation_paths_are_fail_closed() -> None:
     deploy = (WORKFLOWS / "deploy.yml").read_text(encoding="utf-8")
     iam = (ROOT / "infra/terraform/modules/platform/iam.tf").read_text(encoding="utf-8")
