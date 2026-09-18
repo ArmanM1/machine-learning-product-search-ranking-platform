@@ -62,6 +62,10 @@ describe('verified experiment provenance', () => {
     expect(screen.getByRole('button', { name: 'Copy evaluation image digest' })).toBeInTheDocument()
     expect(screen.getByText(run.split_manifest_hash)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Copy split manifest hash' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Open frozen YAML' })).toHaveAttribute(
+      'href',
+      `https://github.com/ArmanM1/machine-learning-product-search-ranking-platform/blob/${run.code_commit}/configs/experiments/candidate-v1.yaml`,
+    )
     expect(screen.queryByRole('heading', { name: 'Hardware and boundary' })).not.toBeInTheDocument()
     expect(screen.getByLabelText('Experiment configuration and execution evidence')).toHaveClass('verified-layout')
     expect(screen.getByRole('button', { name: 'Copy release invocation reference' })).toBeInTheDocument()

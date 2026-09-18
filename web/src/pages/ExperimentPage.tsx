@@ -27,6 +27,12 @@ export function ExperimentPage() {
 
   const run = resource.data
   const hasSeparatedExecutions = Boolean(run.training_provenance && run.evaluation_provenance)
+  const frozenConfigPath = run.training_provenance
+    ? 'configs/experiments/candidate-v1.yaml'
+    : 'configs/experiments/baselines-v1.yaml'
+  const frozenConfigUrl = run.evidence_mode === 'fixture' || !run.code_commit
+    ? null
+    : `https://github.com/ArmanM1/machine-learning-product-search-ranking-platform/blob/${run.code_commit}/${frozenConfigPath}`
   const modeLabel = run.evidence_mode === 'fixture'
     ? 'Illustrative fixture · no executed run'
     : run.evidence_mode === 'validation_only'
@@ -55,7 +61,13 @@ export function ExperimentPage() {
         <dl className="provenance-list">
           <div><dt>Dataset hash</dt><dd><CopyField label="dataset hash" value={run.data_hash} /></dd></div>
           <div><dt>Split manifest</dt><dd><CopyField label="split manifest hash" value={run.split_manifest_hash} /></dd></div>
-          <div><dt>Training configuration</dt><dd><CopyField label="configuration hash" value={run.configuration_hash} /></dd></div>
+          <div>
+            <dt>Training configuration</dt>
+            <dd>
+              <CopyField label="configuration hash" value={run.configuration_hash} />
+              {frozenConfigUrl ? <a className="text-link" href={frozenConfigUrl} target="_blank" rel="noreferrer">Open frozen YAML</a> : null}
+            </dd>
+          </div>
           <div><dt>Code commit</dt><dd><CopyField label="code commit" value={run.code_commit} /></dd></div>
           {run.training_provenance && run.evaluation_provenance ? <>
             <div><dt>Trial selection</dt><dd><CopyField label="trial selection hash" value={run.training_provenance.trial_selection_sha256} /></dd></div>
