@@ -281,6 +281,8 @@ def test_read_only_diagnostic_job_cannot_submit_compute_or_publish_raw_reason() 
     mode_guard = jobs["validate-mode"]
     guard_source = json.dumps(mode_guard, sort_keys=True)
     assert mode_guard["timeout-minutes"] == 2
+    assert mode_guard["permissions"] == {"contents": "read"}
+    assert "id-token" not in mode_guard["permissions"]
     assert "QUOTA_PROBE_ONLY" in guard_source
     assert "DIAGNOSTIC_ONLY" in guard_source
     assert "mutually exclusive" in guard_source
