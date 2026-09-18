@@ -14,14 +14,21 @@ import re
 from pathlib import Path
 from typing import Any, Literal, cast
 
-DocumentKind = Literal["boundary", "platform-seed-policy", "state-policy", "trust"]
+DocumentKind = Literal[
+    "boundary",
+    "dev-lifecycle-policy",
+    "platform-seed-policy",
+    "state-policy",
+    "trust",
+]
 Environment = Literal["dev", "prod"]
-TrustPurpose = Literal["platform-seed", "state-bootstrap"]
+TrustPurpose = Literal["dev-lifecycle", "platform-seed", "state-bootstrap"]
 
 PROJECT = "product-search-ranking"
 DEFAULT_ENVIRONMENT: Environment = "prod"
 REGION = "us-east-1"
 STATE_ROLE_NAME = "product-search-github-bootstrap"
+DEV_LIFECYCLE_ROLE_NAME = "product-search-github-dev-lifecycle"
 REPOSITORY_NAME = "machine-learning-product-search-ranking-platform"
 
 ACCOUNT_RE = re.compile(r"^[0-9]{12}$")
@@ -735,6 +742,210 @@ def build_platform_seed_policy(
     return document
 
 
+def build_dev_lifecycle_policy(account_id: str) -> dict[str, Any]:
+    """Return the external, destroy-only authority for the disposable dev proof profile.
+
+    The lifecycle role is intentionally outside the Terraform state that it destroys. Its
+    mutating authority is limited to deterministic dev resources; production resources and
+    production-tagged resources receive explicit denies. Public-serving resources are read-only
+    because the disposable proof profile rejects them before apply.
+    """
+
+    arn = _arns(account_id, "dev")
+    lifecycle_role = f"arn:aws:iam::{account_id}:role/{DEV_LIFECYCLE_ROLE_NAME}"
+    log_groups = [
+        f"arn:aws:logs:{REGION}:{account_id}:log-group:/aws/apigateway/{arn['name']}-candidate",
+        f"arn:aws:logs:{REGION}:{account_id}:log-group:/aws/apigateway/{arn['name']}-production",
+        f"arn:aws:logs:{REGION}:{account_id}:log-group:/aws/lambda/{arn['name']}-api",
+    ]
+    production_resources = [
+        f"arn:aws:s3:::{PROJECT}-prod-{account_id}-{REGION}-artifacts",
+        f"arn:aws:s3:::{PROJECT}-prod-{account_id}-{REGION}-artifacts/*",
+        f"arn:aws:s3:::{PROJECT}-prod-{account_id}-{REGION}-site",
+        f"arn:aws:s3:::{PROJECT}-prod-{account_id}-{REGION}-site/*",
+        f"arn:aws:s3:::{PROJECT}-terraform-state-{account_id}-{REGION}/{PROJECT}/prod/*",
+        f"arn:aws:ecr:{REGION}:{account_id}:repository/{PROJECT}-prod-*",
+        f"arn:aws:iam::{account_id}:role/{PROJECT}-prod-*",
+        f"arn:aws:lambda:{REGION}:{account_id}:function:{PROJECT}-prod-*",
+        f"arn:aws:logs:{REGION}:{account_id}:log-group:/aws/*/{PROJECT}-prod-*",
+        f"arn:aws:logs:{REGION}:{account_id}:log-group:/aws/*/{PROJECT}-prod-*:*",
+        f"arn:aws:events:{REGION}:{account_id}:rule/{PROJECT}-prod-*",
+        f"arn:aws:sns:{REGION}:{account_id}:{PROJECT}-prod-*",
+        f"arn:aws:budgets::{account_id}:budget/{PROJECT}-prod-*",
+    ]
+    document = {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Sid": "DenyProductionTaggedResources",
+                "Effect": "Deny",
+                "Action": "*",
+                "Resource": "*",
+                "Condition": {
+                    "StringEquals": {
+                        "aws:ResourceTag/Environment": "prod",
+                        "aws:ResourceTag/Project": PROJECT,
+                    }
+                },
+            },
+            {
+                "Sid": "DenyNamedProductionResources",
+                "Effect": "Deny",
+                "Action": "*",
+                "Resource": production_resources,
+            },
+            _statement(
+                "DevTerraformStateBucketMetadata",
+                ["s3:GetBucketLocation", "s3:GetBucketVersioning"],
+                [arn["state_bucket"]],
+            ),
+            _statement(
+                "ListOnlyDevTerraformState",
+                ["s3:ListBucket"],
+                [arn["state_bucket"]],
+                {
+                    "StringLike": {
+                        "s3:prefix": [
+                            f"{PROJECT}/dev/terraform.tfstate",
+                            f"{PROJECT}/dev/terraform.tfstate.tflock",
+                        ]
+                    }
+                },
+            ),
+            _statement(
+                "DevTerraformStateOnly",
+                ["s3:GetObject", "s3:PutObject"],
+                [arn["state_object"]],
+            ),
+            _statement(
+                "DevTerraformLockOnly",
+                ["s3:DeleteObject", "s3:GetObject", "s3:PutObject"],
+                [arn["state_lock"]],
+            ),
+            _statement(
+                "DestroyOnlyDevBuckets",
+                [
+                    "s3:AbortMultipartUpload",
+                    "s3:DeleteBucket",
+                    "s3:DeleteBucketPolicy",
+                    "s3:DeleteBucketWebsite",
+                    "s3:DeleteObject",
+                    "s3:DeleteObjectVersion",
+                    "s3:Get*",
+                    "s3:List*",
+                    "s3:PutBucketOwnershipControls",
+                    "s3:PutBucketPublicAccessBlock",
+                    "s3:PutBucketTagging",
+                    "s3:PutBucketVersioning",
+                    "s3:PutEncryptionConfiguration",
+                    "s3:PutLifecycleConfiguration",
+                ],
+                [
+                    arn["artifact_bucket"],
+                    f"{arn['artifact_bucket']}/*",
+                    arn["site_bucket"],
+                    f"{arn['site_bucket']}/*",
+                ],
+            ),
+            _statement(
+                "DestroyOnlyDevRepositories",
+                [
+                    "ecr:BatchDeleteImage",
+                    "ecr:DeleteLifecyclePolicy",
+                    "ecr:DeleteRepository",
+                    "ecr:DeleteRepositoryPolicy",
+                    "ecr:DescribeImages",
+                    "ecr:DescribeRepositories",
+                    "ecr:GetLifecyclePolicy",
+                    "ecr:GetLifecyclePolicyPreview",
+                    "ecr:GetRepositoryPolicy",
+                    "ecr:ListImages",
+                    "ecr:ListTagsForResource",
+                    "ecr:UntagResource",
+                ],
+                arn["repositories"],
+            ),
+            _statement(
+                "DestroyOnlyTerraformManagedDevRoles",
+                [
+                    "iam:DeleteRole",
+                    "iam:DeleteRolePolicy",
+                    "iam:GetRole",
+                    "iam:GetRolePolicy",
+                    "iam:ListAttachedRolePolicies",
+                    "iam:ListInstanceProfilesForRole",
+                    "iam:ListRolePolicies",
+                    "iam:ListRoleTags",
+                    "iam:RemoveRoleFromInstanceProfile",
+                    "iam:UntagRole",
+                ],
+                arn["roles"],
+            ),
+            _statement(
+                "DestroyOnlyBaseDevLogGroups",
+                ["logs:DeleteLogGroup", "logs:ListTagsForResource"],
+                log_groups,
+            ),
+            _statement(
+                "AuditLifecycleRoleOnly",
+                [
+                    "iam:GetRole",
+                    "iam:GetRolePolicy",
+                    "iam:ListAttachedRolePolicies",
+                    "iam:ListRolePolicies",
+                ],
+                [lifecycle_role],
+            ),
+            _statement(
+                "ReadExternalTrustRoots",
+                ["iam:GetOpenIDConnectProvider", "iam:GetPolicy", "iam:GetPolicyVersion"],
+                [
+                    f"arn:aws:iam::{account_id}:oidc-provider/token.actions.githubusercontent.com",
+                    arn["boundary"],
+                ],
+            ),
+            _statement(
+                "ReadOnlyResidualInventory",
+                [
+                    "apigateway:GET",
+                    "cloudfront:ListDistributions",
+                    "cloudfront:ListFunctions",
+                    "cloudfront:ListOriginAccessControls",
+                    "cloudfront:ListResponseHeadersPolicies",
+                    "events:ListRules",
+                    "logs:DescribeLogGroups",
+                    "sagemaker:ListProcessingJobs",
+                    "sagemaker:ListTrainingJobs",
+                    "sns:ListTopics",
+                    "sts:GetCallerIdentity",
+                ],
+                ["*"],
+            ),
+            _statement(
+                "ReadOnlyDevServingAbsence",
+                [
+                    "lambda:GetFunction",
+                    "lambda:ListAliases",
+                    "lambda:ListVersionsByFunction",
+                ],
+                [f"arn:aws:lambda:{REGION}:{account_id}:function:{arn['name']}-api*"],
+            ),
+            _statement(
+                "ReadOnlyDevBudgets",
+                [
+                    "budgets:DescribeBudget",
+                    "budgets:DescribeNotificationsForBudget",
+                    "budgets:DescribeSubscribersForNotification",
+                    "budgets:ViewBudget",
+                ],
+                [f"arn:aws:budgets::{account_id}:budget/{arn['name']}-*"],
+            ),
+        ],
+    }
+    validate_dev_lifecycle_policy(document, account_id)
+    return document
+
+
 def build_trust(
     account_id: str,
     owner: str,
@@ -749,6 +960,9 @@ def build_trust(
     elif purpose == "state-bootstrap":
         github_environment = "aws-state-bootstrap"
         workflow_file = "bootstrap-infrastructure.yml"
+    elif purpose == "dev-lifecycle":
+        github_environment = "aws-dev-lifecycle"
+        workflow_file = "dev-teardown.yml"
     else:
         raise ValueError("trust purpose is invalid")
     provider = f"arn:aws:iam::{account_id}:oidc-provider/token.actions.githubusercontent.com"
@@ -914,6 +1128,91 @@ def validate_seed_policy(
         raise ValueError("seed inline policy exceeds AWS's 10,240-character role quota")
 
 
+def validate_dev_lifecycle_policy(document: dict[str, Any], account_id: str) -> None:
+    """Fail closed if the external dev lifecycle policy can mutate outside dev."""
+
+    arn = _arns(account_id, "dev")
+    statements = document.get("Statement")
+    if not isinstance(statements, list):
+        raise ValueError("dev lifecycle policy statements must be a list")
+    allows = [statement for statement in statements if statement.get("Effect") == "Allow"]
+    denies = [statement for statement in statements if statement.get("Effect") == "Deny"]
+    if {statement.get("Sid") for statement in denies} != {
+        "DenyNamedProductionResources",
+        "DenyProductionTaggedResources",
+    }:
+        raise ValueError("dev lifecycle policy must retain both production denies")
+
+    forbidden = {
+        "apigateway:DELETE",
+        "apigateway:PATCH",
+        "apigateway:POST",
+        "apigateway:PUT",
+        "cloudfront:DeleteDistribution",
+        "cloudfront:DeleteFunction",
+        "cloudfront:DeleteOriginAccessControl",
+        "cloudfront:DeleteResponseHeadersPolicy",
+        "cloudfront:UpdateDistribution",
+        "iam:CreateRole",
+        "iam:DeleteOpenIDConnectProvider",
+        "iam:PassRole",
+        "sagemaker:StopProcessingJob",
+        "sagemaker:StopTrainingJob",
+    }
+    allow_actions: set[str] = set()
+    for statement in allows:
+        action_value = statement.get("Action")
+        actions = {action_value} if isinstance(action_value, str) else set(action_value or [])
+        allow_actions.update(actions)
+        resources_value = statement.get("Resource")
+        resources = (
+            [resources_value] if isinstance(resources_value, str) else list(resources_value or [])
+        )
+        has_mutation = any(
+            action.startswith(("ecr:Delete", "ecr:Untag", "s3:Delete", "s3:Put"))
+            or action in {"ecr:BatchDeleteImage", "s3:AbortMultipartUpload"}
+            or action.startswith(("iam:Delete", "iam:Remove", "iam:Untag", "logs:Delete"))
+            or action in {"s3:DeleteObject", "s3:PutObject"}
+            for action in actions
+        )
+        if has_mutation and "*" in resources:
+            raise ValueError("dev lifecycle mutations must never target wildcard resources")
+    if allow_actions.intersection(forbidden):
+        raise ValueError("dev lifecycle policy includes forbidden serving or production authority")
+    if "*" in allow_actions:
+        raise ValueError("dev lifecycle allow statements must not grant wildcard actions")
+
+    lifecycle_role = f"arn:aws:iam::{account_id}:role/{DEV_LIFECYCLE_ROLE_NAME}"
+    self_statements = [
+        statement
+        for statement in allows
+        if lifecycle_role
+        in (
+            [statement.get("Resource")]
+            if isinstance(statement.get("Resource"), str)
+            else statement.get("Resource", [])
+        )
+    ]
+    if len(self_statements) != 1 or self_statements[0].get("Sid") != "AuditLifecycleRoleOnly":
+        raise ValueError("dev lifecycle role may reference itself only for exact read-only audit")
+    if any(action.startswith("iam:Delete") for action in self_statements[0]["Action"]):
+        raise ValueError("dev lifecycle role must not delete itself")
+
+    destructive = next(
+        statement
+        for statement in allows
+        if statement.get("Sid") == "DestroyOnlyTerraformManagedDevRoles"
+    )
+    if set(destructive["Resource"]) != set(arn["roles"]):
+        raise ValueError("dev lifecycle role deletion must target the exact Terraform role set")
+    for statement in allows:
+        serialized = json.dumps(statement, sort_keys=True)
+        if f"{PROJECT}-prod-" in serialized or f"/{PROJECT}/prod/" in serialized:
+            raise ValueError("production references are permitted only in explicit deny statements")
+    if len(json.dumps(document, separators=(",", ":"), sort_keys=True)) > 10240:
+        raise ValueError("dev lifecycle inline policy exceeds AWS's 10,240-character role quota")
+
+
 def render_document(
     kind: DocumentKind,
     account_id: str,
@@ -926,6 +1225,10 @@ def render_document(
     _validate_identity(account_id, owner, owner_id, repository_id)
     if kind == "boundary":
         return build_boundary(account_id, environment)
+    if kind == "dev-lifecycle-policy":
+        if environment != "dev":
+            raise ValueError("dev lifecycle policy is available only for environment=dev")
+        return build_dev_lifecycle_policy(account_id)
     if kind == "platform-seed-policy":
         return build_platform_seed_policy(account_id, environment)
     if kind == "state-policy":
@@ -938,7 +1241,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--kind",
         required=True,
-        choices=("boundary", "platform-seed-policy", "state-policy", "trust"),
+        choices=(
+            "boundary",
+            "dev-lifecycle-policy",
+            "platform-seed-policy",
+            "state-policy",
+            "trust",
+        ),
     )
     parser.add_argument("--account-id", required=True)
     parser.add_argument("--repository-owner", required=True)
@@ -947,7 +1256,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--environment", choices=("dev", "prod"), default="prod")
     parser.add_argument(
         "--trust-purpose",
-        choices=("platform-seed", "state-bootstrap"),
+        choices=("dev-lifecycle", "platform-seed", "state-bootstrap"),
         default="platform-seed",
     )
     parser.add_argument("--output", type=Path)

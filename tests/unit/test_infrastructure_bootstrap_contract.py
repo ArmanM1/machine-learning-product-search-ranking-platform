@@ -10,12 +10,14 @@ import yaml
 from scripts.render_bootstrap_iam import (
     APPROVED_BOUNDARY_WILDCARDS,
     BOUNDARY_NAME,
+    DEV_LIFECYCLE_ROLE_NAME,
     PROJECT,
     SEED_ROLE_NAME,
     STATE_BUCKET_READ_ACTIONS,
     STATE_ROLE_NAME,
     boundary_name,
     build_boundary,
+    build_dev_lifecycle_policy,
     build_platform_seed_policy,
     build_state_policy,
     build_trust,
@@ -248,6 +250,65 @@ def test_seed_trust_uses_immutable_repository_identity_and_one_environment() -> 
     assert "job_workflow_ref" not in json.dumps(state_trust, sort_keys=True)
 
 
+def test_dev_lifecycle_trust_and_policy_are_external_exact_and_nonproduction() -> None:
+    trust = build_trust(ACCOUNT_ID, OWNER, OWNER_ID, REPOSITORY_ID, "dev-lifecycle")
+    condition = trust["Statement"][0]["Condition"]["StringEquals"]
+    assert condition["token.actions.githubusercontent.com:sub"].endswith(
+        ":environment:aws-dev-lifecycle:workflow_ref:"
+        f"{OWNER}/machine-learning-product-search-ranking-platform/.github/workflows/"
+        "dev-teardown.yml@refs/heads/main"
+    )
+    assert condition["token.actions.githubusercontent.com:ref"] == "refs/heads/main"
+
+    policy = build_dev_lifecycle_policy(ACCOUNT_ID)
+    compact = json.dumps(policy, separators=(",", ":"), sort_keys=True)
+    allows = [statement for statement in policy["Statement"] if statement["Effect"] == "Allow"]
+    denies = [statement for statement in policy["Statement"] if statement["Effect"] == "Deny"]
+    allow_actions = {
+        action
+        for statement in allows
+        for action in (
+            [statement["Action"]] if isinstance(statement["Action"], str) else statement["Action"]
+        )
+    }
+
+    assert len(compact) <= 10240
+    assert {statement["Sid"] for statement in denies} == {
+        "DenyNamedProductionResources",
+        "DenyProductionTaggedResources",
+    }
+    assert all(
+        f"{PROJECT}-prod-" not in json.dumps(statement, sort_keys=True)
+        and f"/{PROJECT}/prod/" not in json.dumps(statement, sort_keys=True)
+        for statement in allows
+    )
+    assert not allow_actions & {
+        "apigateway:DELETE",
+        "cloudfront:DeleteDistribution",
+        "cloudfront:DeleteFunction",
+        "cloudfront:DeleteOriginAccessControl",
+        "cloudfront:DeleteResponseHeadersPolicy",
+        "iam:DeleteOpenIDConnectProvider",
+        "iam:PassRole",
+        "sagemaker:StopProcessingJob",
+        "sagemaker:StopTrainingJob",
+    }
+    lifecycle_role = f"arn:aws:iam::{ACCOUNT_ID}:role/{DEV_LIFECYCLE_ROLE_NAME}"
+    self_reference = [
+        statement
+        for statement in allows
+        if lifecycle_role
+        in (
+            [statement["Resource"]]
+            if isinstance(statement["Resource"], str)
+            else statement["Resource"]
+        )
+    ]
+    assert len(self_reference) == 1
+    assert self_reference[0]["Sid"] == "AuditLifecycleRoleOnly"
+    assert not any(action.startswith("iam:Delete") for action in self_reference[0]["Action"])
+
+
 def test_state_bootstrap_preflights_live_authority_before_fixed_six_resource_apply() -> None:
     workflow_path = ROOT / ".github" / "workflows" / "bootstrap-infrastructure.yml"
     workflow_text = workflow_path.read_text(encoding="utf-8")
@@ -317,9 +378,7 @@ def test_platform_plan_digest_binds_reviewed_commit_and_locked_providers() -> No
 def test_platform_roles_use_their_own_environment_state_key() -> None:
     iam = (ROOT / "infra/terraform/modules/platform/iam.tf").read_text(encoding="utf-8")
 
-    assert iam.count(
-        "${var.project_name}/${var.environment}/terraform.tfstate"
-    ) == 8
+    assert iam.count("${var.project_name}/${var.environment}/terraform.tfstate") == 8
     assert "${var.project_name}/prod/terraform.tfstate" not in iam
 
 
