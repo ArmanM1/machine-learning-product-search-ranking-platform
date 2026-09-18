@@ -18,6 +18,10 @@ PublicRequestIdentifier = Annotated[
     str,
     Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$"),
 ]
+PublicModelIdentifier = Annotated[
+    str,
+    Field(min_length=3, max_length=100, pattern=r"^[A-Za-z0-9][A-Za-z0-9._@-]{2,99}$"),
+]
 PublicMetricName = Literal[
     "graded_ndcg@10",
     "exact_mrr@10",
@@ -76,6 +80,87 @@ class ReadyResponse(ContractModel):
     status: Literal["ready"] = "ready"
     model_id: NonEmptyStr
     dataset_manifest_hash: Sha256
+
+
+class PublicLatencyPercentiles(ContractModel):
+    p50: NonNegativeFloat
+    p95: NonNegativeFloat
+    p99: NonNegativeFloat
+
+    @model_validator(mode="after")
+    def percentiles_are_monotonic(self) -> PublicLatencyPercentiles:
+        if not self.p50 <= self.p95 <= self.p99:
+            raise ValueError("public latency percentiles must satisfy p50 <= p95 <= p99")
+        return self
+
+
+class PublicWarmServingEvidence(ContractModel):
+    scope: Literal["deployed_api_gateway_lambda_gate"]
+    candidate_count: Literal[40]
+    warmup_request_count: Literal[10]
+    measured_request_count: Literal[200]
+    successful_request_count: Count
+    failure_count: Count
+    concurrency: Literal[1]
+    end_to_end_latency_ms: PublicLatencyPercentiles
+    model_latency_ms: PublicLatencyPercentiles
+    lambda_memory_mb: Literal[4096]
+    architecture: Literal["x86_64"]
+    region: Literal["us-east-1"]
+    reserved_concurrency: Literal[2]
+    provisioned_concurrency: Literal[0]
+    controlled_cold_sample_included: Literal[False]
+
+    @model_validator(mode="after")
+    def request_counts_are_exact(self) -> PublicWarmServingEvidence:
+        if self.successful_request_count + self.failure_count != self.measured_request_count:
+            raise ValueError("public warm request counts do not sum to the measured total")
+        return self
+
+
+class PublicColdStartObservation(ContractModel):
+    measurement_class: Literal["controlled_on_demand_lambda_cold_start"]
+    sample_count: Literal[1]
+    candidate_count: Literal[40]
+    end_to_end_latency_ms: Annotated[float, Field(gt=0, allow_inf_nan=False)]
+    init_duration_ms: Annotated[float, Field(gt=0, allow_inf_nan=False)]
+    model_load_duration_ms: Annotated[float, Field(gt=0, allow_inf_nan=False)]
+    excluded_from_warm_latency: Literal[True]
+
+
+class PublicOperationsPending(ContractModel):
+    schema_version: Literal["1.0.0"] = "1.0.0"
+    status: Literal["pending"] = "pending"
+    release_id: PublicRequestIdentifier
+    model_id: PublicModelIdentifier
+    note: Literal["Deployment evidence is publishing."] = "Deployment evidence is publishing."
+
+    @model_validator(mode="after")
+    def payload_is_public(self) -> PublicOperationsPending:
+        _reject_private_public_text(self.model_dump(mode="json"))
+        return self
+
+
+class PublicOperationsVerified(ContractModel):
+    schema_version: Literal["1.0.0"] = "1.0.0"
+    status: Literal["verified"] = "verified"
+    release_id: PublicRequestIdentifier
+    model_id: PublicModelIdentifier
+    code_commit: Annotated[str, Field(pattern=r"^[0-9a-f]{40}$")]
+    serving_image_digest: Sha256
+    warm: PublicWarmServingEvidence
+    controlled_cold_start: PublicColdStartObservation
+
+    @model_validator(mode="after")
+    def payload_is_public(self) -> PublicOperationsVerified:
+        _reject_private_public_text(self.model_dump(mode="json"))
+        return self
+
+
+PublicOperationsEvidence = Annotated[
+    PublicOperationsPending | PublicOperationsVerified,
+    Field(discriminator="status"),
+]
 
 
 class CuratedQuerySummary(ContractModel):
@@ -640,16 +725,21 @@ __all__ = [
     "CuratedQuerySummary",
     "HealthResponse",
     "ModelSummary",
+    "PublicColdStartObservation",
     "PublicEvaluationEvidence",
     "PublicEvaluationProvenance",
     "PublicEvidenceEnvelope",
     "PublicFailureAnalysis",
     "PublicFailureExample",
     "PublicInterval",
+    "PublicLatencyPercentiles",
     "PublicMetricComparison",
     "PublicMetricName",
     "PublicMetricValue",
     "PublicModelMetricRow",
+    "PublicOperationsEvidence",
+    "PublicOperationsPending",
+    "PublicOperationsVerified",
     "PublicRunIntervals",
     "PublicRunMetrics",
     "PublicRunSummary",
@@ -659,6 +749,7 @@ __all__ = [
     "PublicValidationFailureAnalysis",
     "PublicValidationRunMetrics",
     "PublicValidationRunSummary",
+    "PublicWarmServingEvidence",
     "RankMovement",
     "RankRequest",
     "RankResponse",

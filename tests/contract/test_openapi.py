@@ -8,6 +8,7 @@ EXPECTED_OPERATIONS = {
     ("/healthz", "get"): "health_healthz_get",
     ("/readyz", "get"): "ready_readyz_get",
     ("/api/v1/models", "get"): "models_api_v1_models_get",
+    ("/api/v1/operations", "get"): "operations_api_v1_operations_get",
     ("/api/v1/queries", "get"): "queries_api_v1_queries_get",
     ("/api/v1/rank", "post"): "rank_api_v1_rank_post",
     ("/api/v1/comparisons/{query_id}", "get"): ("comparison_api_v1_comparisons__query_id__get"),
@@ -90,3 +91,16 @@ def test_openapi_types_curated_queries_and_complete_public_evidence() -> None:
     components = schema["components"]["schemas"]
     assert "split_manifest_hash" in components["PublicRunSummary"]["required"]
     assert "split_manifest_hash" in components["PublicValidationRunSummary"]["required"]
+
+
+def test_openapi_types_sanitized_operational_evidence() -> None:
+    schema = create_app().openapi()
+    operation = schema["paths"]["/api/v1/operations"]["get"]
+    response = operation["responses"]["200"]["content"]["application/json"]["schema"]
+    assert response["discriminator"]["propertyName"] == "status"
+    assert {item["$ref"] for item in response["oneOf"]} == {
+        "#/components/schemas/PublicOperationsPending",
+        "#/components/schemas/PublicOperationsVerified",
+    }
+    assert _reference(operation, "409") == "#/components/schemas/ApiError"
+    assert _reference(operation, "503") == "#/components/schemas/ApiError"

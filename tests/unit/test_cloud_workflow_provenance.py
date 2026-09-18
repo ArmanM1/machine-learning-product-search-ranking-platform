@@ -550,6 +550,23 @@ def test_deploy_validates_and_cas_versions_durable_evidence() -> None:
     assert ".Code.ResolvedImageUri == $image" in evidence
     assert "activated-lambda-alias-revision.txt" in evidence
     assert "AutomaticDeploymentRollback.model_validate_json" in deploy
+    publication = deploy.index("Publish deployment evidence only after production verification passes")
+    compensation = deploy.index(
+        "Compensate any failure or cancellation after a production mutation",
+        publication,
+    )
+    projection = deploy.index("Verify the published operational evidence projection", compensation)
+    assert publication < compensation < projection
+    published_projection = deploy[projection : deploy.index("actions/upload-artifact", projection)]
+    assert '"${cloudfront_url}/api/v1/operations"' in published_projection
+    assert '.status == "verified"' in published_projection
+    assert '.release_id == $release' in published_projection
+    assert '.model_id == $model' in published_projection
+    assert '.code_commit == $commit' in published_projection
+    assert '.serving_image_digest == $digest' in published_projection
+    assert ".warm.candidate_count == 40" in published_projection
+    assert ".controlled_cold_start.excluded_from_warm_latency == true" in published_projection
+    assert "published-operations.json" in deploy
     assert "ManualRollbackEvidence.model_validate_json" in deploy
     assert (
         'rollback_evidence_key="public/${RELEASE_ID}/rollback-evidence-${GITHUB_RUN_ID}-attempt-${GITHUB_RUN_ATTEMPT}.json"'
