@@ -82,6 +82,58 @@ _APPLICATION_FAILURE_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
         ),
     ),
     (
+        "checkpoint_model_save",
+        (
+            "save_pretrained",
+            "safe_serialization",
+            "safe serialization",
+            "safetensors",
+            "safetensorerror",
+            "shared tensor",
+            "tensor sharing",
+            "share memory",
+            "sharing memory",
+        ),
+    ),
+    (
+        "checkpoint_optimizer_save",
+        (
+            "torch.save",
+            "optimizer-state.pt",
+            "picklingerror",
+            "pickling error",
+            "cannot pickle",
+            "can't pickle",
+        ),
+    ),
+    (
+        "checkpoint_metadata_write",
+        (
+            "trainer-state.json",
+            "checkpoint-manifest.json",
+            "json.dumps",
+            "json.dump",
+            "not json serializable",
+            "jsonencodeerror",
+        ),
+    ),
+    (
+        "checkpoint_rng_state",
+        ("rng state", "random state", "get_rng_state"),
+    ),
+    (
+        "checkpoint_commit",
+        (
+            ".staging-",
+            "staging.replace",
+            "staging rename",
+            "cross-device link",
+            "cross device link",
+            "[errno 18]",
+            "exdev",
+        ),
+    ),
+    (
         "checkpoint_resume",
         (
             "managed-spot checkpoint",
@@ -101,6 +153,10 @@ _APPLICATION_FAILURE_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "disk quota exceeded",
             "permission denied",
             "read-only file system",
+            "read only file system",
+            "no such file or directory",
+            "permissionerror",
+            "filenotfounderror",
         ),
     ),
     (
@@ -139,6 +195,70 @@ _APPLICATION_FAILURE_SIGNAL_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = 
     ("serialization", ("convert", "serialize", "pickle", "json", "parquet", "arrow")),
     ("contract", ("expected", "required", "missing", "invalid", "unsupported")),
     ("training", ("gradient", "backward", "loss", "optimizer", "scheduler", "epoch")),
+    ("operation_save_pretrained", ("save_pretrained",)),
+    (
+        "format_safetensors",
+        ("safe_serialization", "safe serialization", "safetensors", "safetensorerror"),
+    ),
+    (
+        "shared_tensor",
+        ("shared tensor", "tensor sharing", "share memory", "sharing memory"),
+    ),
+    ("optimizer_state", ("optimizer-state.pt", "optimizer state", "optimizer_state")),
+    ("operation_torch_save", ("torch.save",)),
+    ("format_pickle", ("pickle", "picklingerror", "pickling error")),
+    (
+        "format_json",
+        ("json", "json.dumps", "json.dump", "jsonencodeerror", "jsondecodeerror"),
+    ),
+    ("checkpoint_manifest", ("checkpoint manifest", "checkpoint-manifest.json")),
+    ("rng_state", ("rng state", "random state", "get_rng_state")),
+    (
+        "operation_staging_rename",
+        (".staging-", "staging.replace", "staging rename"),
+    ),
+    (
+        "cross_device",
+        ("cross-device link", "cross device link", "[errno 18]", "exdev"),
+    ),
+    (
+        "permission_denied",
+        ("permission denied", "permissionerror", "[errno 13]", "eacces"),
+    ),
+    (
+        "read_only_filesystem",
+        ("read-only file system", "read only file system", "[errno 30]", "erofs"),
+    ),
+    (
+        "disk_full",
+        ("no space left on device", "disk quota exceeded", "[errno 28]", "enospc", "edquot"),
+    ),
+    (
+        "missing_path",
+        ("no such file or directory", "filenotfounderror", "[errno 2]", "enoent"),
+    ),
+    (
+        "exception_os",
+        (
+            "oserror",
+            "ioerror",
+            "permissionerror",
+            "filenotfounderror",
+            "fileexistserror",
+            "isadirectoryerror",
+            "notadirectoryerror",
+        ),
+    ),
+    (
+        "exception_serialization",
+        ("safetensorerror", "picklingerror", "jsondecodeerror", "jsonencodeerror"),
+    ),
+    ("exception_runtime", ("runtimeerror",)),
+    ("exception_value", ("valueerror",)),
+    ("exception_type", ("typeerror",)),
+    ("exception_key", ("keyerror",)),
+    ("exception_memory", ("memoryerror", "outofmemoryerror")),
+    ("exception_assertion", ("assertionerror",)),
 )
 _SECONDARY_STATUSES = {
     "Starting",
