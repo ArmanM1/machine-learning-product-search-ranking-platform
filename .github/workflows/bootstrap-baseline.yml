@@ -231,7 +231,7 @@ jobs:
              (.split_counts.validation.query_count | type == "number")' \
             baseline-input/manifest.json >/dev/null
           SPLIT_MANIFEST_HASH="$(jq -er '.split_manifest_hash | select(test("^sha256:[0-9a-f]{64}$"))' baseline-input/manifest.json)"
-          export SPLIT_MANIFEST_HASH
+          printf 'SPLIT_MANIFEST_HASH=%s\n' "${SPLIT_MANIFEST_HASH}" >> "${GITHUB_ENV}"
           jq -e \
             '.schema_version == "1.0.0" and (.queries | type == "array") and
              ([.queries[].products | length]) as $counts |
