@@ -607,6 +607,7 @@ class BenchmarkSample(ContractModel):
     throttled: bool
     end_to_end_ms: NonNegativeFloat
     model_ms: NonNegativeFloat | None = None
+    serialization_ms: NonNegativeFloat | None = None
     error_category: (
         Literal["http_throttle", "http_error", "invalid_response", "transport_error"] | None
     ) = None
@@ -614,12 +615,21 @@ class BenchmarkSample(ContractModel):
     @model_validator(mode="after")
     def success_and_failure_fields_are_disjoint(self) -> BenchmarkSample:
         if self.ok:
-            if self.http_status != 200 or self.throttled or self.model_ms is None:
+            if (
+                self.http_status != 200
+                or self.throttled
+                or self.model_ms is None
+                or self.serialization_ms is None
+            ):
                 raise ValueError("successful benchmark sample has inconsistent fields")
             if self.error_category is not None:
                 raise ValueError("successful benchmark sample cannot name an error")
         else:
-            if self.model_ms is not None or self.error_category is None:
+            if (
+                self.model_ms is not None
+                or self.serialization_ms is not None
+                or self.error_category is None
+            ):
                 raise ValueError("failed benchmark sample must name only its error category")
             if self.throttled != (self.error_category == "http_throttle"):
                 raise ValueError("benchmark throttle flag and category differ")
@@ -662,6 +672,7 @@ class BenchmarkSampleSummary(ContractModel):
     http_status_and_transport_counts: dict[NonEmptyStr, Annotated[int, Field(ge=1)]]
     end_to_end_latency_ms: BenchmarkLatencySummary | None
     model_latency_ms: BenchmarkLatencySummary | None
+    serialization_latency_ms: BenchmarkLatencySummary | None
     samples: Annotated[list[BenchmarkSample], Field(min_length=1, max_length=200)]
 
     @staticmethod
@@ -719,6 +730,15 @@ class BenchmarkSampleSummary(ContractModel):
             [sample.model_ms for sample in successful if sample.model_ms is not None],
             "model_latency_ms",
         )
+        self._validate_summary(
+            self.serialization_latency_ms,
+            [
+                sample.serialization_ms
+                for sample in successful
+                if sample.serialization_ms is not None
+            ],
+            "serialization_latency_ms",
+        )
         return self
 
 
@@ -763,11 +783,11 @@ class BenchmarkTotals(ContractModel):
 
 class BenchmarkInterpretation(ContractModel):
     latency_claim: Literal[
-        "Warm public CloudFront end-to-end and model latency over successful responses after "
-        "explicit warmups. The primary 40-candidate, concurrency-one condition has at least "
-        "199 successes from 200 attempts (error rate below one percent); every secondary "
-        "condition has at least 20 successes. The controlled candidate cold start is reported "
-        "separately."
+        "Warm public CloudFront end-to-end, model, and in-process response-serialization latency "
+        "over successful responses after explicit warmups. The primary 40-candidate, "
+        "concurrency-one condition has at least 199 successes from 200 attempts (error rate "
+        "below one percent); every secondary condition has at least 20 successes. The "
+        "controlled candidate cold start is reported separately."
     ]
     throughput_claim_eligible: Literal[False]
     scaling_claim_eligible: Literal[False]

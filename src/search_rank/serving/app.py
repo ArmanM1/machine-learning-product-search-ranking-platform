@@ -44,6 +44,8 @@ from .dependencies import (
 
 LOGGER = logging.getLogger(__name__)
 
+_SERIALIZATION_LATENCY_HEADER = "x-search-rank-serialization-ms"
+
 _OBSERVABILITY_ROUTES = frozenset(
     {
         "/healthz",
@@ -88,6 +90,16 @@ def _error(request: Request, status: int, code: str, message: str) -> JSONRespon
     request.state.error_code = code
     body = ApiError(status=status, code=code, message=message, request_id=_request_id(request))
     return JSONResponse(status_code=status, content=body.model_dump(mode="json"))
+
+
+def _serialized_rank_response(body: RankResponse) -> JSONResponse:
+    """Render the final rank JSON bytes and expose only their bounded timing."""
+
+    started_ns = time.perf_counter_ns()
+    response = JSONResponse(content=body.model_dump(mode="json"))
+    elapsed_ms = (time.perf_counter_ns() - started_ns) / 1_000_000
+    response.headers[_SERIALIZATION_LATENCY_HEADER] = f"{elapsed_ms:.9f}"
+    return response
 
 
 def _memory_used_mb() -> float | None:
@@ -237,6 +249,18 @@ def create_app(
         "/api/v1/rank",
         response_model=RankResponse,
         responses={
+            200: {
+                "description": "Successful curated ranking.",
+                "headers": {
+                    _SERIALIZATION_LATENCY_HEADER: {
+                        "description": (
+                            "Milliseconds spent exporting the validated RankResponse and "
+                            "rendering its final JSON bytes inside the service process."
+                        ),
+                        "schema": {"type": "number", "format": "double", "minimum": 0},
+                    }
+                },
+            },
             400: {"model": ApiError},
             404: {"model": ApiError},
             409: {"model": ApiError},
@@ -263,7 +287,7 @@ def create_app(
             return _error(request, 422, "top_k_out_of_range", "top_k exceeds candidate count.")
         output = ranker.rank(query)
         request.state.model_latency_ms = output.latency_ms
-        return RankResponse(
+        rank_response = RankResponse(
             request_id=_request_id(request),
             query_id=query.query_id,
             query=query.query,
@@ -283,6 +307,7 @@ def create_app(
                 for item in output.results[: body.top_k]
             ],
         )
+        return _serialized_rank_response(rank_response)
 
     @app.get(
         "/api/v1/comparisons/{query_id}",

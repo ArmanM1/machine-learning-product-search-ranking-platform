@@ -126,7 +126,7 @@
       "additionalProperties": false,
       "properties": {
         "latency_claim": {
-          "const": "Warm public CloudFront end-to-end and model latency over successful responses after explicit warmups. The primary 40-candidate, concurrency-one condition has at least 199 successes from 200 attempts (error rate below one percent); every secondary condition has at least 20 successes. The controlled candidate cold start is reported separately.",
+          "const": "Warm public CloudFront end-to-end, model, and in-process response-serialization latency over successful responses after explicit warmups. The primary 40-candidate, concurrency-one condition has at least 199 successes from 200 attempts (error rate below one percent); every secondary condition has at least 20 successes. The controlled candidate cold start is reported separately.",
           "title": "Latency Claim",
           "type": "string"
         },
@@ -569,6 +569,19 @@
           "default": null,
           "title": "Model Ms"
         },
+        "serialization_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Serialization Ms"
+        },
         "error_category": {
           "anyOf": [
             {
@@ -656,6 +669,16 @@
             }
           ]
         },
+        "serialization_latency_ms": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BenchmarkLatencySummary"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "samples": {
           "items": {
             "$ref": "#/$defs/BenchmarkSample"
@@ -674,6 +697,7 @@
         "http_status_and_transport_counts",
         "end_to_end_latency_ms",
         "model_latency_ms",
+        "serialization_latency_ms",
         "samples"
       ],
       "title": "BenchmarkSampleSummary",
