@@ -420,8 +420,6 @@ class PublicSliceResult(ContractModel):
                 raise ValueError("slice confidence interval requires measured slice values")
         if self.low_sample == (self.finding != "insufficient_data"):
             raise ValueError("low_sample must match an insufficient_data finding")
-        if self.low_sample and any(value is not None for value in interval):
-            raise ValueError("low-sample slices cannot publish a confidence interval")
         return self
 
 
