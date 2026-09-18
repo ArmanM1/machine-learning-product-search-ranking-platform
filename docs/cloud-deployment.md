@@ -62,7 +62,12 @@ The train and evaluation images run as root inside their isolated, short-lived S
 containers so the service-owned `/opt/ml` input and output mounts are writable. Cloud access is still
 bounded by their separate least-privilege execution roles. The long-lived public serving image remains
 non-root. Training entry-point failures also leave a redacted, best-effort diagnostic at SageMaker's
-standard `/opt/ml/output/failure` path so a missing log stream does not erase the failure phase.
+standard `/opt/ml/output/failure` path so a missing log stream does not erase the failure phase. Before
+the train or validation dataset is loaded, the entry point resolves the declared runtime device and runs
+a deterministic two-example model forward/backward preflight. The unchanged mining cross-encoder then
+receives that exact resolved device and is moved off the accelerator and disposed before fine-tuning.
+Failure records expose only an allowlisted phase, error category, and exit code; paths, identifiers, and
+exception messages are never copied into the SageMaker failure file.
 
 ## Local review before approval
 
