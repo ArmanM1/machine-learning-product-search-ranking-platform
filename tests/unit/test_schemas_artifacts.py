@@ -6,14 +6,37 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
-from search_rank.schemas import DatasetManifest, ModelArtifact, PromotionPointer, RunManifest
+from search_rank.schemas import (
+    ContractModel,
+    DatasetManifest,
+    EvaluationReport,
+    ExperimentConfig,
+    ModelArtifact,
+    PromotionPointer,
+    RunManifest,
+    TrialSelection,
+)
 from search_rank.schemas.dataset import SplitManifestIdentity
 
 SHA_A = "sha256:" + "a" * 64
 SHA_B = "sha256:" + "b" * 64
 NOW = datetime(2026, 9, 2, 12, 0, tzinfo=UTC)
+
+
+@pytest.mark.parametrize(
+    "model",
+    [DatasetManifest, ExperimentConfig, RunManifest, EvaluationReport, TrialSelection],
+)
+def test_core_artifact_schema_versions_are_fail_closed(model: type[ContractModel]) -> None:
+    schema_version = TypeAdapter(model.model_fields["schema_version"].annotation)
+
+    assert schema_version.validate_python("1.0.0") == "1.0.0"
+    with pytest.raises(ValidationError, match=r"Input should be '1\.0\.0'"):
+        schema_version.validate_python("2.0.0")
+
+    assert model.model_json_schema()["properties"]["schema_version"]["const"] == "1.0.0"
 
 
 def dataset_manifest_values() -> dict[str, object]:
