@@ -140,8 +140,7 @@
       "type": "integer"
     },
     "schema_version": {
-      "minLength": 1,
-      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+      "const": "1.0.0",
       "title": "Schema Version",
       "type": "string"
     },
