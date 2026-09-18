@@ -42,8 +42,11 @@ installation and rejects the whole object unless:
 - config roles, hardware/accelerator pairs, baseline membership, and runtime ceilings agree; and
 - protected bucket and ECR variables are present and valid before derived URIs are exported.
 
-The release object also carries the exact baseline-evidence Git SHA, committed baseline-config path,
-and byte checksum. Before held-out access, the release workflow binds the baseline command to that
+The release object also carries the exact model-source Git SHA, baseline-evidence Git SHA, committed
+baseline-config path, and byte checksum. Before held-out access, the release workflow binds the selected
+training artifacts and every trial to the model-source revision, while evaluation and release evidence bind
+the checked-out release-orchestration revision. It requires frozen model configs and evaluation-relevant
+inputs to remain byte-identical between those revisions. The workflow also binds the baseline command to that
 explicit clean 40-character revision and recomputes the baseline config's semantic hash from the
 currently checked-out bytes. This permits an immutable baseline from an earlier reviewed revision
 while rejecting an unpinned revision, dirty baseline evidence, or different config bytes.

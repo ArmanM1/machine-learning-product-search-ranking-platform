@@ -19,7 +19,7 @@
   ],
   "public_evidence_retains": [
     "selected release model and evaluated candidate configuration",
-    "sanitized training and clean-evaluation provenance",
+    "sanitized model-source training and release-orchestration evaluation provenance",
     "held-out test-access count and paired confidence intervals",
     "both preregistered validation ablations",
     "slice metrics, representative examples, and limitations",

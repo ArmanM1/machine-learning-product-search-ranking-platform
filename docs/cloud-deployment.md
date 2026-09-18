@@ -309,7 +309,7 @@ Create these protected environments with required reviewer approval:
 | `aws-training` | `train.yml` | Submit exactly one bounded training job; cannot read `test.parquet` |
 | `aws-trial-selection` | `freeze-trial-selection.yml` | Freeze one validation-only trial-selection manifest; cannot train, process, or deploy |
 | `baseline-release` | `bootstrap-baseline.yml` | Publish the validation-only baseline bundle and initial pointer; cannot read test data |
-| `heldout-release` | `release.yml` | Increment two counters and run two clean held-out Processing jobs |
+| `heldout-release` | `release.yml` calling `release-clean-evaluation.yml` | Prepare immutable inputs, increment two counters in order, run one clean held-out Processing job per sequential phase, then bind and stage the decision |
 | `production` | `deploy.yml` | Deploy or roll back the public service |
 | `production-benchmark` | `benchmark-serving.yml` | Run one explicitly authorized post-deployment performance matrix; cannot deploy or roll back |
 
@@ -410,12 +410,14 @@ access acknowledgement separate as well.
 9. `bootstrap-baseline.yml`: one-time, validation-only publication of the strongest unchanged baseline and create-if-absent pointer; never receives test-object permission.
 10. `deploy.yml`: reconcile the baseline Lambda and IAM-authenticated candidate API privately; only after its controlled cold-start and candidate API gates pass, run a second no-delete/no-replacement plan that enables the first public API and CloudFront surface without changing the tested runtime, then verify the baseline revision and create the known-good rollback target.
 11. `release.yml`: separate manual dispatch; it first proves that the exact `us-east-1`
-    `ml.m5.xlarge for processing job usage` quota has finite applied capacity of at least one. Only then
-    may it increment two consecutive access counters and run two independent held-out Processing jobs,
-    which are checksum-bound before the automatic promotion gate. The sanitized quota receipt is retained
-    in the Actions artifact and conditionally published under the completed report prefix. The workflow
-    publishes an immutable deployment decision under `promoted/decisions/<release-id>.json` but does not
-    mutate the live pointer.
+    `ml.m5.xlarge for processing job usage` quota has finite applied capacity of at least one. It freezes a
+    checksum-bound preflight handoff, then calls `release-clean-evaluation.yml` twice in strict sequence.
+    Each called job reserves exactly one consecutive access count, submits or reuses exactly one Processing
+    job, polls through bounded sub-hour windows with refreshed OIDC credentials, and emits an immutable
+    phase handoff. A final no-held-out job verifies both handoffs, checksum-binds the results, and applies
+    the automatic promotion gate. The sanitized quota receipt is retained in the Actions artifact and
+    conditionally published under the completed report prefix. The workflow publishes an immutable
+    deployment decision under `promoted/decisions/<release-id>.json` but does not mutate the live pointer.
 12. `deploy.yml`: separate manual candidate deployment; Terraform state detection keeps an existing public surface enabled while a new private candidate version is reconciled. Before any smoke traffic, one first rank request against that newly published candidate version is correlated with its CloudWatch initialization report and structured model-load/memory logs, and the observed Lambda resolved-image URI must exactly equal the verified ECR repository-plus-digest URI. The workflow tests the candidate API, then maps staged browser static requests to the immutable release prefix without changing live-root objects. Its same-origin API check uses a brief revision-ID-CAS `production` canary that must restore the exact captured alias state or disable traffic. Durable activation verifies the exact CloudFront root, every release-object byte, and the complete desktop/mobile/keyboard browser/API flow, then may advance `promoted/current.json`. Activation and manual rollback compensate on normal errors, `INT`, `TERM`, and job cancellation; incomplete restoration forces Lambda concurrency to zero. The production alias revision and resolved image are re-observed immediately before deployment evidence advances a versioned canonical key with an ETag precondition, allowing a fresh-version retry while retaining every earlier S3 version.
 13. `benchmark-serving.yml`: optional manual post-deployment evidence run over candidate counts 10/20/40 and offered concurrency 1/4/8, with 10 explicit warmups and 200 measured requests per condition. Fixed concurrency waves are paced to 18 requests/second below the API stage's 20 requests/second throttle, leaving reserved Lambda concurrency two as the measured capacity bound. Each successful rank response carries a numeric server-side serialization duration for the validated response's JSON-mode export and final byte rendering; the benchmark retains every raw value and recomputes separate percentiles rather than estimating serialization as end-to-end minus model time. It checksum-binds the separate controlled cold observation, excludes it and pre-benchmark observations from all warm percentiles, reports throttles above the reserved bound, and makes no throughput or scaling claim.
 

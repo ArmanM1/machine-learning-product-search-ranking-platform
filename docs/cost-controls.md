@@ -43,8 +43,10 @@ The values are caps from the PRD, not current prices or expected invoices.
 `train.yml` and `release.yml` retrieve the current AWS Price List response for the selected `us-east-1`
 instance. They use the highest matching hourly dimension as a conservative on-demand upper bound;
 Managed Spot savings are never required for the gate to pass. Release cost is calculated for two
-independent Processing jobs, each capped at two hours so both jobs and evidence binding fit the
-hosted-runner boundary. Each workflow validates total runtime, campaign spend, applicable credit, reserve,
+independent Processing jobs, each capped at four hours. Each clean evaluation runs in its own sequential
+GitHub job, and its polling is divided into sub-hour windows with a fresh OIDC assumption before every
+window and terminal collection. The offline binder and immutable publication run in a third job and do not
+open the held-out set. Each workflow validates total runtime, campaign spend, applicable credit, reserve,
 and a run-specific declared cap before calling SageMaker. The compact dispatch JSON documented in
 `docs/workflow-inputs/README.md` remains part of the exact operation authorization, but it is not the
 authoritative source for cumulative budget or hour state.
@@ -79,8 +81,8 @@ migration.
 
 The snapshot and existing reservation are revalidated before later mutation boundaries. Missing,
 future-dated, mismatched, malformed, expired, unreserved, or ledger-conflicting provenance fails closed.
-Release repeats the check for the second independent Processing job rather than relying only on the first
-check; the serving benchmark repeats it immediately before its fixed request matrix.
+Release repeats the check in each independent Processing phase rather than relying only on the first
+phase; the serving benchmark repeats it immediately before its fixed request matrix.
 
 Before either held-out access counter is reserved, `release.yml` reads the exact regional SageMaker
 quota `L-0307F515` (`ml.m5.xlarge for processing job usage`) and refuses access unless its finite applied

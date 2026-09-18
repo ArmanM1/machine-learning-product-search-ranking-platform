@@ -37,7 +37,7 @@ input/random diagnostics -> BM25 -> unchanged cross-encoder
                   immutable promotion      retain prior model
 ```
 
-Validation is the only model-selection surface. The official test set is accessed only by the manual `release.yml` workflow after the configuration, checkpoint, baseline set, and processed-dataset identity are frozen. The two clean final evaluations run in separate SageMaker Processing jobs and consume consecutive access-counter values; two model loads inside one process do not satisfy this gate.
+Validation is the only model-selection surface. The official test set is accessed only by the manual `release.yml` workflow after the configuration, checkpoint, baseline set, and processed-dataset identity are frozen. The two clean final evaluations run in separate sequential GitHub jobs and separate SageMaker Processing jobs, consume consecutive access-counter values, and pass immutable handoffs to a no-held-out finalizer; two model loads inside one process do not satisfy this gate.
 
 ## AWS flow
 
