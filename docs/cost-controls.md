@@ -16,6 +16,7 @@ spend, and credit balance are not claimed as applied or current until live evide
 | Paid CPU training and processing | 10 instance-hours total |
 | Lambda reserved concurrency | 2 |
 | Lambda provisioned concurrency | 0 |
+| API Gateway default route throttle | 20 requests/second, burst 40 |
 | Post-release idle target | at most USD 2/month before credits |
 
 These are simultaneous checks. Staying below one limit does not excuse breaching another.

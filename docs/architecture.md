@@ -134,7 +134,8 @@ The first deployed revision is the reproducible baseline release. It establishes
 - Lambda: x86_64, 4,096 MB or less, 2,048 MB ephemeral storage or less, 30-second timeout.
 - Reserved concurrency: exactly 2.
 - Provisioned concurrency: no resource exists; effective value is 0.
-- API Gateway default route throttle: burst 2, rate 2 requests/second.
+- API Gateway default route throttle: burst 40, rate 20 requests/second. Lambda reserved
+  concurrency two remains the compute and cost-capacity bound.
 - CloudWatch operational log retention: 7 days.
 - S3 public access: blocked for both buckets; CloudFront uses origin access control.
 - CloudFront: generated domain, TLS redirect, managed caching policies, API caching disabled.

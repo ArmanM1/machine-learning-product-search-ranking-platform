@@ -594,6 +594,7 @@ jobs:
           OFFERED_CONCURRENCY = (1, 4, 8)
           WARMUP_REQUESTS = 10
           MEASURED_REQUESTS = 200
+          TARGET_API_REQUEST_RATE = 18.0
           MAX_RESPONSE_BYTES = 1_048_576
           REQUEST_TIMEOUT_SECONDS = 20
           BASE_URL = os.environ["BENCHMARK_BASE_URL"]
@@ -725,15 +726,25 @@ jobs:
           def run_samples(
               query_id: str, candidate_count: int, offered_concurrency: int, count: int
           ) -> list[dict[str, Any]]:
+              samples: list[dict[str, Any]] = []
               with concurrent.futures.ThreadPoolExecutor(
                   max_workers=offered_concurrency
               ) as executor:
-                  return list(
-                      executor.map(
-                          lambda ordinal: rank_once(query_id, candidate_count, ordinal),
-                          range(1, count + 1),
+                  for offset in range(0, count, offered_concurrency):
+                      ordinals = range(offset + 1, min(offset + offered_concurrency, count) + 1)
+                      wave_started = time.perf_counter()
+                      wave = list(
+                          executor.map(
+                              lambda ordinal: rank_once(query_id, candidate_count, ordinal),
+                              ordinals,
+                          )
                       )
-                  )
+                      samples.extend(wave)
+                      minimum_wave_seconds = len(wave) / TARGET_API_REQUEST_RATE
+                      remaining = minimum_wave_seconds - (time.perf_counter() - wave_started)
+                      if remaining > 0:
+                          time.sleep(remaining)
+              return samples
 
           def sample_summary(samples: list[dict[str, Any]]) -> dict[str, Any]:
               successes = [sample for sample in samples if sample["ok"]]
@@ -944,6 +955,9 @@ jobs:
                   "measurement_class": "warm_after_explicit_per_condition_warmups",
                   "candidate_counts": list(CANDIDATE_COUNTS),
                   "offered_concurrency_levels": list(OFFERED_CONCURRENCY),
+                  "api_gateway_rate_limit_rps": 20,
+                  "target_request_rate_rps": TARGET_API_REQUEST_RATE,
+                  "wave_pacing_enabled": True,
                   "warmup_requests_per_condition": WARMUP_REQUESTS,
                   "measured_requests_per_condition": MEASURED_REQUESTS,
                   "condition_count": len(conditions),
@@ -1161,6 +1175,9 @@ jobs:
           if (
               protocol.get("measurement_class")
               != "warm_after_explicit_per_condition_warmups"
+              or protocol.get("api_gateway_rate_limit_rps") != 20
+              or protocol.get("target_request_rate_rps") != 18.0
+              or protocol.get("wave_pacing_enabled") is not True
               or protocol.get("minimum_warmup_successes_per_condition") != 1
               or protocol.get("primary_latency_candidate_count") != 40
               or protocol.get("primary_latency_offered_concurrency") != 1

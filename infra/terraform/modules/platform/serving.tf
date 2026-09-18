@@ -113,8 +113,8 @@ resource "aws_apigatewayv2_stage" "candidate" {
   auto_deploy = true
 
   default_route_settings {
-    throttling_burst_limit = 2
-    throttling_rate_limit  = 2
+    throttling_burst_limit = 40
+    throttling_rate_limit  = 20
   }
 
   access_log_settings {
@@ -173,8 +173,8 @@ resource "aws_apigatewayv2_stage" "production" {
   auto_deploy = true
 
   default_route_settings {
-    throttling_burst_limit = 2
-    throttling_rate_limit  = 2
+    throttling_burst_limit = 40
+    throttling_rate_limit  = 20
   }
 
   access_log_settings {
