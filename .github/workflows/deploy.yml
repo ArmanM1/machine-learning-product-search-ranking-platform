@@ -2622,6 +2622,46 @@ jobs:
           )
           PY
           touch rollback-complete.txt
+      - name: Verify the published operational evidence projection
+        shell: bash
+        run: |
+          set -euo pipefail
+          cloudfront_url="$(cat cloudfront-url.txt)"
+          expected_digest="$(cut -d@ -f2 serving-image-uri.txt)"
+          verified=0
+          for attempt in $(seq 1 12); do
+            curl --fail --silent --show-error \
+              --header 'Accept: application/json' \
+              --header 'Cache-Control: no-cache' \
+              --dump-header published-operations-headers.txt \
+              --output published-operations.json \
+              "${cloudfront_url}/api/v1/operations" || true
+            if jq -e \
+              --arg release "${RELEASE_ID}" \
+              --arg model "${MODEL_ID}" \
+              --arg commit "${GITHUB_SHA}" \
+              --arg digest "${expected_digest}" \
+              '.status == "verified" and
+               .release_id == $release and
+               .model_id == $model and
+               .code_commit == $commit and
+               .serving_image_digest == $digest and
+               .warm.scope == "deployed_api_gateway_lambda_gate" and
+               .warm.candidate_count == 40 and
+               .warm.measured_request_count == 200 and
+               .warm.controlled_cold_sample_included == false and
+               .controlled_cold_start.sample_count == 1 and
+               .controlled_cold_start.candidate_count == 40 and
+               .controlled_cold_start.excluded_from_warm_latency == true' \
+              published-operations.json >/dev/null 2>&1; then
+              verified=1
+              break
+            fi
+            sleep 5
+          done
+          test "${verified}" = "1"
+          grep -Eiq '^cache-control:[[:space:]]*no-store([[:space:]]|,|$)' \
+            published-operations-headers.txt
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
@@ -2646,6 +2686,8 @@ jobs:
             production-browser-mobile.png
             production-static-verification.json
             production-ready.json
+            published-operations.json
+            published-operations-headers.txt
             deployment-evidence.json
             failed-deployment-rollback.json
             promotion-pointer.json

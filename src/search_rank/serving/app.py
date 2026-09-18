@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import FastAPI, Query, Request
+from fastapi import FastAPI, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -26,6 +26,7 @@ from search_rank.schemas.api import (
     HealthResponse,
     ModelSummary,
     PublicEvidenceEnvelope,
+    PublicOperationsEvidence,
     PublicRequestIdentifier,
     RankedProduct,
     RankMovement,
@@ -34,7 +35,12 @@ from search_rank.schemas.api import (
     ReadyResponse,
 )
 
-from .dependencies import ServiceSettings, ServiceState
+from .dependencies import (
+    OperationalEvidenceConflict,
+    OperationalEvidenceUnavailable,
+    ServiceSettings,
+    ServiceState,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -43,6 +49,7 @@ _OBSERVABILITY_ROUTES = frozenset(
         "/healthz",
         "/readyz",
         "/api/v1/models",
+        "/api/v1/operations",
         "/api/v1/queries",
         "/api/v1/rank",
         "/api/v1/comparisons/{query_id}",
@@ -176,6 +183,34 @@ def create_app(
     @app.get("/api/v1/models", response_model=list[ModelSummary])
     async def models() -> list[ModelSummary]:
         return service_state.model_summaries()
+
+    @app.get(
+        "/api/v1/operations",
+        response_model=PublicOperationsEvidence,
+        responses={409: {"model": ApiError}, 503: {"model": ApiError}},
+    )
+    def operations(
+        request: Request, response: Response
+    ) -> PublicOperationsEvidence | JSONResponse:
+        response.headers["Cache-Control"] = "no-store"
+        try:
+            return service_state.operational_evidence()
+        except OperationalEvidenceConflict:
+            error = _error(
+                request,
+                409,
+                "operational_evidence_conflict",
+                "Deployment evidence conflicts with the active release.",
+            )
+        except OperationalEvidenceUnavailable:
+            error = _error(
+                request,
+                503,
+                "operational_evidence_unavailable",
+                "Deployment evidence is temporarily unavailable.",
+            )
+        error.headers["Cache-Control"] = "no-store"
+        return error
 
     @app.get(
         "/api/v1/queries",

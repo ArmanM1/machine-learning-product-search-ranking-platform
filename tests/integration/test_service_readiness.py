@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import io
 import json
 from pathlib import Path
 from typing import Any
 
 import pytest
+from botocore.exceptions import ClientError
 from fastapi.testclient import TestClient
 
 from search_rank.artifacts.checksums import sha256_file
@@ -451,3 +455,348 @@ def test_public_evidence_tamper_never_becomes_ready(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match=r"checksum mismatch: public-evidence\.json"):
         state.load()
     assert not state.ready
+
+
+OPERATIONS_GIT_SHA = "c" * 40
+
+
+def _deployment_evidence_payload(*, code_commit: str = OPERATIONS_GIT_SHA) -> bytes:
+    payload = {
+        "schema_version": "1.0.0",
+        "artifact_type": "deployment_evidence",
+        "release_id": "release-validation-baseline",
+        "model_id": "bm25-v1",
+        "code_commit": code_commit,
+        "serving_image_digest": "sha256:" + "d" * 64,
+        "previous_lambda_version": "1",
+        "production_lambda_version": "2",
+        "promoted_pointer_version_id": "private-version-id",
+        "smoke_tests_passed": True,
+        "controlled_cold_start": {
+            "schema_version": "1.0.0",
+            "status": "measured",
+            "measurement_class": "controlled_on_demand_lambda_cold_start",
+            "controlled_cold_start": True,
+            "measured_at": "2026-09-02T12:01:00Z",
+            "identifiers": {
+                "release_id": "release-validation-baseline",
+                "model_id": "bm25-v1",
+                "dataset_manifest_hash": DATA_HASH,
+                "model_artifact_checksum": ZERO_HASH,
+                "function_name": "private-function-name",
+                "alias": "candidate",
+                "function_version": "2",
+                "region": "us-east-1",
+            },
+            "control_proof": {
+                "newly_published_after_apply_started": True,
+                "candidate_version_changed": True,
+                "previous_candidate_version": "1",
+                "new_version_prior_cloudwatch_event_count": 0,
+                "on_demand_execution": True,
+                "reserved_concurrency": 2,
+                "provisioned_concurrency": 0,
+            },
+            "first_request": {
+                "request_id": "private-request-id",
+                "route": "/api/v1/rank",
+                "http_status": 200,
+                "candidate_count": 40,
+                "end_to_end_latency_ms": 1000.0,
+                "model_latency_ms": 100.0,
+            },
+            "lambda_report": {
+                "init_duration_ms": 800.0,
+                "invocation_duration_ms": 200.0,
+                "billed_duration_ms": 1000.0,
+                "configured_memory_mb": 4096,
+                "max_memory_used_mb": 1000.0,
+            },
+            "structured_startup": {
+                "startup_succeeded": True,
+                "model_load_duration_ms": 700.0,
+            },
+            "structured_request": {"process_peak_memory_mb": 900.0},
+            "sample_count": 1,
+            "excluded_from_warm_samples": True,
+            "limitations": ["One controlled observation is not a distribution."],
+        },
+        "candidate_api_gate": {
+            "schema_version": "1.0.0",
+            "status": "passed",
+            "scope": "candidate_alias_primary_release_gate",
+            "valid_request_count": 200,
+            "failure_count": 0,
+            "error_rate": 0.0,
+            "error_rate_target": "less_than_0.01",
+            "warmup_request_count": 10,
+            "candidate_count": 40,
+            "concurrency": 1,
+            "end_to_end_latency_ms": {"p50": 100.0, "p95": 200.0, "p99": 250.0},
+            "model_latency_ms": {"p50": 20.0, "p95": 40.0, "p99": 50.0},
+            "lambda_memory_mb": 4096,
+            "architecture": "x86_64",
+            "region": "us-east-1",
+            "reserved_concurrency": 2,
+            "provisioned_concurrency": 0,
+            "measurement_phase": "warm_after_ten_explicit_warmups",
+            "controlled_cold_start_evidence_file": "candidate-cold-start.json",
+            "controlled_cold_sample_included": False,
+            "limitations": ["Concurrency one only."],
+        },
+        "production_api_smoke": {
+            "schema_version": "1.0.0",
+            "status": "passed",
+            "scope": "bounded_release_smoke",
+            "base_url_origin": "https://example.cloudfront.net",
+            "model_id": "bm25-v1",
+            "evaluated_candidate_model_id": "bm25-v1",
+            "query_id": "q1",
+            "candidate_count": 40,
+            "rank_requests": 3,
+            "comparison_checked": True,
+            "request_count": 8,
+            "error_count": 0,
+            "latency_ms": {
+                "minimum": 10.0,
+                "median": 20.0,
+                "maximum": 30.0,
+                "rank_median": 25.0,
+            },
+            "production_error_rate_claim_eligible": False,
+            "note": "Bounded smoke only.",
+        },
+        "browser_smoke": {"desktop": True, "mobile": True, "keyboard": True},
+    }
+    return (json.dumps(payload, sort_keys=True) + "\n").encode()
+
+
+def _mutated_deployment_evidence_payload(path: str, value: object) -> bytes:
+    payload = json.loads(_deployment_evidence_payload())
+    target = payload
+    parts = path.split(".")
+    for part in parts[:-1]:
+        target = target[part]
+    target[parts[-1]] = value
+    return (json.dumps(payload, sort_keys=True) + "\n").encode()
+
+
+class _FakeS3:
+    def __init__(self, payload: bytes | None = None, *, error_code: str | None = None) -> None:
+        self.payload = payload
+        self.error_code = error_code
+        self.calls: list[dict[str, object]] = []
+
+    def get_object(self, **kwargs: object) -> dict[str, object]:
+        self.calls.append(kwargs)
+        if self.error_code:
+            raise ClientError(
+                {"Error": {"Code": self.error_code, "Message": "not exposed"}},
+                "GetObject",
+            )
+        assert self.payload is not None
+        return {
+            "Body": io.BytesIO(self.payload),
+            "ContentLength": len(self.payload),
+            "ContentType": "application/json",
+            "ChecksumSHA256": base64.b64encode(hashlib.sha256(self.payload).digest()).decode(),
+        }
+
+
+def _operations_client(s3: _FakeS3, *, lambda_version: str = "2") -> TestClient:
+    settings = ServiceSettings(
+        service_version=OPERATIONS_GIT_SHA,
+        artifact_bucket="private-artifact-bucket",
+        lambda_function_version=lambda_version,
+    )
+    state = ServiceState(
+        settings,
+        release_manifest=_strict_validation_manifest(evaluation_report_id="report-tiny"),
+        s3_client=s3,
+    )
+    return TestClient(create_app(settings, state=state))
+
+
+def test_operational_store_settings_use_the_deployed_environment_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ARTIFACT_BUCKET", "private-artifact-bucket")
+    monkeypatch.setenv("PUBLIC_PREFIX", "public/")
+    monkeypatch.setenv("AWS_LAMBDA_FUNCTION_VERSION", "2")
+    settings = ServiceSettings()
+    assert settings.artifact_bucket == "private-artifact-bucket"
+    assert settings.public_prefix == "public/"
+    assert settings.lambda_function_version == "2"
+
+
+@pytest.mark.parametrize("error_code", ["NoSuchKey", "AccessDenied"])
+def test_operational_evidence_is_pending_until_the_canonical_record_exists(
+    error_code: str,
+) -> None:
+    s3 = _FakeS3(error_code=error_code)
+    with _operations_client(s3) as client:
+        response = client.get("/api/v1/operations")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json() == {
+        "schema_version": "1.0.0",
+        "status": "pending",
+        "release_id": "release-validation-baseline",
+        "model_id": "bm25-v1",
+        "note": "Deployment evidence is publishing.",
+    }
+    assert s3.calls == [
+        {
+            "Bucket": "private-artifact-bucket",
+            "Key": "public/release-validation-baseline/deployment-evidence.json",
+            "ChecksumMode": "ENABLED",
+        }
+    ]
+
+
+def test_operational_evidence_returns_only_the_sanitized_deployed_measurements() -> None:
+    s3 = _FakeS3(_deployment_evidence_payload())
+    with _operations_client(s3) as client:
+        response = client.get("/api/v1/operations")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    payload = response.json()
+    assert payload["status"] == "verified"
+    assert payload["warm"]["candidate_count"] == 40
+    assert payload["warm"]["measured_request_count"] == 200
+    assert payload["warm"]["successful_request_count"] == 200
+    assert payload["warm"]["end_to_end_latency_ms"]["p95"] == 200.0
+    assert payload["warm"]["model_latency_ms"]["p95"] == 40.0
+    assert payload["controlled_cold_start"]["excluded_from_warm_latency"] is True
+    serialized = json.dumps(payload, sort_keys=True)
+    for private_field in (
+        "function_name",
+        "function_version",
+        "promoted_pointer_version_id",
+        "previous_lambda_version",
+        "production_lambda_version",
+        "private-request-id",
+    ):
+        assert private_field not in serialized
+
+
+def test_stale_deployment_record_is_pending_during_a_new_activation() -> None:
+    s3 = _FakeS3(_deployment_evidence_payload(code_commit="e" * 40))
+    with _operations_client(s3) as client:
+        response = client.get("/api/v1/operations")
+    assert response.status_code == 200
+    assert response.json()["status"] == "pending"
+
+
+def test_evidence_for_another_lambda_version_is_pending_during_activation() -> None:
+    payload = json.loads(_deployment_evidence_payload())
+    payload["production_lambda_version"] = "3"
+    payload["controlled_cold_start"]["identifiers"]["function_version"] = "3"
+    s3 = _FakeS3((json.dumps(payload, sort_keys=True) + "\n").encode())
+    with _operations_client(s3, lambda_version="2") as client:
+        response = client.get("/api/v1/operations")
+    assert response.status_code == 200
+    assert response.json()["status"] == "pending"
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        ("controlled_cold_start.identifiers.dataset_manifest_hash", "sha256:" + "9" * 64),
+        ("controlled_cold_start.identifiers.model_artifact_checksum", "sha256:" + "8" * 64),
+        ("controlled_cold_start.first_request.candidate_count", 20),
+        ("production_api_smoke.candidate_count", 20),
+        ("controlled_cold_start.control_proof.reserved_concurrency", 1),
+        ("controlled_cold_start.control_proof.provisioned_concurrency", 1),
+        ("controlled_cold_start.lambda_report.configured_memory_mb", 2048),
+        ("controlled_cold_start.identifiers.region", "us-west-2"),
+    ],
+)
+def test_operational_evidence_rejects_cross_bound_identity_or_configuration(
+    path: str,
+    value: object,
+) -> None:
+    with _operations_client(_FakeS3(_mutated_deployment_evidence_payload(path, value))) as client:
+        response = client.get("/api/v1/operations")
+    assert response.status_code == 409
+    assert response.json()["code"] == "operational_evidence_conflict"
+
+
+def test_release_mode_requires_operational_store_and_lambda_identity() -> None:
+    manifest = _strict_validation_manifest(evaluation_report_id="report-tiny")
+    missing_store = ServiceSettings(
+        service_version=OPERATIONS_GIT_SHA,
+        release_mode=True,
+        lambda_function_version="2",
+    )
+    state = ServiceState(missing_store, release_manifest=manifest)
+    with TestClient(create_app(missing_store, state=state)) as client:
+        assert client.get("/api/v1/operations").status_code == 503
+
+    missing_version = ServiceSettings(
+        service_version=OPERATIONS_GIT_SHA,
+        release_mode=True,
+        artifact_bucket="private-artifact-bucket",
+    )
+    state = ServiceState(missing_version, release_manifest=manifest, s3_client=_FakeS3())
+    with TestClient(create_app(missing_version, state=state)) as client:
+        assert client.get("/api/v1/operations").status_code == 503
+
+
+def test_operational_transport_failures_are_mapped_to_service_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class BrokenBody:
+        def read(self, _: int) -> bytes:
+            raise OSError("private transport failure")
+
+        def close(self) -> None:
+            return None
+
+    class BrokenReadS3(_FakeS3):
+        def get_object(self, **kwargs: object) -> dict[str, object]:
+            response = super().get_object(**kwargs)
+            response["Body"] = BrokenBody()
+            return response
+
+    with _operations_client(BrokenReadS3(_deployment_evidence_payload())) as client:
+        assert client.get("/api/v1/operations").status_code == 503
+
+    monkeypatch.setattr(
+        "search_rank.serving.dependencies.boto3.client",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("client unavailable")),
+    )
+    settings = ServiceSettings(
+        service_version=OPERATIONS_GIT_SHA,
+        artifact_bucket="private-artifact-bucket",
+        lambda_function_version="2",
+    )
+    state = ServiceState(
+        settings,
+        release_manifest=_strict_validation_manifest(evaluation_report_id="report-tiny"),
+    )
+    with TestClient(create_app(settings, state=state)) as client:
+        assert client.get("/api/v1/operations").status_code == 503
+
+
+def test_operational_evidence_rejects_tamper_and_hides_store_failures() -> None:
+    bad_checksum = _FakeS3(_deployment_evidence_payload())
+    original_get = bad_checksum.get_object
+
+    def tampered_get(**kwargs: object) -> dict[str, object]:
+        response = original_get(**kwargs)
+        response["ChecksumSHA256"] = "not-the-object-checksum"
+        return response
+
+    bad_checksum.get_object = tampered_get  # type: ignore[method-assign]
+    with _operations_client(bad_checksum) as client:
+        conflict = client.get("/api/v1/operations")
+    assert conflict.status_code == 409
+    assert conflict.headers["cache-control"] == "no-store"
+    assert conflict.json()["code"] == "operational_evidence_conflict"
+
+    with _operations_client(_FakeS3(error_code="SlowDown")) as client:
+        unavailable = client.get("/api/v1/operations")
+    assert unavailable.status_code == 503
+    assert unavailable.headers["cache-control"] == "no-store"
+    assert unavailable.json()["code"] == "operational_evidence_unavailable"
