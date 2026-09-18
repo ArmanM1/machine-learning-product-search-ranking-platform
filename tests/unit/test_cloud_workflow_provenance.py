@@ -256,6 +256,7 @@ def test_split_manifest_identity_is_derived_and_bound_across_release_surfaces() 
 
 def test_release_binds_baseline_evidence_to_explicit_clean_commit_and_config() -> None:
     release = (WORKFLOWS / "release.yml").read_text(encoding="utf-8")
+    phase = (ROOT / "scripts" / "release_processing_phase.sh").read_text(encoding="utf-8")
     validator = (ROOT / "scripts" / "validate_release_artifacts.py").read_text(encoding="utf-8")
 
     assert 'test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"' in release
@@ -271,9 +272,12 @@ def test_release_binds_baseline_evidence_to_explicit_clean_commit_and_config() -
     assert "command.git_sha != expected_git_sha" in validator
     assert "command.repository_dirty" in validator
     assert "baseline.config_hash != semantic_config_hash" in validator
-    assert "VALIDATION_BASELINE_CONFIG_HASH: $baseline_config_hash" in release
+    assert "VALIDATION_BASELINE_CONFIG_HASH: $baseline_config_hash" in phase
     assert ".git_sha == $git and .repository_dirty == false" in release
     assert ".validation_baseline_summary_checksum == $baseline_summary" in release
+    assert '--git-sha "${MODEL_SOURCE_GIT_SHA}"' in release
+    assert "imageTag=sha-${GITHUB_SHA}" in release
+    assert "MODEL_SOURCE_GIT_SHA: $model_source_commit" in phase
 
 
 def test_baseline_bootstrap_receives_checksum_index_via_manifest_metadata() -> None:

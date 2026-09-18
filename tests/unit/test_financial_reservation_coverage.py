@@ -174,7 +174,7 @@ def test_workflow_guards_bind_the_exact_allowance_dimensions_before_reservation(
             "required_cpu_hours=0",
             "required_gpu_hours=0",
         ),
-        ("release.yml", "evaluate-and-promote"): (
+        ("release.yml", "prepare"): (
             "required_max_usd=estimate",
             "required_remaining_committed_usd=remaining",
             "required_cpu_hours=total_hours",

@@ -215,6 +215,8 @@ class TrialSelection(ContractModel):
         }
         if len(shared_values) != 1 or self.dataset_manifest_hash != treatment.dataset_manifest_hash:
             raise ValueError("all trials must share data, code, image, region, and hardware")
+        if any(trial.training_git_sha != self.git_sha for trial in self.trials):
+            raise ValueError("trial selection Git SHA must equal every training trial Git SHA")
 
         by_contrast: dict[str, ValidationContrast] = {
             contrast.contrast_id: contrast for contrast in self.contrasts

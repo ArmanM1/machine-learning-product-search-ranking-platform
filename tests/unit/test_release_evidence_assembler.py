@@ -29,6 +29,7 @@ from tests.unit.test_durable_evidence_contracts import (
 )
 
 SOURCE_SHA = "a" * 40
+MODEL_SOURCE_SHA = "d" * 40
 DEPLOYMENT_SHA = "b" * 40
 BASELINE_SHA = "c" * 40
 DIGEST_A = "sha256:" + "1" * 64
@@ -315,7 +316,7 @@ def _portfolio_ablations() -> dict[str, Any]:
         "artifact_type": "portfolio_ablation_evidence",
         "source_trial_selection_sha256": DIGEST_C,
         "selection_id": TRIAL_ID,
-        "git_sha": SOURCE_SHA,
+        "git_sha": MODEL_SOURCE_SHA,
         "dataset_manifest_sha256": DIGEST_A,
         "metric": "graded_ndcg@10",
         "test_access_count": 0,
@@ -442,7 +443,7 @@ def _public_evidence(report: dict[str, Any]) -> dict[str, Any]:
                 "selected_model_id": CANDIDATE_MODEL,
                 "selected_model_artifact_checksum": DIGEST_B,
                 "config_hash": DIGEST_D,
-                "git_sha": SOURCE_SHA,
+                "git_sha": MODEL_SOURCE_SHA,
                 "image_digest": DIGEST_C,
                 "hardware_class": "ml.g4dn.xlarge",
                 "accelerator": "gpu",
@@ -985,6 +986,7 @@ def _fixture(root: Path, *, gate_passed: bool = True) -> None:
 def _assemble(root: Path) -> dict[str, Any]:
     return assembler.assemble(
         root,
+        MODEL_SOURCE_SHA,
         SOURCE_SHA,
         DEPLOYMENT_SHA,
         generated_at="2026-09-18T09:00:00Z",
@@ -999,6 +1001,8 @@ def test_assembler_binds_typed_chain_and_derives_serialization(tmp_path: Path) -
     payload = _assemble(root)
 
     assert payload["release_gate"]["passed"] is True
+    assert payload["identities"]["model_source_git_sha"] == MODEL_SOURCE_SHA
+    assert payload["identities"]["release_git_sha"] == SOURCE_SHA
     assert "workflow_run_ids" not in payload
     assert payload["rollback"]["verified"] is True
     assert payload["redeployment"]["exact_winner_redeployed"] is True

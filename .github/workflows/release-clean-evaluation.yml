@@ -1,0 +1,198 @@
+name: One clean held-out evaluation phase
+
+on:
+  workflow_call:
+    inputs:
+      dispatch_config:
+        required: true
+        type: string
+      allow_heldout_eval:
+        required: true
+        type: string
+      authorization:
+        required: true
+        type: string
+      authorization_inputs_json:
+        required: true
+        type: string
+      clean_run:
+        required: true
+        type: number
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: us-east-1
+  CAMPAIGN_BUDGET_USD: "40"
+  REQUIRED_CREDIT_RESERVE_USD: "40"
+  MAXIMUM_OUT_OF_POCKET_USD: "0"
+
+jobs:
+  evaluate:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    environment: heldout-release
+    env:
+      ALLOW_HELDOUT_EVAL: ${{ inputs.allow_heldout_eval }}
+      AUTHORIZATION: ${{ inputs.authorization }}
+      DISPATCH_CONFIG_JSON: ${{ inputs.dispatch_config }}
+      CAMPAIGN_SPEND_TO_DATE_USD: ${{ secrets.AWS_CAMPAIGN_SPEND_TO_DATE_USD }}
+      REMAINING_APPLICABLE_CREDIT_USD: ${{ secrets.AWS_REMAINING_APPLICABLE_CREDIT_USD }}
+      FINANCIAL_SNAPSHOT_OBSERVED_AT: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_OBSERVED_AT }}
+      FINANCIAL_SNAPSHOT_RECEIPT_SHA256: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_RECEIPT_SHA256 }}
+      FINANCIAL_SNAPSHOT_HMAC_KEY: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_HMAC_KEY }}
+      FINANCIAL_RESERVATION_MAX_USD: ${{ secrets.AWS_FINANCIAL_RESERVATION_MAX_USD }}
+      FINANCIAL_RESERVATION_REMAINING_COMMITTED_USD: ${{ secrets.AWS_FINANCIAL_RESERVATION_REMAINING_COMMITTED_USD }}
+      FINANCIAL_RESERVATION_CPU_HOURS: ${{ secrets.AWS_FINANCIAL_RESERVATION_CPU_HOURS }}
+      FINANCIAL_RESERVATION_GPU_HOURS: ${{ secrets.AWS_FINANCIAL_RESERVATION_GPU_HOURS }}
+      FINANCIAL_CPU_HOURS_USED_TO_DATE: ${{ secrets.AWS_FINANCIAL_CPU_HOURS_USED_TO_DATE }}
+      FINANCIAL_GPU_HOURS_USED_TO_DATE: ${{ secrets.AWS_FINANCIAL_GPU_HOURS_USED_TO_DATE }}
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_WORKFLOW: release
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_INPUTS_JSON: ${{ inputs.authorization_inputs_json }}
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_COMMIT_SHA: ${{ github.sha }}
+      FINANCIAL_SNAPSHOT_SOURCE: aws_billing_and_cost_management_console
+      FINANCIAL_SNAPSHOT_MAX_AGE_SECONDS: "86400"
+      TF_STATE_BUCKET: ${{ vars.AWS_TERRAFORM_STATE_BUCKET }}
+      ARTIFACT_BUCKET: ${{ vars.AWS_ARTIFACT_BUCKET }}
+      PROCESSING_ROLE_ARN: ${{ vars.AWS_SAGEMAKER_PROCESSING_ROLE_ARN }}
+      EVAL_REPOSITORY: ${{ vars.AWS_EVAL_ECR_REPOSITORY_URL }}
+      INSTANCE_TYPE: ml.m5.xlarge
+      PROJECT_NAME: product-search-ranking
+      ENVIRONMENT_NAME: prod
+      OWNER_ALIAS: ${{ vars.TF_OWNER_ALIAS }}
+      POLL_WINDOW_SECONDS: "3000"
+      POLL_INTERVAL_SECONDS: "30"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+      - name: Validate the immutable phase inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${AUTHORIZATION}" = "RUN TWO CLEAN HELDOUT EVALUATIONS"
+          test "${ALLOW_HELDOUT_EVAL}" = "1"
+          test "${AWS_REGION}" = "us-east-1"
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          test "${{ inputs.clean_run }}" = "1" || test "${{ inputs.clean_run }}" = "2"
+          uv sync --frozen --all-extras
+          python scripts/validate_workflow_dispatch.py --workflow release
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: heldout-release-preflight-${{ github.run_id }}
+          path: .
+      - name: Verify the cross-job preflight handoff
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum --check preflight-checksums.txt
+          jq -e \
+            --arg release "${GITHUB_SHA}" \
+            --arg source "${MODEL_SOURCE_GIT_SHA}" \
+            --arg dispatch "${DISPATCH_CONFIG_SHA256}" '
+            .schema_version == "1.0.0" and
+            .artifact_type == "heldout_release_preflight" and
+            .release_git_sha == $release and
+            .model_source_git_sha == $source and
+            .dispatch_config_sha256 == $dispatch and
+            (.baseline_config_hash | test("^sha256:[0-9a-f]{64}$")) and
+            (.split_manifest_hash | test("^sha256:[0-9a-f]{64}$"))' \
+            preflight-handoff.json >/dev/null
+          baseline_hash="$(jq -er '.baseline_config_hash' preflight-handoff.json)"
+          split_hash="$(jq -er '.split_manifest_hash' preflight-handoff.json)"
+          printf 'BASELINE_CONFIG_HASH=%s\nSPLIT_MANIFEST_HASH=%s\n' \
+            "${baseline_hash}" "${split_hash}" >>"${GITHUB_ENV}"
+      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-heldout-phase-${{ github.run_id }}-${{ inputs.clean_run }}
+          mask-aws-account-id: true
+      - name: Atomically reserve the signed campaign capacity
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPATH=src uv run python scripts/reserve_financial_capacity.py reserve \
+            --bucket "${TF_STATE_BUCKET}" \
+            --output "financial-capacity-reservation-clean-${{ inputs.clean_run }}.json"
+      - name: Reserve one access and submit or reuse the exact clean evaluation
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/release_processing_phase.sh reserve-submit "${{ inputs.clean_run }}"
+      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-heldout-poll1-${{ github.run_id }}-${{ inputs.clean_run }}
+          mask-aws-account-id: true
+      - name: Poll clean evaluation in bounded window 1
+        shell: bash
+        run: bash scripts/release_processing_phase.sh poll "${{ inputs.clean_run }}"
+      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-heldout-poll2-${{ github.run_id }}-${{ inputs.clean_run }}
+          mask-aws-account-id: true
+      - name: Poll clean evaluation in bounded window 2
+        shell: bash
+        run: bash scripts/release_processing_phase.sh poll "${{ inputs.clean_run }}"
+      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-heldout-poll3-${{ github.run_id }}-${{ inputs.clean_run }}
+          mask-aws-account-id: true
+      - name: Poll clean evaluation in bounded window 3
+        shell: bash
+        run: bash scripts/release_processing_phase.sh poll "${{ inputs.clean_run }}"
+      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-heldout-poll4-${{ github.run_id }}-${{ inputs.clean_run }}
+          mask-aws-account-id: true
+      - name: Poll clean evaluation in bounded window 4
+        shell: bash
+        run: bash scripts/release_processing_phase.sh poll "${{ inputs.clean_run }}"
+      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-heldout-poll5-${{ github.run_id }}-${{ inputs.clean_run }}
+          mask-aws-account-id: true
+      - name: Poll clean evaluation in bounded window 5
+        shell: bash
+        run: bash scripts/release_processing_phase.sh poll "${{ inputs.clean_run }}"
+      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-heldout-collect-${{ github.run_id }}-${{ inputs.clean_run }}
+          mask-aws-account-id: true
+      - name: Collect the terminal clean-evaluation evidence
+        shell: bash
+        run: bash scripts/release_processing_phase.sh collect "${{ inputs.clean_run }}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: heldout-clean-${{ inputs.clean_run }}-${{ github.run_id }}
+          path: |
+            access-counter-clean-${{ inputs.clean_run }}.json
+            output-uri-clean-${{ inputs.clean_run }}.txt
+            processing-job-clean-${{ inputs.clean_run }}.json
+            processing-job-evidence-clean-${{ inputs.clean_run }}.json
+            processing-phase-checksums-clean-${{ inputs.clean_run }}.txt
+            processing-phase-clean-${{ inputs.clean_run }}.json
+          if-no-files-found: error
+          retention-days: 2

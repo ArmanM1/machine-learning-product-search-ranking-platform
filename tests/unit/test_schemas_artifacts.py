@@ -15,6 +15,8 @@ from search_rank.schemas import (
     ExperimentConfig,
     ModelArtifact,
     PromotionPointer,
+    ReleaseExecutionProvenance,
+    ReleaseManifest,
     RunManifest,
     TrialSelection,
 )
@@ -23,6 +25,9 @@ from search_rank.schemas.dataset import SplitManifestIdentity
 SHA_A = "sha256:" + "a" * 64
 SHA_B = "sha256:" + "b" * 64
 NOW = datetime(2026, 9, 2, 12, 0, tzinfo=UTC)
+TRAINING_GIT_SHA = "a" * 40
+RELEASE_GIT_SHA = "b" * 40
+OTHER_EVALUATION_GIT_SHA = "c" * 40
 
 
 @pytest.mark.parametrize(
@@ -270,6 +275,120 @@ def test_unevaluated_model_artifact_cannot_claim_final_release_binding() -> None
     values["source_model_artifact_sha256"] = SHA_A
     with pytest.raises(ValidationError, match="cannot claim final release bindings"):
         ModelArtifact.model_validate(values)
+
+
+def release_execution_provenance_values(
+    *, evaluation_git_sha: str = RELEASE_GIT_SHA
+) -> dict[str, object]:
+    return {
+        "training": {
+            "trial_selection_id": "trial-selection-" + "1" * 20,
+            "trial_selection_sha256": SHA_A,
+            "run_id": "training-run-1",
+            "run_manifest_sha256": SHA_B,
+            "selected_model_id": "candidate-v1",
+            "selected_model_artifact_checksum": SHA_A,
+            "config_hash": SHA_B,
+            "git_sha": TRAINING_GIT_SHA,
+            "image_digest": SHA_A,
+            "hardware_class": "ml.g4dn.xlarge",
+            "accelerator": "gpu",
+            "region": "us-east-1",
+            "runtime_seconds": 100.0,
+            "estimated_cost_usd": 0.8,
+            "actual_cost_usd": None,
+            "cost_evidence": "Training estimate; reconciliation pending.",
+        },
+        "evaluation": {
+            "candidate_model_id": "candidate-v1",
+            "candidate_model_artifact_checksum": SHA_A,
+            "evaluation_config_hash": SHA_B,
+            "git_sha": evaluation_git_sha,
+            "image_digest": SHA_B,
+            "hardware_class": "ml.m5.xlarge",
+            "region": "us-east-1",
+            "clean_execution_count": 2,
+            "runtime_seconds": 20.0,
+            "runtime_basis": "processing_job_wall_clock_sum",
+            "estimated_cost_usd": 0.2,
+            "actual_cost_usd": None,
+            "cost_evidence": "Processing estimate; reconciliation pending.",
+        },
+    }
+
+
+def release_model_values(
+    model_id: str, kind: str, checksum: str, *, promoted: bool
+) -> dict[str, object]:
+    values: dict[str, object] = {
+        "model_id": model_id,
+        "kind": kind,
+        "text_template": "enriched_v1",
+        "artifact_checksum": checksum,
+        "public_summary": {
+            "model_id": model_id,
+            "display_name": model_id,
+            "kind": kind,
+            "base_model_id": None if kind == "bm25" else "base/model",
+            "artifact_checksum": checksum,
+            "evaluation_report_id": "report-1",
+            "promoted_at": "2026-09-02T12:00:00Z" if promoted else None,
+            "limitations_url": "/methodology#limitations",
+        },
+    }
+    if kind != "bm25":
+        values.update({"checkpoint": "models/candidate", "batch_size": 32})
+    return values
+
+
+def verified_release_manifest_values(
+    *, evaluation_git_sha: str = RELEASE_GIT_SHA
+) -> dict[str, object]:
+    return {
+        "schema_version": "1.0.0",
+        "release_id": "release-split-sha-1",
+        "promoted_model_id": "candidate-v1",
+        "dataset_manifest_hash": SHA_A,
+        "split_manifest_hash": SHA_B,
+        "evaluation_report_id": "report-1",
+        "git_sha": RELEASE_GIT_SHA,
+        "evidence_mode": "verified",
+        "provenance": release_execution_provenance_values(evaluation_git_sha=evaluation_git_sha),
+        "artifact_checksums": {
+            "candidate-model-artifact.json": SHA_A,
+            "evaluation-report.json": SHA_B,
+            "evaluation-provenance.json": SHA_A,
+            "curated-queries.json": SHA_B,
+            "public-evidence.json": SHA_A,
+            "LICENSE": SHA_B,
+            "NOTICE": SHA_A,
+        },
+        "models": [
+            release_model_values("bm25-v1", "bm25", SHA_B, promoted=False),
+            release_model_values("candidate-v1", "fine_tuned", SHA_A, promoted=True),
+        ],
+    }
+
+
+def test_release_execution_provenance_can_carry_split_git_shas() -> None:
+    provenance = ReleaseExecutionProvenance.model_validate(release_execution_provenance_values())
+
+    assert provenance.training.git_sha == TRAINING_GIT_SHA
+    assert provenance.evaluation.git_sha == RELEASE_GIT_SHA
+    assert provenance.training.git_sha != provenance.evaluation.git_sha
+
+
+def test_release_manifest_allows_split_training_sha_and_binds_evaluation_to_release() -> None:
+    manifest = ReleaseManifest.model_validate(verified_release_manifest_values())
+
+    assert manifest.provenance is not None
+    assert manifest.provenance.training.git_sha == TRAINING_GIT_SHA
+    assert manifest.provenance.evaluation.git_sha == manifest.git_sha == RELEASE_GIT_SHA
+
+    with pytest.raises(ValidationError, match="release Git SHA differs from evaluation provenance"):
+        ReleaseManifest.model_validate(
+            verified_release_manifest_values(evaluation_git_sha=OTHER_EVALUATION_GIT_SHA)
+        )
 
 
 def test_checked_in_json_schemas_are_valid_documents_with_required_fields() -> None:

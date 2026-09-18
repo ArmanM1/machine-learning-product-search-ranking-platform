@@ -993,6 +993,11 @@
           "title": "Model Artifact Sha256",
           "type": "string"
         },
+        "model_source_git_sha": {
+          "pattern": "^[0-9a-f]{40}$",
+          "title": "Model Source Git Sha",
+          "type": "string"
+        },
         "release_git_sha": {
           "pattern": "^[0-9a-f]{40}$",
           "title": "Release Git Sha",
@@ -1015,6 +1020,7 @@
         }
       },
       "required": [
+        "model_source_git_sha",
         "release_git_sha",
         "deployment_git_sha",
         "dataset_manifest_sha256",

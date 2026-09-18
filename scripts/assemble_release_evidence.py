@@ -326,7 +326,7 @@ def _require_handoff_values(
 
 
 def _release_files(
-    evidence_root: Path, source_sha: str
+    evidence_root: Path, release_sha: str
 ) -> tuple[
     dict[str, Any],
     EvaluationReport,
@@ -336,8 +336,8 @@ def _release_files(
     PromotionPointer,
     Path,
 ]:
-    release_root = _stage_root(evidence_root, source_sha, "release")
-    handoff = _handoff(evidence_root, source_sha, "release")
+    release_root = _stage_root(evidence_root, release_sha, "release")
+    handoff = _handoff(evidence_root, release_sha, "release")
     report = _model(release_root / "evaluation-report.json", EvaluationReport, "evaluation report")
     provenance = _model(
         release_root / "evaluation-provenance.json",
@@ -359,7 +359,7 @@ def _release_files(
     _require(pointer.previous is not None, "release promotion pointer lacks its prior release")
     assert pointer.previous is not None
     _require(
-        pointer.git_sha == summary.code_commit == provenance.evaluation_git_sha == source_sha,
+        pointer.git_sha == summary.code_commit == provenance.evaluation_git_sha == release_sha,
         "release source identities differ",
     )
     _require(
@@ -525,7 +525,7 @@ def _rollback_files(
 def _benchmark_files(
     benchmark_root: Path,
     benchmark: Mapping[str, Any],
-    source_sha: str,
+    release_sha: str,
     deployment_sha: str,
     generated_at: datetime,
     release_pointer: PromotionPointer,
@@ -575,7 +575,7 @@ def _benchmark_files(
     binding = report.release_binding
     report_sha = _sha256(report_path)
     _require(ids.evidence_mode == "verified", "benchmark evidence mode differs")
-    _require(ids.release_git_sha == source_sha, "release source binding differs")
+    _require(ids.release_git_sha == release_sha, "release source binding differs")
     _require(ids.benchmark_harness_git_sha == deployment_sha, "benchmark source binding differs")
     _require(ids.region == "us-east-1", "benchmark region differs")
     _require(
@@ -705,7 +705,8 @@ def _portfolio_public_snapshot(
     *,
     public_evidence_sha256: str,
     model_artifact_sha256: str,
-    source_sha: str,
+    model_source_sha: str,
+    release_sha: str,
     evaluation: EvaluationReport,
     evaluation_provenance: EvaluationProvenance,
     release_summary: ReleaseSummary,
@@ -746,8 +747,9 @@ def _portfolio_public_snapshot(
         "served public run identity differs from held-out evaluation",
     )
     _require(
-        run.git_sha == training.git_sha == public_provenance.git_sha == source_sha,
-        "served public source identity differs",
+        run.git_sha == public_provenance.git_sha == release_sha
+        and training.git_sha == model_source_sha,
+        "served public training or release source identity differs",
     )
     _require(
         run.dataset_manifest_hash == evaluation_provenance.dataset_manifest_hash,
@@ -871,7 +873,7 @@ def _portfolio_public_snapshot(
     _require(
         ablations.source_trial_selection_sha256 == release_summary.trial_selection_sha256
         and ablations.selection_id == release_summary.trial_selection_id
-        and ablations.git_sha == source_sha
+        and ablations.git_sha == model_source_sha
         and ablations.dataset_manifest_sha256 == evaluation_provenance.dataset_manifest_hash
         and ablations.selected_model_id == evaluation.candidate_model_id
         and ablations.selected_config_sha256 == evaluation_provenance.config_hash,
@@ -962,7 +964,8 @@ def _public_only(value: Any) -> None:
 
 def assemble(
     evidence_root: Path,
-    source_sha: str,
+    model_source_sha: str,
+    release_sha: str,
     deployment_sha: str,
     *,
     generated_at: str,
@@ -983,7 +986,7 @@ def assemble(
         release_pointer,
         previous_pointer,
         release_root,
-    ) = _release_files(evidence_root, source_sha)
+    ) = _release_files(evidence_root, release_sha)
     release_prior = release_pointer.previous
     _require(release_prior is not None, "release promotion pointer lacks its prior release")
     assert release_prior is not None
@@ -1102,7 +1105,7 @@ def assemble(
     bound, benchmark_report_sha, benchmark_checksums_sha, performance = _benchmark_files(
         benchmark_root,
         benchmark,
-        source_sha,
+        release_sha,
         deployment_sha,
         generated,
         release_pointer,
@@ -1121,7 +1124,8 @@ def assemble(
         release_root,
         public_evidence_sha256=bound["public_evidence"],
         model_artifact_sha256=bound["model_artifact"],
-        source_sha=source_sha,
+        model_source_sha=model_source_sha,
+        release_sha=release_sha,
         evaluation=evaluation,
         evaluation_provenance=evaluation_provenance,
         release_summary=release_summary,
@@ -1150,7 +1154,8 @@ def assemble(
         "evidence_mode": "verified",
         "release_id": _identifier(release_pointer.release_id, "release ID"),
         "identities": {
-            "release_git_sha": source_sha,
+            "model_source_git_sha": model_source_sha,
+            "release_git_sha": release_sha,
             "deployment_git_sha": deployment_sha,
             "dataset_manifest_sha256": bound["dataset_manifest"],
             "model_artifact_sha256": bound["model_artifact"],
@@ -1314,7 +1319,8 @@ def write_immutable(payload: Mapping[str, Any], output_dir: Path) -> Path:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--evidence-root", type=Path, required=True)
-    parser.add_argument("--source-sha", required=True)
+    parser.add_argument("--model-source-sha", required=True)
+    parser.add_argument("--release-sha", required=True)
     parser.add_argument("--deployment-sha", required=True)
     parser.add_argument("--generated-at")
     parser.add_argument("--public-demo-expires-at", required=True)
@@ -1330,7 +1336,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         payload = assemble(
             args.evidence_root,
-            args.source_sha,
+            args.model_source_sha,
+            args.release_sha,
             args.deployment_sha,
             generated_at=generated_at,
             public_demo_expires_at=args.public_demo_expires_at,

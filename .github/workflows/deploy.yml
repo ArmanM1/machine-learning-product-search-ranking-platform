@@ -727,7 +727,10 @@ jobs:
                       artifact.config_hash == training.config_hash == public_run.config_hash
                   ),
                   "training Git SHA": (
-                      artifact.git_sha == training.git_sha == release.git_sha == public_run.git_sha
+                      artifact.git_sha == training.git_sha
+                  ),
+                  "evaluation and release Git SHA": (
+                      evaluation.git_sha == release.git_sha == public_run.git_sha
                   ),
                   "training image": artifact.image_digest == training.image_digest,
                   "dataset": (
