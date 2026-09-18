@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import hashlib
 import json
 import logging
@@ -28,6 +29,7 @@ from search_rank.schemas.experiment import ExperimentConfig
 
 from .callbacks import CurvePoint, EarlyStopper, write_curves
 from .checkpoints import assert_any_parameter_changed, load_checkpoint, snapshot_parameters
+from .diagnostics import TrainingStageTracker, fail_tracked_stage, training_stage
 
 LOGGER = logging.getLogger(__name__)
 _EPOCH_CHECKPOINT = re.compile(r"^epoch-([0-9]{4})$")
@@ -62,6 +64,17 @@ class TrainingResult:
     fresh_load_verified: bool
     warmup_steps: int
     planned_optimizer_steps: int
+    device_type: str
+    cuda_available: bool
+    cuda_device_count: int
+    accelerator_type: str
+
+
+@dataclass(frozen=True)
+class TrainingRuntime:
+    """Resolved execution device verified before loading the training dataset."""
+
+    device: str
     device_type: str
     cuda_available: bool
     cuda_device_count: int
@@ -438,6 +451,21 @@ def _resolve_training_device(requested: str) -> tuple[str, str, bool, int, str]:
     return selected, device_type, cuda_available, cuda_device_count, accelerator_type
 
 
+def resolve_training_runtime(requested: str) -> TrainingRuntime:
+    """Resolve a requested device into an immutable, explicit runtime declaration."""
+
+    device, device_type, cuda_available, cuda_device_count, accelerator_type = (
+        _resolve_training_device(requested)
+    )
+    return TrainingRuntime(
+        device=device,
+        device_type=device_type,
+        cuda_available=cuda_available,
+        cuda_device_count=cuda_device_count,
+        accelerator_type=accelerator_type,
+    )
+
+
 def _early_stopping(config: ExperimentConfig) -> tuple[int, float]:
     value = config.early_stopping
     if isinstance(value, bool):
@@ -512,7 +540,76 @@ def _precision(config: ExperimentConfig, device: str) -> tuple[bool, torch.dtype
     return False, torch.float32
 
 
-def train_candidate(
+def release_cross_encoder_resources(model: CrossEncoder, *, device_type: str) -> None:
+    """Move a model off its accelerator and clear allocations before disposal."""
+
+    transformer = model.model
+    if transformer is not None:
+        torch_model = cast(torch.nn.Module, transformer)
+        torch_model.zero_grad(set_to_none=True)
+        torch_model.to("cpu")
+    del transformer
+    if device_type == "cuda":
+        torch.cuda.empty_cache()
+
+
+def preflight_training_runtime(
+    config: ExperimentConfig,
+    *,
+    device: str = "auto",
+) -> TrainingRuntime:
+    """Verify model loading plus a deterministic forward/backward pass on the target device."""
+
+    with training_stage("device_preflight"):
+        runtime = resolve_training_runtime(device)
+        configure_determinism(config.seed, strict=config.deterministic_mode)
+        model = _model(config, runtime.device)
+        try:
+            transformer = model.model
+            if transformer is None:
+                raise RuntimeError("cross-encoder has no underlying transformer model")
+            torch_model = cast(torch.nn.Module, transformer)
+            torch_model.train()
+            torch_model.zero_grad(set_to_none=True)
+            encoded = model.tokenizer(
+                ["device preflight", "device preflight"],
+                ["relevant product", "irrelevant product"],
+                padding=True,
+                truncation=True,
+                max_length=config.max_sequence_length,
+                return_tensors="pt",
+            ).to(runtime.device)
+            targets = torch.tensor([1.0, 0.0], dtype=torch.float32, device=runtime.device)
+            use_autocast, autocast_dtype = _precision(config, runtime.device)
+            with torch.autocast(
+                device_type="cuda" if runtime.device_type == "cuda" else "cpu",
+                dtype=autocast_dtype,
+                enabled=use_autocast,
+            ):
+                logits = cast(torch.Tensor, transformer(**encoded).logits).reshape(-1).float()
+                if logits.shape != targets.shape or not bool(torch.isfinite(logits).all()):
+                    raise RuntimeError("device preflight produced invalid logits")
+                loss = torch.nn.functional.binary_cross_entropy_with_logits(logits, targets)
+            if not bool(torch.isfinite(loss)):
+                raise RuntimeError("device preflight produced an invalid loss")
+            torch.autograd.backward(loss)
+            gradients = [
+                parameter.grad
+                for parameter in torch_model.parameters()
+                if parameter.requires_grad and parameter.grad is not None
+            ]
+            if not gradients or not all(
+                bool(torch.isfinite(gradient).all()) for gradient in gradients
+            ):
+                raise RuntimeError("device preflight produced invalid gradients")
+        finally:
+            release_cross_encoder_resources(model, device_type=runtime.device_type)
+            del model
+            gc.collect()
+    return runtime
+
+
+def _train_candidate(
     training_sample: pd.DataFrame,
     validation_frame: pd.DataFrame,
     config: ExperimentConfig,
@@ -521,6 +618,7 @@ def train_candidate(
     device: str = "auto",
     checkpoint_dir: str | Path | None = None,
     log_context: TrainingLogContext | None = None,
+    stage_tracker: TrainingStageTracker,
 ) -> TrainingResult:
     required_train = {"query", "input_text", "target", "query_id", "project_split"}
     required_validation = {
@@ -633,6 +731,7 @@ def train_candidate(
         stopper.bad_epochs = resume.bad_epochs
     start = time.perf_counter()
 
+    stage_tracker.transition("epoch")
     for epoch in range(first_epoch, config.max_epochs + 1):
         if training_complete:
             break
@@ -744,6 +843,7 @@ def train_candidate(
             break
         torch_model.train()
 
+    stage_tracker.transition("post_train")
     if checkpoint_root is not None and best_epoch:
         durable_best = checkpoint_root / f"epoch-{best_epoch:04d}" / "model"
         shutil.rmtree(best_path, ignore_errors=True)
@@ -783,4 +883,34 @@ def train_candidate(
     (output / "training-summary.json").write_text(
         json.dumps(asdict(result), indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
+    stage_tracker.complete()
     return result
+
+
+def train_candidate(
+    training_sample: pd.DataFrame,
+    validation_frame: pd.DataFrame,
+    config: ExperimentConfig,
+    *,
+    output_dir: str | Path,
+    device: str = "auto",
+    checkpoint_dir: str | Path | None = None,
+    log_context: TrainingLogContext | None = None,
+) -> TrainingResult:
+    """Train a candidate while recording safe trainer-init, epoch, and post-train stages."""
+
+    tracker = TrainingStageTracker("trainer_init")
+    tracker.start()
+    try:
+        return _train_candidate(
+            training_sample,
+            validation_frame,
+            config,
+            output_dir=output_dir,
+            device=device,
+            checkpoint_dir=checkpoint_dir,
+            log_context=log_context,
+            stage_tracker=tracker,
+        )
+    except Exception as error:
+        fail_tracked_stage(tracker, error)

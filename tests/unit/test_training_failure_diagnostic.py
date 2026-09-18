@@ -63,6 +63,12 @@ def _description(reason: str) -> dict[str, object]:
             "training_subprocess",
             1,
         ),
+        (
+            "AlgorithmError: phase=device_preflight; error_type=runtime_failure; exit_code=1",
+            "algorithm_error",
+            "device_preflight",
+            1,
+        ),
         ("AlgorithmError: ExecuteUserScriptError: ExitCode 137", "process_killed", None, 137),
         ("CUDA out of memory", "out_of_memory", None, None),
         ("MaxWaitTime exceeded", "spot_wait_limit", None, None),
@@ -260,6 +266,30 @@ def test_application_failure_signals_reject_unallowlisted_or_unordered_values() 
             application_failure_category="unknown",
             application_failure_signals=["tensor", "gpu"],
         )
+
+
+@pytest.mark.parametrize(
+    "phase",
+    (
+        "device_preflight",
+        "data_load",
+        "mining",
+        "sampling",
+        "artifact_write",
+        "trainer_init",
+        "epoch",
+        "post_train",
+    ),
+)
+def test_training_stage_and_category_are_preserved_from_safe_failure_reason(
+    phase: str,
+) -> None:
+    diagnostic = sanitize_training_failure(
+        _description(f"AlgorithmError: phase={phase}; error_type=contract_violation; exit_code=1")
+    )
+
+    assert diagnostic["container_phase"] == phase
+    assert diagnostic["error_type"] == "contract_violation"
 
 
 def test_cli_never_echoes_private_reason(

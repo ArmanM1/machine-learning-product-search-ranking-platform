@@ -4,12 +4,34 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 FAILURE_DIAGNOSTIC_PATH = Path("/opt/ml/output/failure")
+FAILURE_DIAGNOSTIC_ENV = "SEARCH_RANK_TRAINING_FAILURE_PATH"
+_TRAINING_PHASES = {
+    "device_preflight",
+    "data_load",
+    "mining",
+    "sampling",
+    "artifact_write",
+    "trainer_init",
+    "epoch",
+    "post_train",
+}
+_FAILURE_CATEGORIES = {
+    "contract_violation",
+    "dependency_failure",
+    "io_failure",
+    "permission_denied",
+    "resource_exhausted",
+    "runtime_failure",
+    "unexpected_failure",
+}
+_CHILD_DIAGNOSTIC = re.compile(r"^phase=([a-z_]+); error_type=([a-z_]+); exit_code=1\n$")
 
 
 def _write_failure_diagnostic(
@@ -31,6 +53,21 @@ def _write_failure_diagnostic(
     except OSError:
         # The original failure must win even if SageMaker's diagnostic mount is unavailable.
         return
+
+
+def _has_safe_child_diagnostic() -> bool:
+    """Accept only the exact bounded grammar emitted by the training process."""
+
+    try:
+        if FAILURE_DIAGNOSTIC_PATH.stat().st_size > 192:
+            return False
+        payload = FAILURE_DIAGNOSTIC_PATH.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return False
+    match = _CHILD_DIAGNOSTIC.fullmatch(payload)
+    return bool(
+        match and match.group(1) in _TRAINING_PHASES and match.group(2) in _FAILURE_CATEGORIES
+    )
 
 
 def _discover_file(
@@ -128,12 +165,20 @@ def main(argv: list[str] | None = None) -> int:
         print(f"training container preflight failed: {error}", file=sys.stderr)
         return 2
     try:
-        completed = subprocess.run(command, cwd=model_dir, check=False)
+        FAILURE_DIAGNOSTIC_PATH.unlink(missing_ok=True)
+        child_environment = os.environ.copy()
+        child_environment[FAILURE_DIAGNOSTIC_ENV] = str(FAILURE_DIAGNOSTIC_PATH)
+        completed = subprocess.run(
+            command,
+            cwd=model_dir,
+            check=False,
+            env=child_environment,
+        )
     except OSError as error:
         _write_failure_diagnostic(phase="subprocess_start", error_type=type(error).__name__)
         print(f"training container subprocess failed to start: {error}", file=sys.stderr)
         return 2
-    if completed.returncode != 0:
+    if completed.returncode != 0 and not _has_safe_child_diagnostic():
         _write_failure_diagnostic(
             phase="training_subprocess",
             exit_code=completed.returncode,
