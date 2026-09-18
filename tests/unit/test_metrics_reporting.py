@@ -16,6 +16,7 @@ from search_rank.evaluation.report import (
     public_evaluation_outcome,
     select_strongest_baseline,
 )
+from search_rank.evaluation.runner import _serialization_latency_samples
 from search_rank.schemas.evaluation import (
     CostEvidence,
     EvaluationReport,
@@ -110,6 +111,23 @@ def test_offline_latency_accepts_candidate_groups_above_public_api_cap() -> None
         model_revision="offline-baseline",
     )
     assert result.candidate_count == 70
+
+
+def test_serialization_latency_times_canonical_json_encoding_per_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    records = [
+        ScoredProduct("q2", "cup", "p3", "candidate", 0.5, 1, 0, "Exact", 1),
+        ScoredProduct("q1", "mug", "p2", "candidate", 0.1, 2, 1, "Irrelevant", 1),
+        ScoredProduct("q1", "mug", "p1", "candidate", 0.9, 1, 0, "Exact", 1),
+    ]
+    clock = iter((1_000_000, 1_400_000, 2_000_000, 2_100_000))
+    monkeypatch.setattr("search_rank.evaluation.runner.time.perf_counter_ns", lambda: next(clock))
+
+    samples, candidate_count = _serialization_latency_samples(records)
+
+    assert samples == pytest.approx([0.4, 0.1])
+    assert candidate_count is None
 
 
 def test_example_selection_includes_wins_losses_ties_and_required_failures() -> None:
