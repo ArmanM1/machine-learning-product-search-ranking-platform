@@ -64,7 +64,15 @@ export function ExperimentPage() {
             <div><dt>Evaluation configuration</dt><dd><CopyField label="evaluation configuration hash" value={run.evaluation_provenance.evaluation_config_hash} /></dd></div>
             <div><dt>Evaluation image</dt><dd><CopyField label="evaluation image digest" value={run.evaluation_provenance.image_digest} /></dd></div>
           </> : (
-            <div><dt>Container image</dt><dd><CopyField label="image digest" value={run.image_digest} /></dd></div>
+            <div>
+              <dt>{run.evidence_mode === 'validation_only' ? 'Reviewed evidence image' : 'Container image'}</dt>
+              <dd>
+                <CopyField
+                  label={run.evidence_mode === 'validation_only' ? 'reviewed evidence image digest' : 'image digest'}
+                  value={run.image_digest}
+                />
+              </dd>
+            </div>
           )}
           <div><dt>Model artifact</dt><dd><CopyField label="model artifact checksum" value={run.model_artifact_checksum} /></dd></div>
         </dl>

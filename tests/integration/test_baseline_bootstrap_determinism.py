@@ -150,3 +150,8 @@ def test_baseline_bootstrap_is_byte_identical_for_identical_inputs(
         model for model in manifest_payload["models"] if model["model_id"] == "bm25-enriched-v1"
     )
     assert selected["public_summary"]["promoted_at"] == "2026-09-02T00:01:00Z"
+    public_evidence = json.loads((outputs[0] / "public-evidence.json").read_text())
+    assert any(
+        "image_digest binds the reviewed evaluation container" in limitation
+        for limitation in public_evidence["run"]["limitations"]
+    )

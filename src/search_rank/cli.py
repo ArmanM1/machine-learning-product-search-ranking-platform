@@ -737,6 +737,11 @@ def bootstrap_baseline_release(
             ),
             limitations=[
                 "This bootstrap release contains validation evidence only.",
+                (
+                    "The baseline executed directly on the declared GitHub-hosted runner; "
+                    "image_digest binds the reviewed evaluation container and source revision, "
+                    "not the baseline runtime."
+                ),
                 "The system reranks supplied candidates and is not full-catalog retrieval.",
             ],
             prohibited_claims=[
