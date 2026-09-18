@@ -3,7 +3,6 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { apiClient, publicConfig } from '../api/client'
 import { useApiResource } from '../api/useApiResource'
 import { ArrowRightIcon } from '../components/Icons'
-import { PageIntro } from '../components/PageIntro'
 import { JudgmentLegend, ProductRanking } from '../components/ProductRanking'
 import { QueryPicker } from '../components/QueryPicker'
 import { StatusPanel } from '../components/StatusPanel'
@@ -50,16 +49,22 @@ export function ComparisonPage() {
 
   return (
     <div className="page-container comparison-page">
-      <PageIntro
-        eyebrow="Query comparison"
-        title={baselineOnly ? 'Inspect the validation-selected baseline.' : 'See what moved—and why it matters.'}
-        description={baselineOnly
-          ? 'This bootstrap release exposes an unchanged model for serving verification. It does not contain a trained candidate or held-out comparison.'
-          : 'Both systems receive the same curated products. Rank movement is model output; optional relevance badges are separate benchmark annotations.'}
-        meta={baselineOnly
-          ? <><span>Validation only</span><span>Held-out accesses: 0</span><span>Scores ≠ probabilities</span></>
-          : <><span>Curated examples</span><span>Top 10 shown</span><span>Scores ≠ probabilities</span></>}
-      />
+      <header className="workspace-header">
+        <div>
+          <p className="eyebrow">Ranking workspace</p>
+          <h1>{baselineOnly ? 'Inspect the selected baseline' : 'Compare product rankings'}</h1>
+          <p>
+            {baselineOnly
+              ? 'Choose a query and inspect the unchanged model selected on validation data.'
+              : 'Choose a shopper query, then compare how the same products move between systems.'}
+          </p>
+        </div>
+        <dl className="workspace-meta" aria-label="Workspace boundaries">
+          <div><dt>Source</dt><dd>Curated queries</dd></div>
+          <div><dt>View</dt><dd>Top 10</dd></div>
+          <div><dt>Scores</dt><dd>Not probabilities</dd></div>
+        </dl>
+      </header>
 
       {queries.status === 'success' ? (
         <QueryPicker queries={queries.data} selectedId={selectedQueryId} onSelect={chooseQuery} />
@@ -124,7 +129,7 @@ export function ComparisonPage() {
             <p>{baselineOnly
               ? 'This ranking confirms the selected baseline can serve a curated candidate set; it is not held-out quality evidence.'
               : 'One curated example is context—not proof. Inspect the aggregate report before drawing a conclusion.'}</p>
-            <Link className="button secondary" to="/evaluation">{baselineOnly ? 'View validation boundary' : 'View aggregate evidence'} <ArrowRightIcon /></Link>
+            <Link className="button secondary" to="/evidence">{baselineOnly ? 'View validation boundary' : 'Open evidence'} <ArrowRightIcon /></Link>
           </div>
         </>
       ) : (

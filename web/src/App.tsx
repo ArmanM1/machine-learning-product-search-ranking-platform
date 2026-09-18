@@ -1,4 +1,4 @@
-import { Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes } from 'react-router-dom'
 import { AppShell } from './components/AppShell'
 import { ComparisonPage } from './pages/ComparisonPage'
 import { EvaluationPage } from './pages/EvaluationPage'
@@ -11,8 +11,10 @@ export function App() {
   return (
     <Routes>
       <Route element={<AppShell />}>
-        <Route index element={<OverviewPage />} />
+        <Route index element={<ComparisonPage />} />
         <Route path="compare" element={<ComparisonPage />} />
+        <Route path="evidence" element={<OverviewPage />} />
+        <Route path="overview" element={<Navigate replace to="/evidence" />} />
         <Route path="evaluation" element={<EvaluationPage />} />
         <Route path="failures" element={<FailuresPage />} />
         <Route path="experiment" element={<ExperimentPage />} />

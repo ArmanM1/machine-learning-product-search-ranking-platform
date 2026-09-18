@@ -1,21 +1,19 @@
 import { useEffect, useRef } from 'react'
-import { NavLink, Outlet, useLocation } from 'react-router-dom'
+import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { isFixtureMode, publicConfig } from '../api/client'
 import { EvidenceBanner } from './EvidenceBanner'
 
-const navItems = [
-  { to: '/', label: 'Overview', end: true },
-  { to: '/compare', label: 'Compare' },
-  { to: '/evaluation', label: 'Evaluation' },
-  { to: '/failures', label: 'Failures' },
-  { to: `/experiments/${publicConfig.runId}`, label: 'Experiment' },
-]
-
 const repositoryUrl = 'https://github.com/ArmanM1/machine-learning-product-search-ranking-platform'
 
+const evidencePaths = ['/evidence', '/evaluation', '/failures', '/experiment', '/experiments/']
+
+function isEvidencePath(pathname: string) {
+  return evidencePaths.some((path) => pathname === path || pathname.startsWith(path))
+}
+
 function routeName(pathname: string) {
-  if (pathname === '/') return 'Evidence overview'
-  if (pathname === '/compare') return 'Query comparison'
+  if (pathname === '/' || pathname === '/compare') return 'Ranking workspace'
+  if (pathname === '/evidence') return 'Evidence overview'
   if (pathname === '/evaluation') return 'Evaluation report'
   if (pathname === '/failures') return 'Failure analysis'
   if (pathname === '/experiment' || pathname.startsWith('/experiments/')) return 'Experiment provenance'
@@ -26,9 +24,10 @@ export function AppShell() {
   const location = useLocation()
   const previousPath = useRef(location.pathname)
   const pageName = routeName(location.pathname)
+  const evidenceActive = isEvidencePath(location.pathname)
 
   useEffect(() => {
-    document.title = `${pageName} | Rank / evidence`
+    document.title = `${pageName} | Rerank`
 
     if (previousPath.current === location.pathname) return
     previousPath.current = location.pathname
@@ -66,30 +65,37 @@ export function AppShell() {
       <a className="skip-link" href="#main-content">Skip to content</a>
       <header className="site-header">
         <div className="header-inner">
-          <NavLink className="brand" to="/" aria-label="Product Search Ranking home">
+          <Link className="brand" to="/" aria-label="Rerank workspace home">
             <span className="brand-mark" aria-hidden="true"><i /><i /><i /></span>
             <span className="brand-copy">
-              <strong>Rank / evidence</strong>
-              <small>Product search laboratory</small>
+              <strong>Rerank</strong>
+              <small>Product search lab</small>
             </span>
-          </NavLink>
+          </Link>
+
           <nav className="primary-nav" aria-label="Primary navigation">
-            {navItems.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.end}
-                className={({ isActive }) => (isActive ? 'active' : undefined)}
-              >
-                {item.label}
-              </NavLink>
-            ))}
+            <NavLink to="/" end className={({ isActive }) => (isActive || location.pathname === '/compare' ? 'active' : undefined)}>
+              Rank
+            </NavLink>
+            <Link className={evidenceActive ? 'active' : undefined} aria-current={evidenceActive ? 'page' : undefined} to="/evidence">
+              Evidence
+            </Link>
           </nav>
+
           <div className={`mode-badge ${isFixtureMode ? 'fixture' : 'verified'}`}>
             <span aria-hidden="true" />
-            {isFixtureMode ? 'Fixture mode' : 'Published evidence'}
+            {isFixtureMode ? 'Fixture data' : 'Verified release'}
           </div>
         </div>
+
+        {evidenceActive ? (
+          <nav className="evidence-subnav" aria-label="Evidence navigation">
+            <NavLink to="/evidence" end>Overview</NavLink>
+            <NavLink to="/evaluation">Evaluation</NavLink>
+            <NavLink to="/failures">Failures</NavLink>
+            <NavLink to={`/experiments/${publicConfig.runId}`}>Run details</NavLink>
+          </nav>
+        ) : null}
       </header>
 
       <EvidenceBanner />
@@ -103,21 +109,12 @@ export function AppShell() {
       </main>
 
       <footer className="site-footer">
-        <div>
-          <p className="footer-title">Machine Learning Product Search Ranking Platform</p>
-          <p>Reranks supplied candidate lists. It is not a full marketplace search engine.</p>
-          <nav className="footer-links" aria-label="Project resources">
-            <a href={repositoryUrl}>Source</a>
-            <a href={`${repositoryUrl}/blob/main/docs/architecture.md`}>Architecture</a>
-            <a href={`${repositoryUrl}/blob/main/docs/model-card.md`}>Model card</a>
-            <a href={`${repositoryUrl}/blob/main/docs/data-card.md`}>Data card</a>
-          </nav>
-        </div>
-        <div className="footer-meta">
-          <span>US English</span>
-          <span>Curated queries only</span>
-          <span>No shopper data</span>
-        </div>
+        <p><strong>Rerank</strong> compares ranking systems over identical candidate sets.</p>
+        <nav className="footer-links" aria-label="Project resources">
+          <a href={repositoryUrl}>Source</a>
+          <a href={`${repositoryUrl}/blob/main/docs/model-card.md`}>Model card</a>
+          <a href={`${repositoryUrl}/blob/main/docs/data-card.md`}>Data card</a>
+        </nav>
       </footer>
     </div>
   )

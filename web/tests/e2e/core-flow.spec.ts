@@ -1,16 +1,19 @@
 import { expect, test } from '@playwright/test'
 
-test('reviewer can move from overview to comparison and evidence', async ({ page }) => {
+test('reviewer lands on the ranking action and opens evidence', async ({ page }) => {
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: /machine learning product search ranking platform/i })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /compare product rankings/i })).toBeVisible()
   await expect(page.getByText(/illustrative fixture/i).first()).toBeVisible()
-
-  await page.getByRole('link', { name: /compare a query/i }).click()
   await expect(page.getByRole('heading', { name: /quiet keyboard for office/i })).toBeVisible()
   await expect(page.getByLabel(/moved .* up from rank/i).first()).toBeVisible()
 
+  await page.getByRole('button', { name: /apple watch band leather/i }).click()
+  await expect(page.getByRole('heading', { level: 2, name: /apple watch band leather/i })).toBeVisible()
+
   await page.getByRole('checkbox', { name: /show benchmark labels/i }).uncheck()
-  await page.getByRole('link', { name: /view aggregate evidence/i }).click()
+  await page.getByRole('link', { name: 'Evidence', exact: true }).click()
+  await expect(page.getByRole('heading', { level: 1, name: 'Evidence' })).toBeVisible()
+  await page.getByRole('link', { name: 'Evaluation', exact: true }).first().click()
   await expect(page.getByRole('heading', { name: /aggregate evidence/i })).toBeVisible()
 })
 
@@ -19,6 +22,8 @@ test('failure filters and experiment provenance work on a narrow viewport', asyn
   await page.goto('/failures')
   await page.getByRole('button', { name: 'Losses' }).click()
   await expect(page.getByRole('heading', { name: /apple watch band leather/i })).toBeVisible()
+  await page.locator('article.failure-card').filter({ hasText: 'apple watch band leather' }).getByRole('link', { name: /open ranking/i }).click()
+  await expect(page.getByRole('heading', { level: 2, name: /apple watch band leather/i })).toBeVisible()
 
   await page.goto('/experiments/run-demo-fixture')
   await expect(page.getByRole('heading', { name: /immutable chain of evidence/i })).toBeVisible()
@@ -28,6 +33,7 @@ test('failure filters and experiment provenance work on a narrow viewport', asyn
 const evaluationPreviewStates = [
   { state: 'loading', heading: 'Gathering evidence', canRetry: false },
   { state: 'empty', heading: 'Nothing to show yet', canRetry: false },
+  { state: 'not-ready', heading: 'Model not ready', canRetry: true },
   { state: 'conflict', heading: 'Evidence version conflict', canRetry: true },
   { state: 'error', heading: 'Evidence unavailable', canRetry: true },
 ] as const
@@ -65,7 +71,7 @@ test('evaluation keeps wide evidence inside bounded scrollers on a 360px viewpor
       left: element.getBoundingClientRect().left,
       right: element.getBoundingClientRect().right,
     }))
-    const experiment = document.querySelector<HTMLElement>('.primary-nav a:last-child')
+    const experiment = document.querySelector<HTMLElement>('.evidence-subnav a:last-child')
     const experimentRect = experiment?.getBoundingClientRect()
     return {
       viewportWidth,
@@ -82,7 +88,7 @@ test('evaluation keeps wide evidence inside bounded scrollers on a 360px viewpor
   expect(layout.experiment).not.toBeNull()
   expect(layout.experiment!.left).toBeGreaterThanOrEqual(0)
   expect(layout.experiment!.right).toBeLessThanOrEqual(layout.viewportWidth)
-  await expect(page.getByRole('link', { name: 'Experiment' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Run details' })).toBeVisible()
 })
 
 test('normal-text utility colors meet WCAG AA contrast', async ({ page }) => {
@@ -134,14 +140,14 @@ test('keyboard-only navigation updates the route title, announcement, and headin
   await expect(page.locator('#main-content')).toBeFocused()
 
   await page.goto('/')
-  const compareLink = page.getByRole('link', { name: 'Compare', exact: true })
-  for (let step = 0; step < 8 && !(await compareLink.evaluate((link) => link === document.activeElement)); step += 1) {
+  const evidenceLink = page.getByRole('link', { name: 'Evidence', exact: true })
+  for (let step = 0; step < 8 && !(await evidenceLink.evaluate((link) => link === document.activeElement)); step += 1) {
     await page.keyboard.press('Tab')
   }
-  await expect(compareLink).toBeFocused()
+  await expect(evidenceLink).toBeFocused()
   await page.keyboard.press('Enter')
 
-  await expect(page).toHaveTitle('Query comparison | Rank / evidence')
-  await expect(page.getByRole('status')).toHaveText(/query comparison page loaded/i)
-  await expect(page.getByRole('heading', { level: 1, name: /see what moved/i })).toBeFocused()
+  await expect(page).toHaveTitle('Evidence overview | Rerank')
+  await expect(page.getByRole('status')).toHaveText(/evidence overview page loaded/i)
+  await expect(page.getByRole('heading', { level: 1, name: 'Evidence' })).toBeFocused()
 })
