@@ -2,14 +2,15 @@ import { render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { App } from '../src/App'
 
-describe('application shell and overview', () => {
-  it('renders the shopper problem and labels fixture evidence', async () => {
+describe('application shell and ranking workspace', () => {
+  it('opens on the ranking action and labels fixture evidence', async () => {
     render(<MemoryRouter initialEntries={['/']}><App /></MemoryRouter>)
 
-    expect(await screen.findByRole('heading', { name: /machine learning product search ranking platform/i })).toBeInTheDocument()
-    expect(screen.getByText(/a trained reranker learns which products/i)).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /compare product rankings/i })).toBeInTheDocument()
+    expect(screen.getByText(/choose a shopper query, then compare/i)).toBeInTheDocument()
     expect(screen.getAllByText(/illustrative fixture/i).length).toBeGreaterThan(0)
-    expect(screen.getByRole('link', { name: /compare a query/i })).toHaveAttribute('href', '/compare?q=query-fixture-001')
+    expect(screen.getByRole('link', { name: 'Rank' })).toHaveAttribute('href', '/')
+    expect(screen.getByRole('link', { name: 'Evidence' })).toHaveAttribute('href', '/evidence')
     expect(screen.getByRole('link', { name: 'Source' })).toHaveAttribute(
       'href',
       'https://github.com/ArmanM1/machine-learning-product-search-ranking-platform',
@@ -21,7 +22,7 @@ describe('application shell and overview', () => {
 
     expect(screen.getByText('404')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /evidence path does not exist/i })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /return to overview/i })).toHaveAttribute('href', '/')
+    expect(screen.getByRole('link', { name: /return to workspace/i })).toHaveAttribute('href', '/')
   })
 
   it('shows paired slice intervals while marking an inadequate interval unavailable', async () => {

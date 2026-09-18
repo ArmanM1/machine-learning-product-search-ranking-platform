@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import { apiClient } from '../api/client'
 import { useApiResource } from '../api/useApiResource'
-import { ArrowRightIcon, ArrowUpRightIcon } from '../components/Icons'
+import { ArrowRightIcon } from '../components/Icons'
 import { MetricCard } from '../components/MetricCard'
 import { StatusPanel } from '../components/StatusPanel'
 
@@ -15,7 +15,7 @@ export function OverviewPage() {
   if (resource.status !== 'success') {
     return (
       <div className="page-container status-page">
-        <StatusPanel state={resource} subject="Overview" retry={resource.retry} />
+        <StatusPanel state={resource} subject="Evidence overview" retry={resource.retry} />
       </div>
     )
   }
@@ -50,97 +50,65 @@ export function OverviewPage() {
       ? `${operational.warm.candidate_count} candidates · ${operational.warm.successful_request_count}/${operational.warm.measured_request_count} successful · cold excluded`
       : operational.note
 
-  return (
-    <div className="page-container overview-page">
-      <section className="hero" aria-labelledby="hero-title">
-        <div className="hero-copy">
-          <p className="eyebrow">Applied ML · Relevance · Reproducible evidence</p>
-          <h1 id="hero-title" aria-label="Machine Learning Product Search Ranking Platform">
-            Machine Learning<br />Product Search<br /><em>Ranking Platform.</em>
-          </h1>
-          <p className="hero-sentence">
-            {validationOnly
-              ? 'An unchanged baseline is deployed for operational verification while the locked held-out evaluation remains untouched.'
-              : overview.release_status === 'failed'
-                ? `The evaluated reranker did not clear the release gate, so ${overview.promoted_model.display_name} remains active while the negative result stays public.`
-                : 'A trained reranker learns which products best match ambiguous shopper queries and shows where it improves or fails against simpler search methods.'}
-          </p>
-          <div className="hero-actions">
-            <Link className="button primary" to={validationOnly ? '/evaluation' : `/compare?q=${overview.default_query.query_id}`}>
-              {validationOnly ? 'Inspect validation evidence' : 'Compare a query'} <ArrowRightIcon />
-            </Link>
-            <Link className="text-link" to="/evaluation">
-              Inspect the evidence <ArrowUpRightIcon />
-            </Link>
-          </div>
-        </div>
-        <aside className="hero-specimen" aria-label="Model comparison summary">
-          <div className="specimen-index">01 / {validationOnly ? 'baseline bootstrap' : 'controlled comparison'}</div>
-          {validationOnly ? (
-            <div className="system-comparison">
-              <div>
-                <span>Validation-selected system</span>
-                <strong>{overview.promoted_model.display_name}</strong>
-                <small>Unchanged baseline · no held-out claim</small>
-              </div>
-            </div>
-          ) : (
-            <div className="system-comparison">
-              <div>
-                <span>Reference</span>
-                <strong>{overview.strongest_baseline!.display_name}</strong>
-                <small>Weights unchanged</small>
-              </div>
-              <span className="versus" aria-label="versus">/</span>
-              <div>
-                <span>Candidate</span>
-                <strong>{overview.evaluated_candidate!.display_name}</strong>
-                <small>{overview.release_status === 'failed' ? 'Evaluated · not promoted' : 'Training candidate · promoted'}</small>
-              </div>
-            </div>
-          )}
-          <div className="specimen-query">
-            <span>Selected shopper query</span>
-            <blockquote>“{overview.default_query.query}”</blockquote>
-            <p>{overview.default_query.descriptor}</p>
-          </div>
-          <Link to={validationOnly ? '/evaluation' : `/compare?q=${overview.default_query.query_id}`} className="specimen-link">
-            {validationOnly ? 'Open selection evidence' : 'Open ranking movement'} <ArrowRightIcon />
-          </Link>
-        </aside>
-      </section>
+  const decision = validationOnly
+    ? {
+        label: 'Validation-only bootstrap',
+        title: 'Held-out decision not run',
+        note: 'The selected unchanged baseline is deployed only to verify the serving path.',
+      }
+    : overview.release_status === 'failed'
+      ? {
+          label: 'Release decision',
+          title: 'Candidate not promoted',
+          note: 'The trained candidate did not demonstrate a statistically supported improvement.',
+        }
+      : overview.release_status === 'fixture'
+        ? {
+            label: 'Demonstration state',
+            title: 'Interface preview only',
+            note: 'These values show the evidence contract; they are not measured portfolio claims.',
+          }
+        : {
+            label: 'Release decision',
+            title: 'Candidate promoted',
+            note: 'The candidate cleared the preregistered held-out gate and is the active release.',
+          }
 
-      {overview.release_status === 'validation_only' ? (
-        <section className="release-note fixture" aria-labelledby="release-note-title">
-          <p className="eyebrow">Validation-only bootstrap</p>
-          <h2 id="release-note-title">No held-out ranking-improvement decision has been made.</h2>
-          <p>This deployment verifies the baseline serving path before the one-time final evaluation.</p>
-        </section>
-      ) : overview.release_status === 'failed' ? (
-        <section className="release-note failed" aria-labelledby="release-note-title">
-          <p className="eyebrow">Release decision</p>
-          <h2 id="release-note-title">The trained candidate did not demonstrate a statistically supported improvement.</h2>
-          <p>{overview.promoted_model.display_name} remains the active ranking model.</p>
+  return (
+    <div className="page-container evidence-hub">
+      <header className="document-header">
+        <div>
+          <p className="eyebrow">Current release</p>
+          <h1>Evidence</h1>
+          <p>Evaluation, serving measurements, failure cases, and run provenance for the active ranking decision.</p>
+        </div>
+        <span className={`release-state ${overview.release_status}`}>{fixtureLabel}</span>
+      </header>
+
+      <section className="decision-panel" aria-labelledby="decision-title">
+        <div>
+          <p className="eyebrow">{decision.label}</p>
+          <h2 id="decision-title">{decision.title}</h2>
+          <p>{decision.note}</p>
+        </div>
+        {overview.release_status === 'failed' ? (
           <Link className="text-link" to="/failures">Read the failure report <ArrowRightIcon /></Link>
-        </section>
-      ) : overview.release_status === 'fixture' ? (
-        <section className="release-note fixture" aria-labelledby="release-note-title">
-          <p className="eyebrow">Demonstration state</p>
-          <h2 id="release-note-title">This example shows how a gate-passing release would be presented.</h2>
-          <p>No release decision has been made from these illustrative values.</p>
-        </section>
-      ) : null}
+        ) : (
+          <Link className="text-link" to="/evaluation">Open evaluation <ArrowRightIcon /></Link>
+        )}
+      </section>
 
       <section className="evidence-section" aria-labelledby="evidence-title">
         <header className="section-heading split">
           <div>
-            <p className="eyebrow">Release evidence</p>
-            <h2 id="evidence-title">The result, with its boundaries attached.</h2>
+            <p className="eyebrow">Release snapshot</p>
+            <h2 id="evidence-title">The decision and its boundaries</h2>
           </div>
           <p>{validationOnly
-            ? 'Every displayed quality number comes from versioned validation evidence; no held-out result is implied.'
-            : 'Every quality number is tied to the same candidate lists, a locked held-out set, and a versioned run.'}</p>
+            ? 'Quality values are validation-only; no held-out improvement is implied.'
+            : 'Every value is tied to the same candidate sets, locked split, and versioned run.'}</p>
         </header>
+
         <div className="metric-grid">
           <MetricCard
             eyebrow={fixtureLabel}
@@ -178,6 +146,7 @@ export function OverviewPage() {
             note={latencyNote}
           />
         </div>
+
         {overview.evidence_mode !== 'fixture' && operationalVerified ? (
           <details className="operations-detail">
             <summary>Serving measurement protocol</summary>
@@ -201,35 +170,33 @@ export function OverviewPage() {
         ) : null}
       </section>
 
-      <section className="method-strip" aria-labelledby="method-title">
+      <section className="evidence-index" aria-labelledby="evidence-index-title">
         <header>
-          <p className="eyebrow">What the platform proves</p>
-          <h2 id="method-title">{validationOnly ? 'A baseline path, checked before held-out access.' : 'One ranking question. Three controlled systems.'}</h2>
+          <p className="eyebrow">Evidence trail</p>
+          <h2 id="evidence-index-title">Inspect the record</h2>
         </header>
-        {validationOnly ? (
-          <ol>
-            <li><span>01</span><strong>Validation selection</strong><p>Unchanged systems are compared only on the validation split.</p></li>
-            <li><span>02</span><strong>Baseline bundle</strong><p>The selected model and curated query assets are checksum-verified.</p></li>
-            <li><span>03</span><strong>Serving smoke test</strong><p>The API path can be exercised without touching the locked test split.</p></li>
-            <li><span>04</span><strong>Claims withheld</strong><p>Improvement, intervals, and failure slices wait for final evaluation.</p></li>
-          </ol>
-        ) : <ol>
-          <li><span>01</span><strong>Supplied candidates</strong><p>A known query and its fixed product list enter every system unchanged.</p></li>
-          <li><span>02</span><strong>Credible baselines</strong><p>BM25 and an unchanged cross-encoder establish the reference.</p></li>
-          <li><span>03</span><strong>Trained candidate</strong><p>A compact cross-encoder learns from graded relevance judgments.</p></li>
-          <li><span>04</span><strong>Guarded evidence</strong><p>Paired uncertainty, latency, slices, wins, and losses travel together.</p></li>
-        </ol>}
+        <nav aria-label="Evidence record">
+          <Link to="/evaluation">
+            <span><strong>Evaluation</strong><small>Metrics, paired interval, query count, and latency</small></span>
+            <ArrowRightIcon />
+          </Link>
+          <Link to="/failures">
+            <span><strong>Failures</strong><small>Wins, losses, ties, slices, and representative cases</small></span>
+            <ArrowRightIcon />
+          </Link>
+          <Link to="/experiment">
+            <span><strong>Run details</strong><small>Immutable configuration, training, evaluation, and cost boundaries</small></span>
+            <ArrowRightIcon />
+          </Link>
+        </nav>
       </section>
 
-      <section className="closing-cta">
-        <div>
-          <p className="eyebrow">Two-minute review</p>
-          <h2>Start with a ranking. End with the evidence trail.</h2>
-        </div>
-        <Link className="button light" to={validationOnly ? '/evaluation' : `/compare?q=${overview.default_query.query_id}`}>
-          {validationOnly ? 'Review the boundary' : 'Begin comparison'} <ArrowRightIcon />
+      <div className="workspace-return">
+        <p>Want to inspect a concrete result?</p>
+        <Link className="button secondary" to={`/?q=${overview.default_query.query_id}`}>
+          Open ranking workspace <ArrowRightIcon />
         </Link>
-      </section>
+      </div>
     </div>
   )
 }
