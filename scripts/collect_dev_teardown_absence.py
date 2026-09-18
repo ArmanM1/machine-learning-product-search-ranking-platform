@@ -187,6 +187,10 @@ def collect_absence(
                 StatusEquals=status,
             )
         )
+    endpoint_count = sum(
+        len(page.get("Endpoints", []))
+        for page in _pages(sagemaker, "list_endpoints", NameContains=f"{prefix}-")
+    )
 
     state_bucket = f"{PROJECT}-terraform-state-{account_id}-{REGION}"
     try:
@@ -214,6 +218,7 @@ def collect_absence(
             "lambda_functions": lambda_count,
             "log_groups": log_group_count,
             "s3_buckets": bucket_count,
+            "sagemaker_endpoints": endpoint_count,
             "sns_topics": topic_count,
             "terraform_state_resources": terraform_state_resources,
         },

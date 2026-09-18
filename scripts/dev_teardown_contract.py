@@ -102,6 +102,7 @@ RESIDUAL_FIELDS = frozenset(
         "lambda_functions",
         "log_groups",
         "s3_buckets",
+        "sagemaker_endpoints",
         "sns_topics",
         "terraform_state_resources",
     }
@@ -386,6 +387,7 @@ def build_verified_evidence(
         "region": REGION,
         "residual_counts": dict(sorted(residuals.items())),
         "schema_version": SCHEMA_VERSION,
+        "shared_oidc_provider_disposition": "retained_account_shared",
         "source_commit_sha": plan_contract["source_commit_sha"],
         "state_backend_retained": True,
         "status": "dev_resources_destroyed_external_role_cleanup_pending",

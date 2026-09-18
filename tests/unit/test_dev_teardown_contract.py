@@ -233,6 +233,7 @@ def test_verified_evidence_remains_truthful_until_external_role_cleanup() -> Non
     assert evidence["status"] == "dev_resources_destroyed_external_role_cleanup_pending"
     assert evidence["fr_cloud_009_complete"] is False
     assert evidence["external_lifecycle_role_cleanup_required"] is True
+    assert evidence["shared_oidc_provider_disposition"] == "retained_account_shared"
     assert evidence["plan_sha256"] == canonical_sha256(contract)
 
 
