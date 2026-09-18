@@ -21,12 +21,18 @@ class ScoredProduct:
     latency_ms: float
 
 
+def serialize_ranking_record(record: ScoredProduct) -> str:
+    """Serialize one ranking record using the canonical artifact representation."""
+
+    return json.dumps(asdict(record), sort_keys=True, ensure_ascii=False)
+
+
 def write_rankings(path: str | Path, records: list[ScoredProduct]) -> Path:
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("w", encoding="utf-8", newline="\n") as handle:
         for record in records:
-            handle.write(json.dumps(asdict(record), sort_keys=True, ensure_ascii=False) + "\n")
+            handle.write(serialize_ranking_record(record) + "\n")
     return output
 
 

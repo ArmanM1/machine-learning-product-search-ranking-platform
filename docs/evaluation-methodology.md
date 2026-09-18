@@ -74,6 +74,14 @@ The held-out evaluator enforces those category counts before it can write a repo
 
 Measure cold model load, first request, warm end-to-end, pure inference, serialization, peak resident memory, model size, training runtime, evaluation runtime, and estimated/actual cloud cost separately.
 
+The evaluation report's `serialization` phase directly times canonical deterministic JSON
+encoding of each query's ranking records. It uses the same record serializer as the JSONL
+ranking artifacts and reports one sample per query for each model. `candidate_count` is set
+only when every query in that summary has the same candidate count; otherwise it is null.
+The phase excludes file writes, UTF-8 transport, API Gateway, Lambda, and network time;
+those costs remain part of the separately measured end-to-end serving latency and must not
+be attributed to serialization.
+
 The public run contract keeps the validation-selected SageMaker training execution and the two held-out SageMaker Processing executions in distinct records. Each record publishes its own image digest, hardware, region, runtime, estimate, actual cost when reconciled, and cost-evidence note. Training runtime is taken from the checksummed selected `RunManifest`; evaluation runtime is the sum of the two Processing-job wall-clock intervals. These durations are never added together or presented under one hardware label.
 
 The validation-only bootstrap baseline executes directly with the locked Python environment on the declared GitHub-hosted runner. Its published `image_digest` binds the reviewed evaluation container and source revision used by the protected evidence chain; it is not represented as the runtime that executed the baseline.

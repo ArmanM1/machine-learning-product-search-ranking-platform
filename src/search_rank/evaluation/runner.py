@@ -17,7 +17,7 @@ from pathlib import Path
 import pandas as pd
 import psutil
 
-from search_rank.baselines.common import ScoredProduct
+from search_rank.baselines.common import ScoredProduct, serialize_ranking_record
 from search_rank.schemas.evaluation import (
     CostEvidence,
     EvaluationReport,
@@ -215,6 +215,26 @@ def _latency_samples(records: list[ScoredProduct]) -> tuple[list[float], int]:
         counts[record.query_id] = counts.get(record.query_id, 0) + 1
     candidate_count = max(counts.values(), default=1)
     return list(per_query.values()), candidate_count
+
+
+def _serialization_latency_samples(records: list[ScoredProduct]) -> tuple[list[float], int | None]:
+    """Time canonical JSON encoding per query, excluding file and network I/O."""
+
+    grouped: dict[str, list[ScoredProduct]] = defaultdict(list)
+    for record in sorted(records, key=lambda item: (item.query_id, item.rank, item.product_id)):
+        grouped[record.query_id].append(record)
+    if not grouped:
+        raise ValueError("at least one ranking record is required")
+
+    samples_ms: list[float] = []
+    for query_records in grouped.values():
+        started_ns = time.perf_counter_ns()
+        for record in query_records:
+            serialize_ranking_record(record)
+        samples_ms.append((time.perf_counter_ns() - started_ns) / 1_000_000)
+    candidate_counts = {len(query_records) for query_records in grouped.values()}
+    candidate_count = candidate_counts.pop() if len(candidate_counts) == 1 else None
+    return samples_ms, candidate_count
 
 
 def _metric_results(aggregate: AggregateMetrics) -> dict[str, MetricResult]:
@@ -514,6 +534,22 @@ def evaluate_systems(
                 latency_samples,
                 phase="model_inference",
                 candidate_count=candidate_count,
+                concurrency=1,
+                lambda_memory_mb=None,
+                architecture=os.environ.get("PROCESSOR_ARCHITECTURE", "unknown"),
+                region=os.environ.get("AWS_REGION", "local"),
+                reserved_concurrency=None,
+                model_revision=model_id,
+            )
+        )
+        serialization_samples, serialization_candidate_count = _serialization_latency_samples(
+            records
+        )
+        latency_results.append(
+            summarize_latency(
+                serialization_samples,
+                phase="serialization",
+                candidate_count=serialization_candidate_count,
                 concurrency=1,
                 lambda_memory_mb=None,
                 architecture=os.environ.get("PROCESSOR_ARCHITECTURE", "unknown"),

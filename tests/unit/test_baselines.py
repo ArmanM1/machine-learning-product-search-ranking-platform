@@ -8,7 +8,7 @@ import pytest
 
 from search_rank.artifacts.checksums import sha256_file
 from search_rank.baselines.bm25 import rank_bm25, tokenize
-from search_rank.baselines.common import write_rankings
+from search_rank.baselines.common import serialize_ranking_record, write_rankings
 from search_rank.baselines.input_order import rank_input_order
 from search_rank.baselines.random_order import rank_seeded_random
 from search_rank.cli import _resume_baseline_rankings
@@ -53,6 +53,15 @@ def test_seeded_random_is_reproducible() -> None:
     right = rank_seeded_random(candidates().iloc[::-1], seed=42)
     assert [(item.product_id, item.score) for item in left] == [
         (item.product_id, item.score) for item in right
+    ]
+
+
+def test_ranking_writer_uses_the_canonical_record_serializer(tmp_path: Path) -> None:
+    records = rank_input_order(candidates())
+    output = write_rankings(tmp_path / "rankings.jsonl", records)
+
+    assert output.read_text(encoding="utf-8").splitlines() == [
+        serialize_ranking_record(record) for record in records
     ]
 
 

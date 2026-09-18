@@ -146,6 +146,22 @@ def test_tiny_fixture_prepares_ranks_builds_training_rows_and_reports(
     assert report_path.is_file()
     assert report.release_gate_results.decision == "retain_baseline"
     assert report.bootstrap_resamples == 20
+    assert {(result.phase, result.model_revision) for result in report.latency_results} == {
+        ("model_inference", "candidate-tiny"),
+        ("serialization", "candidate-tiny"),
+        ("model_inference", baseline[0].model_id),
+        ("serialization", baseline[0].model_id),
+    }
+    assert all(
+        result.sample_count == 1
+        for result in report.latency_results
+        if result.phase == "serialization"
+    )
+    assert all(
+        result.candidate_count == 2
+        for result in report.latency_results
+        if result.phase == "serialization"
+    )
 
     pointer_path = config.processed_dir / "current.json"
     pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
