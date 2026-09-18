@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { isFixtureMode, publicConfig } from '../api/client'
 import { EvidenceBanner } from './EvidenceBanner'
+import { evidenceStatusPresentation } from './evidenceStatus'
 
 const repositoryUrl = 'https://github.com/ArmanM1/machine-learning-product-search-ranking-platform'
 
@@ -18,12 +19,6 @@ function routeName(pathname: string) {
   if (pathname === '/failures') return 'Failure analysis'
   if (pathname === '/experiment' || pathname.startsWith('/experiments/')) return 'Experiment provenance'
   return 'Page not found'
-}
-
-export function evidenceStatusPresentation(fixture: boolean) {
-  return fixture
-    ? { className: 'fixture', label: 'Fixture data' }
-    : { className: 'published', label: 'Published evidence' }
 }
 
 export function AppShell() {
