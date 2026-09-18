@@ -154,7 +154,9 @@ def create_app(
         return response
 
     @app.exception_handler(RequestValidationError)
-    async def validation_error(request: Request, _: RequestValidationError) -> JSONResponse:
+    async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+        if any(error.get("type") == "json_invalid" for error in exc.errors()):
+            return _error(request, 400, "malformed_json", "Request body contains malformed JSON.")
         return _error(request, 422, "validation_error", "Request validation failed.")
 
     @app.exception_handler(Exception)
@@ -231,7 +233,16 @@ def create_app(
             for query in service_state.query_store.search(search, limit=limit)
         ]
 
-    @app.post("/api/v1/rank", response_model=RankResponse)
+    @app.post(
+        "/api/v1/rank",
+        response_model=RankResponse,
+        responses={
+            400: {"model": ApiError},
+            404: {"model": ApiError},
+            409: {"model": ApiError},
+            422: {"model": ApiError},
+        },
+    )
     async def rank(request: Request, body: RankRequest) -> RankResponse | JSONResponse:
         if not service_state.ready:
             return _error(request, 409, "model_not_ready", "Model and evidence are not ready.")
@@ -273,7 +284,15 @@ def create_app(
             ],
         )
 
-    @app.get("/api/v1/comparisons/{query_id}", response_model=ComparisonResponse)
+    @app.get(
+        "/api/v1/comparisons/{query_id}",
+        response_model=ComparisonResponse,
+        responses={
+            404: {"model": ApiError},
+            409: {"model": ApiError},
+            422: {"model": ApiError},
+        },
+    )
     async def comparison(
         request: Request,
         query_id: PublicRequestIdentifier,

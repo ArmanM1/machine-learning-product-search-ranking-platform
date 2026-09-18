@@ -43,6 +43,8 @@ def test_openapi_preserves_versioned_ranking_request_and_response_models() -> No
     request_schema = operation["requestBody"]["content"]["application/json"]["schema"]
     assert request_schema == {"$ref": "#/components/schemas/RankRequest"}
     assert _reference(operation, "200") == "#/components/schemas/RankResponse"
+    for status in ("400", "404", "409", "422"):
+        assert _reference(operation, status) == "#/components/schemas/ApiError"
 
     components = schema["components"]["schemas"]
     request = components["RankRequest"]
@@ -73,6 +75,8 @@ def test_openapi_readiness_and_comparison_response_refs_are_stable() -> None:
     assert _reference(ready, "200") == "#/components/schemas/ReadyResponse"
     assert _reference(ready, "409") == "#/components/schemas/ApiError"
     assert _reference(comparison, "200") == "#/components/schemas/ComparisonResponse"
+    for status in ("404", "409", "422"):
+        assert _reference(comparison, status) == "#/components/schemas/ApiError"
 
 
 def test_openapi_types_curated_queries_and_complete_public_evidence() -> None:
