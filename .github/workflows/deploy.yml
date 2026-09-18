@@ -450,13 +450,21 @@ jobs:
             .release/model/release-manifest.json)"
           [[ "${baseline_model_id}" =~ ^[A-Za-z0-9][A-Za-z0-9._@-]{2,99}$ ]]
           [[ "${candidate_model_id}" =~ ^[A-Za-z0-9][A-Za-z0-9._@-]{2,99}$ ]]
+          VITE_DATA_MODE="api"
+          VITE_API_BASE_URL=""
+          VITE_PUBLIC_RUN_ID="${public_run_id}"
+          VITE_DEFAULT_QUERY_ID="${default_query_id}"
+          VITE_BASELINE_MODEL_ID="${baseline_model_id}"
+          VITE_CANDIDATE_MODEL_ID="${candidate_model_id}"
+          export VITE_DATA_MODE VITE_API_BASE_URL VITE_PUBLIC_RUN_ID
+          export VITE_DEFAULT_QUERY_ID VITE_BASELINE_MODEL_ID VITE_CANDIDATE_MODEL_ID
           {
-            echo "VITE_DATA_MODE=api"
-            echo "VITE_API_BASE_URL="
-            echo "VITE_PUBLIC_RUN_ID=${public_run_id}"
-            echo "VITE_DEFAULT_QUERY_ID=${default_query_id}"
-            echo "VITE_BASELINE_MODEL_ID=${baseline_model_id}"
-            echo "VITE_CANDIDATE_MODEL_ID=${candidate_model_id}"
+            echo "VITE_DATA_MODE=${VITE_DATA_MODE}"
+            echo "VITE_API_BASE_URL=${VITE_API_BASE_URL}"
+            echo "VITE_PUBLIC_RUN_ID=${VITE_PUBLIC_RUN_ID}"
+            echo "VITE_DEFAULT_QUERY_ID=${VITE_DEFAULT_QUERY_ID}"
+            echo "VITE_BASELINE_MODEL_ID=${VITE_BASELINE_MODEL_ID}"
+            echo "VITE_CANDIDATE_MODEL_ID=${VITE_CANDIDATE_MODEL_ID}"
           } >> "${GITHUB_ENV}"
           release_manifest_sha256="$(sha256sum .release/model/release-manifest.json | cut -d' ' -f1)"
           [[ "${release_manifest_sha256}" =~ ^[0-9a-f]{64}$ ]]
