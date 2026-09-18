@@ -586,6 +586,11 @@ def test_performance_report_requires_exact_matrix_and_recomputes_raw_aggregates(
     assert report.totals.measured_request_count == 1800
 
     invalid = deepcopy(performance_report())
+    invalid["protocol"]["target_request_rate_rps"] = 17.0
+    with pytest.raises(ValidationError, match=r"target request rate must be exactly 18\.0"):
+        PerformanceReport.model_validate(invalid)
+
+    invalid = deepcopy(performance_report())
     invalid["conditions"][-1]["candidate_count"] = 20
     with pytest.raises(ValidationError, match="matrix is incomplete or duplicated"):
         PerformanceReport.model_validate(invalid)
