@@ -1,6 +1,6 @@
 # Reproducibility
 
-Status: command and evidence contract. Two historical local data-preparation runs reproduced identical semantic and transport checksums. Two separate local validation scoring processes also reproduced every quality metric, rank, and score for all six baseline systems. Those baseline processes used a dirty shared worktree and their uncontrolled timings varied, so clean-checkout and latency reproducibility, cloud execution, training, held-out evaluation, and deployment remain pending.
+Status: command and evidence contract. A clean, commit-bound cloud preparation published the current `query-split-manifest-v1` identity and content-addressed dataset. Two earlier local validation scoring processes reproduced every quality metric, rank, and score for all six baseline systems; controlled cloud baseline latency, candidate training, held-out evaluation, and deployment remain pending.
 
 ## Supported environment
 
@@ -142,7 +142,7 @@ The serving benchmark always attempts exactly 200 measured requests for each of 
 
 | Output | Location | Current value |
 |---|---|---|
-| Dataset manifest | content-addressed processed directory | Historical pre-split-identity evidence was reproduced in two local runs; a fresh run must publish the required `query-split-manifest-v1` hash and refreshed processed/transport hashes before it is current |
+| Dataset manifest | content-addressed processed directory | Cloud-published and remotely verified: processed identity `sha256:814e06ce…a29525`, split identity `sha256:fa7dba0f…2f528`; sanitized receipt in `evidence/cloud/live-data-preparation.json` |
 | Baseline summary | run reports | Two separate local validation scoring processes reproduced exact quality, ranks, and scores; controlled latency and clean-checkout evidence remain pending in `evidence/baselines/milestone-2-validation.json` |
 | Baseline bootstrap command summary | protected validation-only release run | Pending |
 | Candidate run manifest | run root | Pending |

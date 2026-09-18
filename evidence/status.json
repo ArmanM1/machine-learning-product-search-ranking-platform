@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0.0",
-  "as_of": "2026-09-02",
-  "project_status": "implementation_in_progress",
+  "as_of": "2026-09-18",
+  "project_status": "cloud_foundation_and_dataset_live",
   "public_repository_url": "https://github.com/ArmanM1/machine-learning-product-search-ranking-platform",
   "full_prd_completed": false,
   "milestone_0_accepted": false,
@@ -30,6 +30,10 @@
   },
   "claim_boundary": {
     "dataset_pipeline_verified": true,
+    "dataset_cloud_publication_verified": true,
+    "cloud_foundation_applied": true,
+    "terraform_no_drift_verified": true,
+    "live_training_and_processing_quota_probe_verified": true,
     "baselines_verified": false,
     "validation_baseline_two_scoring_processes_completed": true,
     "validation_baseline_quality_reproducibility_verified": true,
@@ -47,16 +51,10 @@
     "teardown_verified": false,
     "external_review_completed": false
   },
-  "aws_apply_authorized": false,
-  "aws_apply_blockers": [
-    "redacted caller-identity evidence from the temporary non-root GitHub OIDC role is not yet retained",
-    "the temporary state-bootstrap role still needs its exact provider-refresh reads and self-only policy-simulation preflight permission",
-    "the externally controlled project permission boundary and one-time platform seed role have not yet been created",
-    "the approved budget thresholds cannot be applied until the owner supplies the exact protected notification address",
-    "no exact Terraform state-bootstrap plan hash has been reviewed and applied",
-    "the requested single-instance SageMaker Managed Spot quotas remain pending",
-    "the ml.m5.xlarge SageMaker Processing quota is applied at zero; AWS currently refuses another quota request while the two existing quota requests remain open"
-  ],
+  "aws_apply_authorized": true,
+  "aws_apply_completed": true,
+  "terraform_managed_resource_count": 57,
+  "aws_apply_blockers": [],
   "current_evidence_mode": null,
   "release_evidence_modes": {
     "validation_only": {
@@ -74,5 +72,5 @@
   "public_demo_url": null,
   "current_release_id": null,
   "evidence_manifest_sha256": null,
-  "note": "The owner authorized credits-only AWS work despite the acknowledged absence of a hard USD 0 guarantee, but each permission change and reviewed Terraform apply remains gated. The data claim is limited to the two checksummed historical local runs in evidence/data; those runs lack Git commit identity. Two separate local validation scoring processes reproduced all six quality vectors and every rank and score exactly, but both used a dirty shared worktree and their uncontrolled p95 timings varied, so clean-checkout and latency reproducibility remain unverified and the broad baselines_verified flag remains false. No release evidence mode is current until an immutable bundle is published. The PRD is not complete."
+  "note": "The owner authorized the remaining bounded AWS work despite the acknowledged absence of a hard USD 0 guarantee. Bootstrap and production Terraform are applied, a post-apply plan found no drift, live quota probes confirm the selected training and processing capacity, and the clean cloud data-preparation workflow published the current dataset and split identities recorded in evidence/cloud/live-data-preparation.json. Two historical local validation scoring processes reproduced all six quality vectors and every rank and score exactly, but their uncontrolled p95 timings varied, so the broad baselines_verified flag remains false until the protected cloud baseline completes. No release evidence mode is current until an immutable bundle is published; candidate training, held-out evaluation, public deployment, benchmark, rollback, and redeployment remain pending."
 }
