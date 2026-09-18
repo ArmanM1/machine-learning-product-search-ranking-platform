@@ -24,9 +24,20 @@ from typing import Any, TypeVar
 from pydantic import BaseModel, ValidationError
 
 from search_rank.evaluation.report import validate_report_consistency
+from search_rank.schemas.api import (
+    PublicEvaluationEvidence,
+    PublicEvidenceEnvelope,
+    PublicFailureAnalysis,
+    PublicRunSummary,
+)
 from search_rank.schemas.evaluation import EvaluationReport
 from search_rank.schemas.evidence import BundleChecksums, EvaluationProvenance
 from search_rank.schemas.performance import ColdStartEvidence
+from search_rank.schemas.portfolio import (
+    PortfolioAblationEvidence,
+    PortfolioPublicEvidence,
+    PortfolioReleaseEvidence,
+)
 from search_rank.schemas.publication import ReleaseSummary
 from search_rank.schemas.release import PromotionPointer
 from search_rank.schemas.workflow import (
@@ -688,6 +699,233 @@ def _benchmark_files(
     )
 
 
+def _portfolio_public_snapshot(
+    deploy_root: Path,
+    release_root: Path,
+    *,
+    public_evidence_sha256: str,
+    model_artifact_sha256: str,
+    source_sha: str,
+    evaluation: EvaluationReport,
+    evaluation_provenance: EvaluationProvenance,
+    release_summary: ReleaseSummary,
+    release_pointer: PromotionPointer,
+) -> tuple[PortfolioPublicEvidence, str]:
+    """Validate the served public envelope and retain only its durable allowlist."""
+
+    envelope = _model(
+        deploy_root / "candidate-run.json",
+        PublicEvidenceEnvelope,
+        "served public evidence",
+    )
+    _require(envelope.evidence_mode == "verified", "served public evidence is not verified")
+    _require(
+        isinstance(envelope.run, PublicRunSummary)
+        and isinstance(envelope.evaluation, PublicEvaluationEvidence)
+        and isinstance(envelope.failure_analysis, PublicFailureAnalysis),
+        "served public evidence has the wrong evidence mode",
+    )
+    assert isinstance(envelope.run, PublicRunSummary)
+    assert isinstance(envelope.evaluation, PublicEvaluationEvidence)
+    assert isinstance(envelope.failure_analysis, PublicFailureAnalysis)
+    canonical_public_evidence = (
+        json.dumps(envelope.model_dump(mode="json"), indent=2, sort_keys=True) + "\n"
+    ).encode("utf-8")
+    _require(
+        "sha256:" + hashlib.sha256(canonical_public_evidence).hexdigest() == public_evidence_sha256,
+        "served public evidence differs from its bundle checksum",
+    )
+    run = envelope.run
+    public_evaluation = envelope.evaluation
+    failure = envelope.failure_analysis
+    training = run.training_provenance
+    public_provenance = run.evaluation_provenance
+
+    _require(
+        run.run_id == evaluation.run_id == public_evaluation.run_id == failure.run_id,
+        "served public run identity differs from held-out evaluation",
+    )
+    _require(
+        run.git_sha == training.git_sha == public_provenance.git_sha == source_sha,
+        "served public source identity differs",
+    )
+    _require(
+        run.dataset_manifest_hash == evaluation_provenance.dataset_manifest_hash,
+        "served public dataset identity differs",
+    )
+    _require(
+        run.split_manifest_hash == evaluation_provenance.split_manifest_hash,
+        "served public split identity differs",
+    )
+    _require(
+        run.model_artifact_checksum == model_artifact_sha256,
+        "served public active-model checksum differs from the benchmark binding",
+    )
+    _require(
+        training.trial_selection_id == release_summary.trial_selection_id
+        and training.trial_selection_sha256 == release_summary.trial_selection_sha256
+        and training.selected_model_id == evaluation.candidate_model_id
+        and training.selected_model_artifact_checksum == evaluation_provenance.checkpoint_checksum
+        and training.config_hash == evaluation_provenance.config_hash,
+        "served public training provenance differs from the frozen release",
+    )
+    _require(
+        public_provenance.candidate_model_id == evaluation.candidate_model_id
+        and public_provenance.candidate_model_artifact_checksum
+        == evaluation_provenance.checkpoint_checksum
+        and public_provenance.evaluation_config_hash
+        == evaluation_provenance.evaluation_config_checksum
+        and public_provenance.image_digest == evaluation_provenance.evaluation_image_digest
+        and public_provenance.clean_execution_count
+        == evaluation_provenance.independent_evaluation_count,
+        "served public evaluation provenance differs from the frozen release",
+    )
+    expected_status = "passed" if evaluation.release_gate_results.passed else "failed"
+    _require(
+        public_evaluation.report_id == evaluation.report_id
+        and public_evaluation.candidate_model_id == evaluation.candidate_model_id
+        and public_evaluation.strongest_baseline_model_id
+        == evaluation.primary_metric.strongest_baseline_id
+        and public_evaluation.release_status == expected_status
+        and public_evaluation.held_out_query_count == evaluation.query_count
+        and public_evaluation.excluded_query_count == evaluation.excluded_query_count
+        and public_evaluation.bootstrap_seed == evaluation.bootstrap_seed
+        and public_evaluation.bootstrap_resamples == evaluation.bootstrap_resamples
+        and public_evaluation.test_access_count == evaluation.test_access_count
+        and public_evaluation.primary_metric.value == evaluation.primary_metric.candidate_value
+        and public_evaluation.strongest_baseline.value
+        == evaluation.primary_metric.strongest_baseline_value
+        and public_evaluation.delta.value == evaluation.primary_metric.candidate_minus_baseline,
+        "served public held-out metrics differ from the frozen release",
+    )
+    primary_interval = next(
+        item
+        for item in evaluation.paired_differences
+        if item.metric_name == "graded_ndcg@10"
+        and item.baseline_model_id == evaluation.primary_metric.strongest_baseline_id
+    )
+    public_interval = public_evaluation.delta.interval
+    _require(public_interval is not None, "served public primary interval is absent")
+    assert public_interval is not None
+    _require(
+        public_interval.point_estimate == primary_interval.point_estimate
+        and public_interval.lower == primary_interval.ci_lower
+        and public_interval.upper == primary_interval.ci_upper
+        and public_interval.confidence_level == primary_interval.confidence_level,
+        "served public primary interval differs from the frozen release",
+    )
+
+    public_slices = {item.slice_id: item for item in failure.slices}
+    expected_slice_ids = {
+        f"{item.dimension}:{item.slice_name}" for item in evaluation.slice_results
+    }
+    _require(
+        set(public_slices) == expected_slice_ids and len(public_slices) == len(failure.slices),
+        "served public slice inventory differs from the held-out report",
+    )
+    for slice_item in evaluation.slice_results:
+        public_slice = public_slices[f"{slice_item.dimension}:{slice_item.slice_name}"]
+        _require(
+            public_slice.query_count == slice_item.query_count
+            and public_slice.excluded_query_count == slice_item.excluded_query_count
+            and public_slice.baseline_graded_ndcg_at_10 == slice_item.baseline_value
+            and public_slice.candidate_graded_ndcg_at_10 == slice_item.candidate_value
+            and public_slice.delta == slice_item.point_estimate
+            and public_slice.ci_lower == slice_item.ci_lower
+            and public_slice.ci_upper == slice_item.ci_upper
+            and public_slice.low_sample == (not slice_item.adequate_sample_size)
+            and public_slice.finding == slice_item.finding,
+            "served public slice differs from the held-out report",
+        )
+
+    public_examples = {item.example_id: item for item in failure.examples}
+    expected_example_ids = {
+        f"{item.category}:{item.query_id}" for item in evaluation.example_results
+    }
+    _require(
+        set(public_examples) == expected_example_ids
+        and len(public_examples) == len(failure.examples),
+        "served public example inventory differs from the held-out report",
+    )
+    for example_item in evaluation.example_results:
+        public_example = public_examples[f"{example_item.category}:{example_item.query_id}"]
+        _require(
+            public_example.query.query_id == example_item.query_id
+            and public_example.category == example_item.category
+            and public_example.baseline_metric == example_item.baseline_metric
+            and public_example.candidate_metric == example_item.candidate_metric
+            and public_example.delta == example_item.delta
+            and public_example.selection_rule == example_item.selection_rule
+            and public_example.public_product_ids == example_item.public_product_ids
+            and public_example.notes == example_item.notes,
+            "served public example differs from the held-out report",
+        )
+    _require(run.limitations == evaluation.limitations, "served public limitations differ")
+
+    ablation_path = release_root / "portfolio-ablation-evidence.json"
+    ablations = _model(
+        ablation_path,
+        PortfolioAblationEvidence,
+        "portfolio ablation evidence",
+    )
+    _require(
+        ablations.source_trial_selection_sha256 == release_summary.trial_selection_sha256
+        and ablations.selection_id == release_summary.trial_selection_id
+        and ablations.git_sha == source_sha
+        and ablations.dataset_manifest_sha256 == evaluation_provenance.dataset_manifest_hash
+        and ablations.selected_model_id == evaluation.candidate_model_id
+        and ablations.selected_config_sha256 == evaluation_provenance.config_hash,
+        "portfolio ablations differ from the frozen release",
+    )
+    snapshot = PortfolioPublicEvidence.model_validate(
+        {
+            "source_public_evidence_sha256": public_evidence_sha256,
+            "dataset_name": run.dataset_name,
+            "dataset_version": run.dataset_version,
+            "locale": run.locale,
+            "selected_release_model": {
+                "model_id": release_pointer.model_id,
+                "artifact_sha256": run.model_artifact_checksum,
+            },
+            "evaluated_candidate": {
+                "model_id": evaluation.candidate_model_id,
+                "artifact_sha256": training.selected_model_artifact_checksum,
+                "config_sha256": run.config_hash,
+                "base_model_id": run.base_model_id,
+                "base_model_revision": run.base_model_revision,
+                "training_strategy": run.training_strategy,
+            },
+            "training_provenance": {
+                "trial_selection_id": training.trial_selection_id,
+                "trial_selection_sha256": training.trial_selection_sha256,
+                "run_manifest_sha256": training.run_manifest_sha256,
+                "selected_model_id": training.selected_model_id,
+                "selected_model_artifact_checksum": (training.selected_model_artifact_checksum),
+                "config_hash": training.config_hash,
+                "git_sha": training.git_sha,
+                "image_digest": training.image_digest,
+                "hardware_class": training.hardware_class,
+                "accelerator": training.accelerator,
+                "region": training.region,
+                "runtime_seconds": training.runtime_seconds,
+                "estimated_cost_usd": training.estimated_cost_usd,
+                "actual_cost_usd": training.actual_cost_usd,
+                "cost_evidence": training.cost_evidence,
+            },
+            "evaluation_provenance": public_provenance,
+            "held_out_test_access_count": run.test_access_count,
+            "model_metrics": list(public_evaluation.models),
+            "secondary_metrics": list(public_evaluation.secondary_metrics),
+            "ablations": ablations,
+            "slices": list(failure.slices),
+            "examples": list(failure.examples),
+            "limitations": list(run.limitations),
+            "prohibited_claims": list(run.prohibited_claims),
+        }
+    )
+    return snapshot, _sha256(ablation_path)
+
+
 def _public_only(value: Any) -> None:
     if type(value) is dict:
         for key, child in value.items():
@@ -878,6 +1116,18 @@ def assemble(
     )
     _require(evaluation.created_at <= generated, "release evidence postdates assembly")
 
+    public_snapshot, public_ablation_sha = _portfolio_public_snapshot(
+        deploy_root,
+        release_root,
+        public_evidence_sha256=bound["public_evidence"],
+        model_artifact_sha256=bound["model_artifact"],
+        source_sha=source_sha,
+        evaluation=evaluation,
+        evaluation_provenance=evaluation_provenance,
+        release_summary=release_summary,
+        release_pointer=release_pointer,
+    )
+
     primary = next(
         condition
         for condition in performance.conditions
@@ -933,6 +1183,7 @@ def assemble(
             "candidate_minus_baseline": evaluation.primary_metric.candidate_minus_baseline,
             "paired_differences": paired,
         },
+        "public_evidence": public_snapshot.model_dump(mode="json"),
         "deployment": {
             "public_url": deployment.production_api_smoke.base_url_origin,
             "smoke_tests_passed": True,
@@ -968,14 +1219,13 @@ def assemble(
             "controlled_cold_max_memory_mb": (
                 performance.controlled_cold_start.lambda_report.max_memory_used_mb
             ),
+            "latency_claim": performance.interpretation.latency_claim,
             "throughput_claim_eligible": performance.interpretation.throughput_claim_eligible,
             "scaling_claim_eligible": performance.interpretation.scaling_claim_eligible,
+            "limitations": list(performance.limitations),
         },
         "rollback": {
             "verified": True,
-            "restored_release_id": _identifier(
-                rollback_evidence.restored_release_id, "restored release"
-            ),
             "restored_model_id": _identifier(rollback_evidence.restored_model_id, "restored model"),
             "smoke_tests_passed": True,
         },
@@ -987,12 +1237,21 @@ def assemble(
             "fresh_runtime_revision_published": True,
             "public_url": redeployment.production_api_smoke.base_url_origin,
         },
+        "claim_boundaries": {
+            "held_out_positive_claim_allowed": gate.positive_claim_allowed,
+            "negative_result_required": gate.negative_result_required,
+            "throughput_claim_eligible": performance.interpretation.throughput_claim_eligible,
+            "scaling_claim_eligible": performance.interpretation.scaling_claim_eligible,
+            "limitations": list(public_snapshot.limitations),
+            "prohibited_claims": list(public_snapshot.prohibited_claims),
+        },
         "artifact_sha256": {
             "release_manifest": bound["release_manifest"],
             "public_evidence": bound["public_evidence"],
             "bundle_checksums": bound["bundle_checksums"],
             "heldout_evaluation_report": _sha256(release_root / "evaluation-report.json"),
             "heldout_evaluation_provenance": _sha256(release_root / "evaluation-provenance.json"),
+            "public_ablation_evidence": public_ablation_sha,
             "baseline_deployment_evidence": _sha256(baseline_root / "deployment-evidence.json"),
             "deployment_evidence": deployment_evidence_sha,
             "promotion_pointer": release_pointer_sha,
@@ -1002,14 +1261,23 @@ def assemble(
             "redeployment_evidence": _sha256(redeploy_root / "deployment-evidence.json"),
         },
     }
-    _public_only(payload)
-    return payload
+    try:
+        record = PortfolioReleaseEvidence.model_validate(payload)
+    except ValidationError as error:
+        raise ReleaseEvidenceError("assembled release violates its portfolio contract") from error
+    public_payload = record.model_dump(mode="json")
+    _public_only(public_payload)
+    return public_payload
 
 
 def write_immutable(payload: Mapping[str, Any], output_dir: Path) -> Path:
     """Atomically write `<release-id>.json`, refusing a different replacement."""
 
-    public_payload = dict(payload)
+    try:
+        record = PortfolioReleaseEvidence.model_validate(dict(payload))
+    except ValidationError as error:
+        raise ReleaseEvidenceError("portfolio release evidence violates its contract") from error
+    public_payload = record.model_dump(mode="json")
     _public_only(public_payload)
     release_id = _identifier(public_payload.get("release_id"), "release ID")
     if output_dir.exists():

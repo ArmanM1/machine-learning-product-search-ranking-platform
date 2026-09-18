@@ -304,6 +304,258 @@ def _release_summary(report: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _portfolio_ablations() -> dict[str, Any]:
+    treatment_value = 0.72
+    controls = {
+        "random_negative_control": 0.67,
+        "title_only_control": 0.65,
+    }
+    return {
+        "schema_version": "1.0.0",
+        "artifact_type": "portfolio_ablation_evidence",
+        "source_trial_selection_sha256": DIGEST_C,
+        "selection_id": TRIAL_ID,
+        "git_sha": SOURCE_SHA,
+        "dataset_manifest_sha256": DIGEST_A,
+        "metric": "graded_ndcg@10",
+        "test_access_count": 0,
+        "selected_model_id": CANDIDATE_MODEL,
+        "selected_config_sha256": DIGEST_D,
+        "trials": [
+            {
+                "role": "candidate_treatment",
+                "promotion_eligible": True,
+                "model_id": CANDIDATE_MODEL,
+                "config_id": "candidate-v1",
+                "config_sha256": DIGEST_D,
+                "input_template_version": "enriched_v1",
+                "sampling_strategy": "mixed_hard_random_v1",
+                "hard_example_sources": ["bm25", "pretrained_cross_encoder"],
+                "validation_graded_ndcg_at_10": treatment_value,
+            },
+            {
+                "role": "random_negative_control",
+                "promotion_eligible": False,
+                "model_id": "candidate-random-ablation-v1",
+                "config_id": "candidate-random-ablation-v1",
+                "config_sha256": DIGEST_A,
+                "input_template_version": "enriched_v1",
+                "sampling_strategy": "random_only_v1",
+                "hard_example_sources": [],
+                "validation_graded_ndcg_at_10": controls["random_negative_control"],
+            },
+            {
+                "role": "title_only_control",
+                "promotion_eligible": False,
+                "model_id": "candidate-title-ablation-v1",
+                "config_id": "candidate-title-ablation-v1",
+                "config_sha256": DIGEST_B,
+                "input_template_version": "title_v1",
+                "sampling_strategy": "mixed_hard_random_v1",
+                "hard_example_sources": ["bm25", "pretrained_cross_encoder"],
+                "validation_graded_ndcg_at_10": controls["title_only_control"],
+            },
+        ],
+        "contrasts": [
+            {
+                "contrast_id": "mixed_vs_random_sampling",
+                "control_role": "random_negative_control",
+                "controlled_difference_fields": [
+                    "config_hash",
+                    "config_id",
+                    "hard_example_sources",
+                    "sampling_strategy",
+                ],
+                "treatment_validation_graded_ndcg_at_10": treatment_value,
+                "control_validation_graded_ndcg_at_10": controls["random_negative_control"],
+                "treatment_minus_control": (treatment_value - controls["random_negative_control"]),
+            },
+            {
+                "contrast_id": "enriched_vs_title_input",
+                "control_role": "title_only_control",
+                "controlled_difference_fields": [
+                    "config_hash",
+                    "config_id",
+                    "input_template_version",
+                ],
+                "treatment_validation_graded_ndcg_at_10": treatment_value,
+                "control_validation_graded_ndcg_at_10": controls["title_only_control"],
+                "treatment_minus_control": treatment_value - controls["title_only_control"],
+            },
+        ],
+    }
+
+
+def _public_evidence(report: dict[str, Any]) -> dict[str, Any]:
+    primary = report["primary_metric"]
+    paired = report["paired_differences"][0]
+    gate = report["release_gate_results"]
+    models = [
+        {
+            "model_id": BASELINE_MODEL,
+            "display_name": "Strongest unchanged baseline",
+            "kind": "pretrained",
+            "graded_ndcg_at_10": primary["strongest_baseline_value"],
+            "exact_mrr_at_10": None,
+            "recall_exact_or_substitute_at_10": None,
+            "pairwise_ordinal_accuracy": None,
+            "graded_ndcg_at_5": None,
+            "exact_top_1_rate": None,
+            "p95_inference_latency_ms": None,
+        },
+        {
+            "model_id": CANDIDATE_MODEL,
+            "display_name": "Fine-tuned candidate",
+            "kind": "fine_tuned",
+            "graded_ndcg_at_10": primary["candidate_value"],
+            "exact_mrr_at_10": None,
+            "recall_exact_or_substitute_at_10": None,
+            "pairwise_ordinal_accuracy": None,
+            "graded_ndcg_at_5": None,
+            "exact_top_1_rate": None,
+            "p95_inference_latency_ms": None,
+        },
+    ]
+    return {
+        "schema_version": "1.0.0",
+        "evidence_mode": "verified",
+        "run": {
+            "evidence_mode": "verified",
+            "run_id": report["run_id"],
+            "status": "complete",
+            "config_hash": DIGEST_D,
+            "dataset_manifest_hash": DIGEST_A,
+            "split_manifest_hash": DIGEST_C,
+            "git_sha": SOURCE_SHA,
+            "model_artifact_checksum": DIGEST_B,
+            "dataset_name": "tiny-esci",
+            "dataset_version": "fixture-v1",
+            "locale": "us",
+            "base_model_id": "cross-encoder-fixture",
+            "base_model_revision": "fixture-revision-1",
+            "training_strategy": "mixed_hard_random_v1",
+            "training_provenance": {
+                "trial_selection_id": TRIAL_ID,
+                "trial_selection_sha256": DIGEST_C,
+                "run_id": "training-run-1",
+                "run_manifest_sha256": DIGEST_A,
+                "selected_model_id": CANDIDATE_MODEL,
+                "selected_model_artifact_checksum": DIGEST_B,
+                "config_hash": DIGEST_D,
+                "git_sha": SOURCE_SHA,
+                "image_digest": DIGEST_C,
+                "hardware_class": "ml.g4dn.xlarge",
+                "accelerator": "gpu",
+                "region": "us-east-1",
+                "runtime_seconds": 60.0,
+                "estimated_cost_usd": 0.8,
+                "actual_cost_usd": None,
+                "cost_evidence": "Fixture training estimate; final charge is not reconciled.",
+            },
+            "evaluation_provenance": {
+                "candidate_model_id": CANDIDATE_MODEL,
+                "candidate_model_artifact_checksum": DIGEST_B,
+                "evaluation_config_hash": DIGEST_A,
+                "git_sha": SOURCE_SHA,
+                "image_digest": DIGEST_B,
+                "hardware_class": "ml.m5.xlarge",
+                "region": "us-east-1",
+                "clean_execution_count": 2,
+                "runtime_seconds": 60.0,
+                "runtime_basis": "processing_job_wall_clock_sum",
+                "estimated_cost_usd": 0.25,
+                "actual_cost_usd": None,
+                "cost_evidence": "Fixture evaluation estimate; final charge is not reconciled.",
+            },
+            "metrics": {
+                "candidate_graded_ndcg_at_10": primary["candidate_value"],
+                "strongest_baseline_graded_ndcg_at_10": primary["strongest_baseline_value"],
+                "candidate_minus_baseline_graded_ndcg_at_10": primary["candidate_minus_baseline"],
+            },
+            "intervals": {
+                "candidate_minus_baseline_graded_ndcg_at_10": {
+                    "point_estimate": paired["point_estimate"],
+                    "lower": paired["ci_lower"],
+                    "upper": paired["ci_upper"],
+                    "confidence_level": paired["confidence_level"],
+                }
+            },
+            "test_access_count": report["test_access_count"],
+            "limitations": report["limitations"],
+            "prohibited_claims": [
+                "No claim of shopper, conversion, revenue, or production-scale impact."
+            ],
+            "reproduction_command": "gh workflow run release.yml --ref " + SOURCE_SHA,
+        },
+        "evaluation": {
+            "evidence_mode": "verified",
+            "report_id": report["report_id"],
+            "run_id": report["run_id"],
+            "candidate_model_id": CANDIDATE_MODEL,
+            "strongest_baseline_model_id": BASELINE_MODEL,
+            "release_status": "passed" if gate["passed"] else "failed",
+            "primary_metric": {
+                "metric": "graded_ndcg@10",
+                "display_name": "Graded nDCG@10",
+                "value": primary["candidate_value"],
+                "interval": None,
+            },
+            "strongest_baseline": {
+                "metric": "graded_ndcg@10",
+                "display_name": "Strongest unchanged baseline",
+                "value": primary["strongest_baseline_value"],
+                "interval": None,
+            },
+            "delta": {
+                "metric": "graded_ndcg@10",
+                "display_name": "Candidate minus baseline",
+                "value": primary["candidate_minus_baseline"],
+                "interval": {
+                    "point_estimate": paired["point_estimate"],
+                    "lower": paired["ci_lower"],
+                    "upper": paired["ci_upper"],
+                    "confidence_level": paired["confidence_level"],
+                },
+            },
+            "held_out_query_count": report["query_count"],
+            "bootstrap_resamples": report["bootstrap_resamples"],
+            "bootstrap_seed": report["bootstrap_seed"],
+            "test_access_count": report["test_access_count"],
+            "excluded_query_count": report["excluded_query_count"],
+            "exclusion_note": "Fixture held-out exclusion policy.",
+            "models": models,
+            "secondary_metrics": [],
+        },
+        "failure_analysis": {
+            "evidence_mode": "verified",
+            "run_id": report["run_id"],
+            "metric": "graded_ndcg@10",
+            "minimum_slice_size": 50,
+            "slices": [],
+            "examples": [
+                {
+                    "example_id": f"{item['category']}:{item['query_id']}",
+                    "query": {
+                        "query_id": item["query_id"],
+                        "query": f"Public fixture query {index}",
+                        "candidate_count": 40,
+                    },
+                    "category": item["category"],
+                    "baseline_metric": item["baseline_metric"],
+                    "candidate_metric": item["candidate_metric"],
+                    "delta": item["delta"],
+                    "selection_rule": item["selection_rule"],
+                    "public_product_ids": item.get("public_product_ids", []),
+                    "notes": item.get("notes"),
+                    "interpretation": None,
+                    "next_experiment": None,
+                }
+                for index, item in enumerate(report["example_results"], start=1)
+            ],
+        },
+    }
+
+
 def _baseline_pointer() -> dict[str, Any]:
     return {
         "schema_version": "1.0.0",
@@ -461,6 +713,7 @@ def _performance_report(
     pointer: dict[str, Any],
     deployment: dict[str, Any],
     deployment_sha256: str,
+    public_evidence_sha256: str,
 ) -> dict[str, Any]:
     report = deepcopy(valid_performance_report())
     report["identifiers"].update(
@@ -481,6 +734,7 @@ def _performance_report(
             "promotion_pointer_version_id": "pointer-winner-v1",
             "bundle_s3_key": pointer["bundle_s3_key"],
             "deployment_evidence_sha256": deployment_sha256,
+            "public_evidence_sha256": public_evidence_sha256,
         }
     )
     report["lambda_configuration"] = _lambda_configuration(model_id)
@@ -521,6 +775,13 @@ def _write_benchmark_stage(
         winner_pointer,
         winner_evidence,
         _digest(winner_root / "deployment-evidence.json"),
+        "sha256:"
+        + hashlib.sha256(
+            (
+                json.dumps(_read(winner_root / "candidate-run.json"), indent=2, sort_keys=True)
+                + "\n"
+            ).encode("utf-8")
+        ).hexdigest(),
     )
     benchmark_root = root / DEPLOYMENT_SHA / "benchmark"
     _write(benchmark_root / "controlled-cold-start.json", winner_evidence["controlled_cold_start"])
@@ -636,6 +897,7 @@ def _fixture(root: Path, *, gate_passed: bool = True) -> None:
     _write(release_root / "evaluation-report.json", report)
     _write(release_root / "evaluation-provenance.json", provenance)
     _write(release_root / "release-summary.json", summary)
+    _write(release_root / "portfolio-ablation-evidence.json", _portfolio_ablations())
     _write(release_root / "previous-pointer.json", baseline_pointer)
     _write(release_root / "promotion-pointer.json", winner_pointer)
 
@@ -672,6 +934,7 @@ def _fixture(root: Path, *, gate_passed: bool = True) -> None:
         winner_pointer,
         baseline_pointer,
     )
+    _write(winner_root / "candidate-run.json", _public_evidence(report))
     _write_benchmark_stage(root, winner_pointer, winner_evidence, winner_root)
 
     rollback_root = _stage(
@@ -754,10 +1017,57 @@ def test_assembler_binds_typed_chain_and_derives_serialization(tmp_path: Path) -
         '"2002"',
         '"2003"',
         '"2004"',
+        "heldout-run",
+        "training-run-1",
     ):
         assert marker not in rendered
     target = assembler.write_immutable(payload, tmp_path / "committed-releases")
     assert target.name == f"{VERIFIED_RELEASE}.json"
+
+
+def test_portfolio_release_schema_matches_the_strict_pydantic_contract() -> None:
+    document = json.loads(
+        Path("schemas/json/portfolio_release_evidence.schema.json").read_text(encoding="utf-8")
+    )
+    assert document.pop("$schema") == "https://json-schema.org/draft/2020-12/schema"
+    assert document.pop("$id").endswith("/portfolio_release_evidence.schema.json")
+    assert document == assembler.PortfolioReleaseEvidence.model_json_schema()
+
+
+def test_assembler_rejects_tampered_sanitized_ablation_values(tmp_path: Path) -> None:
+    root = tmp_path / "local-evidence"
+    _fixture(root)
+    path = root / SOURCE_SHA / "release" / "portfolio-ablation-evidence.json"
+    evidence = _read(path)
+    evidence["contrasts"][0]["treatment_minus_control"] = 0.9
+    _write(path, evidence)
+
+    with pytest.raises(assembler.ReleaseEvidenceError, match="typed contract"):
+        _assemble(root)
+
+
+def test_assembler_rejects_unsupported_served_public_fields(tmp_path: Path) -> None:
+    root = tmp_path / "local-evidence"
+    _fixture(root)
+    path = root / DEPLOYMENT_SHA / "deploy-winner" / "candidate-run.json"
+    evidence = _read(path)
+    evidence["run"]["private_workflow_run_id"] = "123456789"
+    _write(path, evidence)
+
+    with pytest.raises(assembler.ReleaseEvidenceError, match="typed contract"):
+        _assemble(root)
+
+
+def test_assembler_checksum_binds_the_served_public_snapshot(tmp_path: Path) -> None:
+    root = tmp_path / "local-evidence"
+    _fixture(root)
+    path = root / DEPLOYMENT_SHA / "deploy-winner" / "candidate-run.json"
+    evidence = _read(path)
+    evidence["failure_analysis"]["examples"][0]["query"]["query"] = "Tampered query text"
+    _write(path, evidence)
+
+    with pytest.raises(assembler.ReleaseEvidenceError, match="bundle checksum"):
+        _assemble(root)
 
 
 def test_assembler_preserves_a_contract_valid_negative_result(tmp_path: Path) -> None:
@@ -985,22 +1295,22 @@ def test_assembler_binds_summary_to_the_evaluation_config_checksum(tmp_path: Pat
 
 
 def test_public_filter_rejects_private_text_in_allowlisted_values(tmp_path: Path) -> None:
+    root = tmp_path / "local-evidence"
+    _fixture(root)
+    payload = _assemble(root)
+    payload["claim_boundaries"]["limitations"][0] = "person@example.com"
+    payload["public_evidence"]["limitations"][0] = "person@example.com"
     with pytest.raises(assembler.ReleaseEvidenceError, match="private text"):
-        assembler.write_immutable(
-            {"release_id": "safe-release", "detail": "person@example.com"},
-            tmp_path / "committed-releases",
-        )
+        assembler.write_immutable(payload, tmp_path / "committed-releases")
 
 
 def test_public_filter_rejects_numeric_github_workflow_ids(tmp_path: Path) -> None:
-    with pytest.raises(assembler.ReleaseEvidenceError, match="private field"):
-        assembler.write_immutable(
-            {
-                "release_id": "safe-release",
-                "workflow_run_ids": {"release": "123456789"},
-            },
-            tmp_path / "committed-releases",
-        )
+    root = tmp_path / "local-evidence"
+    _fixture(root)
+    payload = _assemble(root)
+    payload["workflow_run_ids"] = {"release": "123456789"}
+    with pytest.raises(assembler.ReleaseEvidenceError, match="violates its contract"):
+        assembler.write_immutable(payload, tmp_path / "committed-releases")
 
 
 def test_immutable_writer_refuses_different_replacement(tmp_path: Path) -> None:
@@ -1017,10 +1327,13 @@ def test_immutable_writer_refuses_different_replacement(tmp_path: Path) -> None:
 def test_immutable_writer_never_clobbers_a_concurrent_creator(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    root = tmp_path / "local-evidence"
+    _fixture(root)
+    first = _assemble(root)
+    second = deepcopy(first)
+    second["generated_at"] = "2026-09-18T09:00:01Z"
     output = tmp_path / "committed-releases"
     output.mkdir()
-    first = {"release_id": "concurrent-release", "generated_at": "2026-09-18T09:00:00Z"}
-    second = {"release_id": "concurrent-release", "generated_at": "2026-09-18T09:00:01Z"}
     barrier = Barrier(2)
     real_link = os.link
 
@@ -1041,7 +1354,13 @@ def test_immutable_writer_never_clobbers_a_concurrent_creator(
 
     assert sorted(status for status, _ in results) == ["error", "ok"]
     expected = {
-        json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n"
+        json.dumps(
+            assembler.PortfolioReleaseEvidence.model_validate(payload).model_dump(mode="json"),
+            indent=2,
+            sort_keys=True,
+            allow_nan=False,
+        )
+        + "\n"
         for payload in (first, second)
     }
-    assert (output / "concurrent-release.json").read_text(encoding="utf-8") in expected
+    assert (output / f"{VERIFIED_RELEASE}.json").read_text(encoding="utf-8") in expected
