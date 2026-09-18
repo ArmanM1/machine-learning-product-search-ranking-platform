@@ -373,5 +373,5 @@ export const fixtureRun: PublicRunSummary = {
     'No claim of AWS training or serving until the named workloads complete.',
     'No claim of Amazon affiliation or an official competition score.',
   ],
-  reproduction_command: 'make reproduce RUN_ID=<verified-run-id>',
+  reproduction_command: 'Not available for illustrative fixture mode.',
 }

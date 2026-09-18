@@ -351,6 +351,9 @@
   }
   .footer-title { color: var(--ink); font-weight: 700; }
   .site-footer p + p { margin-top: 0.25rem; }
+  .footer-links { margin-top: 0.9rem; display: flex; flex-wrap: wrap; gap: 0.45rem 1rem; }
+  .footer-links a { color: var(--ink); font-size: 0.67rem; font-weight: 700; text-decoration-thickness: 1px; text-underline-offset: 0.25rem; }
+  .footer-links a:hover { color: var(--accent-deep); }
   .footer-meta { display: flex; align-items: flex-start; gap: 1.2rem; color: var(--muted); white-space: nowrap; }
 }
 
@@ -571,6 +574,8 @@
   .copy-field svg { width: 15px; height: 15px; }
   .not-recorded { color: var(--quiet); font-size: 0.72rem; font-style: italic; }
   .experiment-grid { padding: 5rem 0; display: grid; grid-template-columns: repeat(3, 1fr); }
+  .experiment-grid.verified-layout { grid-template-columns: repeat(2, 1fr); }
+  .experiment-grid.verified-layout .detail-card:nth-child(3) { border-left: 0; }
   .detail-card { min-height: 390px; padding: 2rem; border-top: 1px solid var(--rule-dark); border-bottom: 1px solid var(--rule-dark); }
   .detail-card + .detail-card { border-left: 1px solid var(--rule); }
   .detail-card h2 { font-size: 1.9rem; }

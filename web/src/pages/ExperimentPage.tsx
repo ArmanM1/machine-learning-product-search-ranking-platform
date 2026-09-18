@@ -26,6 +26,7 @@ export function ExperimentPage() {
   }
 
   const run = resource.data
+  const hasSeparatedExecutions = Boolean(run.training_provenance && run.evaluation_provenance)
   const modeLabel = run.evidence_mode === 'fixture'
     ? 'Illustrative fixture · no executed run'
     : run.evidence_mode === 'validation_only'
@@ -69,7 +70,10 @@ export function ExperimentPage() {
         </dl>
       </section>
 
-      <section className="experiment-grid" aria-label="Experiment configuration and execution evidence">
+      <section
+        className={`experiment-grid ${hasSeparatedExecutions ? 'verified-layout' : ''}`}
+        aria-label="Experiment configuration and execution evidence"
+      >
         <article className="detail-card">
           <p className="eyebrow">Data</p>
           <h2>Source and split</h2>
@@ -135,12 +139,21 @@ export function ExperimentPage() {
       <section className="reproduction-card" aria-labelledby="reproduction-title">
         <div>
           <p className="eyebrow">Clean-checkout entry point</p>
-          <h2 id="reproduction-title">Reproduce the selected run.</h2>
-          <p>{run.evidence_mode === 'validation_only'
-            ? 'The published command recreates the validation-only baseline path without authorizing held-out access.'
-            : 'The exact verified command resolves the versioned configuration and validates every required hash before evaluation.'}</p>
+          <h2 id="reproduction-title">
+            {run.evidence_mode === 'fixture' ? 'Published with verified evidence.' : 'Trace the selected run.'}
+          </h2>
+          <p>{run.evidence_mode === 'fixture'
+            ? 'A real release publishes its clean-checkout invocation reference here; fixture mode does not invent one.'
+            : run.evidence_mode === 'validation_only'
+              ? 'The published command recreates the validation-only baseline path without authorizing held-out access.'
+              : 'This invocation reference identifies the protected release workflow and frozen commit. Its exact dispatch inputs remain checksum-bound in the release evidence.'}</p>
         </div>
-        <CopyField label="reproduction command" value={run.reproduction_command} />
+        {run.evidence_mode === 'fixture'
+          ? <span className="not-recorded">Not available for an illustrative fixture</span>
+          : <CopyField
+              label={run.evidence_mode === 'verified' ? 'release invocation reference' : 'reproduction command'}
+              value={run.reproduction_command}
+            />}
       </section>
 
       <section className="boundaries-grid" id="limitations">
