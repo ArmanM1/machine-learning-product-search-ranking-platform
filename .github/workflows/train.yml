@@ -1521,6 +1521,8 @@ jobs:
               training-failure-diagnostic.json
             jq -r '"- Application category: `" + (.application_failure_category // "unavailable") + "`"' \
               training-failure-diagnostic.json
+            jq -r '"- Application signals: `" + (if (.application_failure_signals | length) > 0 then (.application_failure_signals | join(", ")) else "none" end) + "`"' \
+              training-failure-diagnostic.json
             jq -r '"- Exit code: `" + ((.exit_code // "unavailable") | tostring) + "`"' \
               training-failure-diagnostic.json
             jq -r '"- Completed epoch checkpoints: `" + (.completed_checkpoint_count | tostring) + "`"' \

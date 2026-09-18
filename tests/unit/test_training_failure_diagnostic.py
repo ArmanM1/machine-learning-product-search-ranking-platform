@@ -94,6 +94,7 @@ def test_private_failure_is_reduced_to_allowlisted_facts(
         "container_phase",
         "error_type",
         "application_failure_category",
+        "application_failure_signals",
         "exit_code",
         "managed_spot",
         "training_seconds",
@@ -131,34 +132,49 @@ def _write_failure_archive(path: Path, failure: str) -> None:
 
 
 @pytest.mark.parametrize(
-    ("failure", "expected"),
+    ("failure", "expected", "expected_signals"),
     (
-        ("CUDA training was requested but CUDA is unavailable", "cuda_unavailable"),
-        ("CUDA out of memory. Tried to allocate private tensor", "cuda_out_of_memory"),
-        ("CUBLAS_WORKSPACE_CONFIG must be configured", "cuda_determinism"),
-        ("training and validation query IDs overlap", "dataset_contract"),
+        ("CUDA training was requested but CUDA is unavailable", "cuda_unavailable", ["gpu"]),
+        (
+            "CUDA out of memory. Tried to allocate private tensor",
+            "cuda_out_of_memory",
+            ["gpu", "memory", "tensor"],
+        ),
+        (
+            "CUBLAS_WORKSPACE_CONFIG must be configured",
+            "cuda_determinism",
+            ["gpu", "determinism"],
+        ),
+        ("training and validation query IDs overlap", "dataset_contract", ["validation"]),
         (
             "hard fraction requested but no hard examples are available",
             "hard_example_sampling",
+            ["sampling"],
         ),
-        ("managed-spot checkpoint optimizer state is malformed", "checkpoint_resume"),
-        ("private unrecognized application failure", "unknown"),
+        (
+            "managed-spot checkpoint optimizer state is malformed",
+            "checkpoint_resume",
+            ["checkpoint", "training"],
+        ),
+        ("private unrecognized application failure", "unknown", []),
     ),
 )
 def test_private_model_archive_failure_is_reduced_to_allowlisted_category(
-    tmp_path: Path, failure: str, expected: str
+    tmp_path: Path, failure: str, expected: str, expected_signals: list[str]
 ) -> None:
     archive = tmp_path / "model.tar.gz"
     _write_failure_archive(archive, failure)
 
-    category = sanitizer._category_from_model_archive(archive)
+    category, failure_signals = sanitizer._details_from_model_archive(archive)
     diagnostic = sanitize_training_failure(
         _description("AlgorithmError: phase=training_subprocess; exit_code=1"),
         application_failure_category=category,
+        application_failure_signals=failure_signals,
     )
     encoded = json.dumps(diagnostic, sort_keys=True)
 
     assert diagnostic["application_failure_category"] == expected
+    assert diagnostic["application_failure_signals"] == expected_signals
     assert "application_failure_summary_present" in diagnostic["signals"]
     assert failure not in encoded
     assert "private-run-identifier" not in encoded
@@ -174,7 +190,7 @@ def test_model_archive_rejects_noncanonical_failure_summary_member(tmp_path: Pat
         archive.addfile(member, io.BytesIO(payload))
 
     with pytest.raises(TrainingFailureDiagnosticError):
-        sanitizer._category_from_model_archive(archive_path)
+        sanitizer._details_from_model_archive(archive_path)
 
 
 @pytest.mark.parametrize(
@@ -231,6 +247,21 @@ def test_unknown_error_type_is_mapped_instead_of_exported() -> None:
     assert private_type not in json.dumps(diagnostic)
 
 
+def test_application_failure_signals_reject_unallowlisted_or_unordered_values() -> None:
+    with pytest.raises(TrainingFailureDiagnosticError):
+        sanitize_training_failure(
+            _description("AlgorithmError"),
+            application_failure_category="unknown",
+            application_failure_signals=["private_customer_token"],
+        )
+    with pytest.raises(TrainingFailureDiagnosticError):
+        sanitize_training_failure(
+            _description("AlgorithmError"),
+            application_failure_category="unknown",
+            application_failure_signals=["tensor", "gpu"],
+        )
+
+
 def test_cli_never_echoes_private_reason(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -260,6 +291,7 @@ def test_cli_never_echoes_private_reason(
     assert secret_reason not in rendered
     assert private_application_reason not in rendered
     assert '"application_failure_category": "unknown"' in rendered
+    assert '"application_failure_signals": []' in rendered
 
 
 def test_status_transitions_and_checkpoint_markers_prove_resume_progress() -> None:
@@ -357,6 +389,7 @@ def test_read_only_diagnostic_job_cannot_submit_compute_or_publish_raw_reason() 
     assert "--model-archive" in diagnostic_source
     assert "head-object" in diagnostic_source
     assert "1073741824" in diagnostic_source
+    assert "application_failure_signals" in diagnostic_source
     assert "create-training-job" not in diagnostic_source
     assert "stop-training-job" not in diagnostic_source
     assert "FailureReason" not in diagnostic_source

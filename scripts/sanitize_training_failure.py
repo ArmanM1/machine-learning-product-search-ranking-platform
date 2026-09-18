@@ -120,6 +120,26 @@ _APPLICATION_FAILURE_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
         ),
     ),
 )
+_APPLICATION_FAILURE_SIGNAL_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("gpu", ("cuda", "cudnn", "cublas", "nvidia", "gpu")),
+    ("memory", ("memory", "allocate", "allocation")),
+    (
+        "precision",
+        ("float16", "fp16", "bfloat16", "bf16", "half", "autocast", "dtype"),
+    ),
+    ("tensor", ("tensor", "shape", "dimension", "size mismatch", "scalar type")),
+    ("determinism", ("deterministic", "cublas", "cudnn")),
+    ("model", ("model", "transformer", "tokenizer", "huggingface")),
+    ("tabular", ("dataframe", "pandas", "column", "index", "merge", "parquet", "arrow")),
+    ("sampling", ("sample", "hard example", "baseline ranking")),
+    ("validation", ("validation", "ndcg", "metric")),
+    ("checkpoint", ("checkpoint", "resume", "optimizer state")),
+    ("filesystem", ("file", "directory", "path", "permission", "disk")),
+    ("network", ("download", "connection", "network", "http", "timeout")),
+    ("serialization", ("convert", "serialize", "pickle", "json", "parquet", "arrow")),
+    ("contract", ("expected", "required", "missing", "invalid", "unsupported")),
+    ("training", ("gradient", "backward", "loss", "optimizer", "scheduler", "epoch")),
+)
 _SECONDARY_STATUSES = {
     "Starting",
     "LaunchingMLInstances",
@@ -145,15 +165,25 @@ class TrainingFailureDiagnosticError(ValueError):
     """A private description cannot be reduced safely."""
 
 
-def _application_failure_category(failure: str) -> str:
+def _application_failure_details(failure: str) -> tuple[str, list[str]]:
     normalized = failure.casefold()
-    for category, patterns in _APPLICATION_FAILURE_PATTERNS:
-        if any(pattern in normalized for pattern in patterns):
-            return category
-    return "unknown"
+    category = next(
+        (
+            candidate
+            for candidate, patterns in _APPLICATION_FAILURE_PATTERNS
+            if any(pattern in normalized for pattern in patterns)
+        ),
+        "unknown",
+    )
+    signals = [
+        signal
+        for signal, patterns in _APPLICATION_FAILURE_SIGNAL_PATTERNS
+        if any(pattern in normalized for pattern in patterns)
+    ]
+    return category, signals
 
 
-def _category_from_model_archive(path: Path) -> str:
+def _details_from_model_archive(path: Path) -> tuple[str, list[str]]:
     try:
         archive_size = path.stat().st_size
     except OSError as error:
@@ -192,7 +222,7 @@ def _category_from_model_archive(path: Path) -> str:
     failure = summary.get("failure")
     if not isinstance(failure, str) or not failure or len(failure) > 8192:
         raise TrainingFailureDiagnosticError("failure-summary-reason")
-    return _application_failure_category(failure)
+    return _application_failure_details(failure)
 
 
 def _optional_nonnegative_int(value: object, field: str) -> int | None:
@@ -307,6 +337,7 @@ def sanitize_training_failure(
     expected_job_name: str | None = None,
     expected_checkpoint_uri: str | None = None,
     application_failure_category: str | None = None,
+    application_failure_signals: list[str] | None = None,
 ) -> dict[str, Any]:
     """Return only allowlisted diagnostic facts; never copy the private reason."""
 
@@ -354,6 +385,16 @@ def sanitize_training_failure(
         and application_failure_category not in allowed_application_categories
     ):
         raise TrainingFailureDiagnosticError("application-failure-category")
+    failure_signals = application_failure_signals or []
+    allowed_failure_signals = [signal for signal, _patterns in _APPLICATION_FAILURE_SIGNAL_PATTERNS]
+    if (
+        len(failure_signals) != len(set(failure_signals))
+        or any(signal not in allowed_failure_signals for signal in failure_signals)
+        or failure_signals
+        != [signal for signal in allowed_failure_signals if signal in failure_signals]
+        or (application_failure_category is None and failure_signals)
+    ):
+        raise TrainingFailureDiagnosticError("application-failure-signals")
 
     phase_match = _PHASE_PATTERN.search(reason)
     phase = phase_match.group(1).casefold() if phase_match else None
@@ -391,6 +432,7 @@ def sanitize_training_failure(
         "container_phase": phase,
         "error_type": error_type,
         "application_failure_category": application_failure_category,
+        "application_failure_signals": failure_signals,
         "exit_code": exit_code,
         "managed_spot": managed_spot,
         "training_seconds": training_seconds,
@@ -426,16 +468,19 @@ def main(argv: list[str] | None = None) -> int:
             if not isinstance(candidate, dict):
                 raise TrainingFailureDiagnosticError("checkpoint-listing")
             checkpoint_listing = candidate
+        application_failure_category: str | None = None
+        application_failure_signals: list[str] | None = None
+        if args.model_archive is not None:
+            application_failure_category, application_failure_signals = _details_from_model_archive(
+                args.model_archive
+            )
         diagnostic = sanitize_training_failure(
             payload,
             checkpoint_listing,
             expected_job_name=args.expected_job_name,
             expected_checkpoint_uri=args.expected_checkpoint_uri,
-            application_failure_category=(
-                _category_from_model_archive(args.model_archive)
-                if args.model_archive is not None
-                else None
-            ),
+            application_failure_category=application_failure_category,
+            application_failure_signals=application_failure_signals,
         )
         args.output.write_text(
             json.dumps(diagnostic, indent=2, sort_keys=True) + "\n",
