@@ -14,6 +14,8 @@ from sentence_transformers import CrossEncoder
 
 from .common import ScoredProduct, records_from_scores
 
+_PREDICTION_CHUNK_SIZE = 4096
+
 
 class _CrossEncoderPredictor(Protocol):
     def predict(
@@ -63,26 +65,46 @@ def rank_cross_encoder(
 ) -> list[ScoredProduct]:
     if text_column not in frame:
         raise ValueError(f"missing cross-encoder text column: {text_column}")
-    pairs = [
-        (str(row.query), str(getattr(row, text_column))) for row in frame.itertuples(index=False)
-    ]
-    started = time.perf_counter()
-    predicted = cast(_CrossEncoderPredictor, model).predict(
-        pairs,
-        batch_size=batch_size,
-        show_progress_bar=False,
-        convert_to_numpy=True,
-    )
-    elapsed = (time.perf_counter() - started) * 1000
-    scored = frame.copy()
-    scored["_model_score"] = np.asarray(predicted, dtype=float).reshape(-1)
+    row_count = len(frame)
+    if row_count == 0:
+        return []
+
+    predictor = cast(_CrossEncoderPredictor, model)
+    queries = frame["query"]
+    texts = frame[text_column]
+    scores = np.empty(row_count, dtype=float)
+    elapsed_ms = 0.0
+    for start in range(0, row_count, _PREDICTION_CHUNK_SIZE):
+        stop = min(start + _PREDICTION_CHUNK_SIZE, row_count)
+        pairs = [
+            (str(query), str(text))
+            for query, text in zip(
+                queries.iloc[start:stop],
+                texts.iloc[start:stop],
+                strict=True,
+            )
+        ]
+        started = time.perf_counter()
+        predicted = predictor.predict(
+            pairs,
+            batch_size=batch_size,
+            show_progress_bar=False,
+            convert_to_numpy=True,
+        )
+        elapsed_ms += (time.perf_counter() - started) * 1000
+        chunk_scores = np.asarray(predicted, dtype=float).reshape(-1)
+        if len(chunk_scores) != stop - start:
+            raise ValueError("cross-encoder prediction count differs from candidate rows")
+        scores[start:stop] = chunk_scores
+
     records: list[ScoredProduct] = []
-    for _, group in scored.groupby("query_id", sort=True):
-        group_latency = elapsed * (len(group) / max(len(scored), 1))
+    for positions in frame.groupby("query_id", sort=True).indices.values():
+        group = frame.iloc[positions]
+        group_latency = elapsed_ms * (len(group) / row_count)
         records.extend(
             records_from_scores(
-                group.drop(columns=["_model_score"]),
-                scores=group["_model_score"].astype(float).tolist(),
+                group,
+                scores=scores[positions].tolist(),
                 model_id=model_id,
                 latency_ms=group_latency,
             )

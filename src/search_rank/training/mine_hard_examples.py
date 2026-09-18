@@ -2,25 +2,56 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable
+from typing import TypeAlias
 
 import pandas as pd
 
 from search_rank.baselines.common import ScoredProduct
 from search_rank.evaluation.metrics import gain_for
 
+_ScoreRow: TypeAlias = tuple[float, str, int]
+_HardRow: TypeAlias = tuple[str, str, str, int, int, int, str, float]
 
-def _scores(records: Iterable[ScoredProduct]) -> pd.DataFrame:
-    rows = [
-        {
-            "query_id": record.query_id,
-            "product_id": record.product_id,
-            "source_baseline": record.model_id,
-            "baseline_score": record.score,
-        }
-        for record in records
-    ]
-    return pd.DataFrame(rows)
+
+def _candidate_grades(training_frame: pd.DataFrame) -> dict[tuple[str, str], int]:
+    grades: dict[tuple[str, str], int] = {}
+    for query_id, product_id, label in zip(
+        training_frame["query_id"],
+        training_frame["product_id"],
+        training_frame["esci_label"],
+        strict=True,
+    ):
+        key = (str(query_id), str(product_id))
+        if key in grades:
+            raise ValueError("training frame contains duplicate query/product candidates")
+        grades[key] = gain_for(label)
+    return grades
+
+
+def _group_scores(
+    records: Iterable[ScoredProduct],
+    candidate_grades: dict[tuple[str, str], int],
+) -> dict[tuple[str, str], list[_ScoreRow]]:
+    groups: dict[tuple[str, str], list[_ScoreRow]] = {}
+    record_count = 0
+    for record in records:
+        record_count += 1
+        candidate_key = (record.query_id, record.product_id)
+        grade = candidate_grades.get(candidate_key)
+        if grade is None:
+            raise ValueError("baseline ranking contains non-training candidates")
+        group_key = (record.query_id, record.model_id)
+        groups.setdefault(group_key, []).append((float(record.score), record.product_id, grade))
+    if record_count == 0:
+        raise ValueError("baseline rankings are empty")
+    return groups
+
+
+def _score_order(row: _ScoreRow) -> tuple[bool, float, str]:
+    score, product_id, _ = row
+    return (math.isnan(score), -score if not math.isnan(score) else 0.0, product_id)
 
 
 def mine_hard_examples(
@@ -37,53 +68,37 @@ def mine_hard_examples(
             f"hard-example mining accepts training rows only, got {sorted(unexpected)}"
         )
 
-    candidates = training_frame[["query_id", "product_id", "esci_label"]].copy()
-    candidates["query_id"] = candidates["query_id"].astype(str)
-    candidates["product_id"] = candidates["product_id"].astype(str)
-    candidates["grade"] = candidates["esci_label"].map(gain_for)
-    scores = _scores(baseline_rankings)
-    if scores.empty:
-        raise ValueError("baseline rankings are empty")
-    joined = scores.merge(candidates, on=["query_id", "product_id"], validate="many_to_one")
-    if len(joined) != len(scores):
-        raise ValueError("baseline ranking contains non-training candidates")
+    candidate_grades = _candidate_grades(training_frame)
+    score_groups = _group_scores(baseline_rankings, candidate_grades)
 
-    hard_rows: list[dict[str, object]] = []
-    for (query_id, baseline_id), group in joined.groupby(
-        ["query_id", "source_baseline"], sort=True
-    ):
-        ordered = group.sort_values(
-            ["baseline_score", "product_id"], ascending=[False, True], kind="mergesort"
-        )
-        rows = ordered.to_dict(orient="records")
+    hard_rows: list[_HardRow] = []
+    for query_id, baseline_id in sorted(score_groups):
+        rows = sorted(score_groups[(query_id, baseline_id)], key=_score_order)
         for lower_index, lower in enumerate(rows):
-            better = [
-                higher
-                for higher in rows[lower_index + 1 :]
-                if int(higher["grade"]) > int(lower["grade"])
-            ]
-            if not better:
-                continue
+            lower_score, lower_product_id, lower_grade = lower
             higher = max(
-                better,
+                (item for item in rows[lower_index + 1 :] if item[2] > lower_grade),
                 key=lambda item: (
-                    int(item["grade"]) - int(lower["grade"]),
-                    float(lower["baseline_score"]) - float(item["baseline_score"]),
-                    str(item["product_id"]),
+                    item[2] - lower_grade,
+                    lower_score - item[0],
+                    item[1],
                 ),
+                default=None,
             )
+            if higher is None:
+                continue
+            higher_score, higher_product_id, higher_grade = higher
             hard_rows.append(
-                {
-                    "query_id": str(query_id),
-                    "lower_product_id": str(lower["product_id"]),
-                    "higher_product_id": str(higher["product_id"]),
-                    "lower_grade": int(lower["grade"]),
-                    "higher_grade": int(higher["grade"]),
-                    "grade_difference": int(higher["grade"]) - int(lower["grade"]),
-                    "source_baseline": str(baseline_id),
-                    "score_margin": float(lower["baseline_score"])
-                    - float(higher["baseline_score"]),
-                }
+                (
+                    query_id,
+                    lower_product_id,
+                    higher_product_id,
+                    lower_grade,
+                    higher_grade,
+                    higher_grade - lower_grade,
+                    baseline_id,
+                    lower_score - higher_score,
+                )
             )
     columns = [
         "query_id",
