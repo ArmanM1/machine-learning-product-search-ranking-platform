@@ -1153,8 +1153,8 @@ data "aws_iam_policy_document" "github_terraform" {
       test     = "StringEquals"
       variable = "s3:prefix"
       values = [
-        "${var.project_name}/prod/terraform.tfstate",
-        "${var.project_name}/prod/terraform.tfstate.tflock",
+        "${var.project_name}/${var.environment}/terraform.tfstate",
+        "${var.project_name}/${var.environment}/terraform.tfstate.tflock",
       ]
     }
   }
@@ -1162,13 +1162,13 @@ data "aws_iam_policy_document" "github_terraform" {
   statement {
     effect    = "Allow"
     actions   = ["s3:GetObject", "s3:PutObject"]
-    resources = ["arn:${local.partition}:s3:::${local.state_bucket_name}/${var.project_name}/prod/terraform.tfstate"]
+    resources = ["arn:${local.partition}:s3:::${local.state_bucket_name}/${var.project_name}/${var.environment}/terraform.tfstate"]
   }
 
   statement {
     effect    = "Allow"
     actions   = ["s3:DeleteObject", "s3:GetObject", "s3:PutObject"]
-    resources = ["arn:${local.partition}:s3:::${local.state_bucket_name}/${var.project_name}/prod/terraform.tfstate.tflock"]
+    resources = ["arn:${local.partition}:s3:::${local.state_bucket_name}/${var.project_name}/${var.environment}/terraform.tfstate.tflock"]
   }
 
   statement {
@@ -1509,8 +1509,8 @@ data "aws_iam_policy_document" "github_production_terraform" {
       test     = "StringEquals"
       variable = "s3:prefix"
       values = [
-        "${var.project_name}/prod/terraform.tfstate",
-        "${var.project_name}/prod/terraform.tfstate.tflock",
+        "${var.project_name}/${var.environment}/terraform.tfstate",
+        "${var.project_name}/${var.environment}/terraform.tfstate.tflock",
       ]
     }
   }
@@ -1518,13 +1518,13 @@ data "aws_iam_policy_document" "github_production_terraform" {
   statement {
     effect    = "Allow"
     actions   = ["s3:GetObject", "s3:PutObject"]
-    resources = ["arn:${local.partition}:s3:::${local.state_bucket_name}/${var.project_name}/prod/terraform.tfstate"]
+    resources = ["arn:${local.partition}:s3:::${local.state_bucket_name}/${var.project_name}/${var.environment}/terraform.tfstate"]
   }
 
   statement {
     effect    = "Allow"
     actions   = ["s3:DeleteObject", "s3:GetObject", "s3:PutObject"]
-    resources = ["arn:${local.partition}:s3:::${local.state_bucket_name}/${var.project_name}/prod/terraform.tfstate.tflock"]
+    resources = ["arn:${local.partition}:s3:::${local.state_bucket_name}/${var.project_name}/${var.environment}/terraform.tfstate.tflock"]
   }
 
   statement {
