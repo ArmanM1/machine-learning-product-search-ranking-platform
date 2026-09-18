@@ -110,11 +110,6 @@
       "title": "Dataset Manifest Hash",
       "type": "string"
     },
-    "split_manifest_hash": {
-      "pattern": "^sha256:[0-9a-f]{64}$",
-      "title": "Split Manifest Hash",
-      "type": "string"
-    },
     "dataset_name": {
       "minLength": 1,
       "title": "Dataset Name",
@@ -140,7 +135,7 @@
       "type": "string"
     },
     "evaluation_git_sha": {
-      "pattern": "^(?:unavailable|[0-9a-f]{7,64})$",
+      "pattern": "^(?:unavailable|[0-9a-f]{40})$",
       "title": "Evaluation Git Sha",
       "type": "string"
     },
@@ -211,6 +206,11 @@
         "test"
       ],
       "title": "Split",
+      "type": "string"
+    },
+    "split_manifest_hash": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Split Manifest Hash",
       "type": "string"
     },
     "staged_evaluation_config_checksum": {

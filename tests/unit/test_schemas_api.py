@@ -18,6 +18,8 @@ from search_rank.schemas.api import (
 SHA_A = "sha256:" + "a" * 64
 SHA_B = "sha256:" + "b" * 64
 GIT_SHA = "a" * 40
+TRAINING_GIT_SHA = "b" * 40
+OTHER_EVALUATION_GIT_SHA = "c" * 40
 
 
 def test_rank_request_applies_default_and_bounds() -> None:
@@ -329,6 +331,24 @@ def test_both_public_run_modes_require_a_canonical_split_manifest_hash() -> None
         malformed = {**values, "split_manifest_hash": "not-a-sha256"}
         with pytest.raises(ValidationError, match="split_manifest_hash"):
             model.model_validate(malformed)
+
+
+def test_public_run_summary_allows_split_training_sha_and_binds_evaluation_to_run() -> None:
+    values = public_evidence_values()["run"]
+    values["training_provenance"]["git_sha"] = TRAINING_GIT_SHA  # type: ignore[index]
+
+    summary = PublicRunSummary.model_validate(values)
+
+    assert summary.training_provenance.git_sha == TRAINING_GIT_SHA
+    assert summary.evaluation_provenance.git_sha == summary.git_sha == GIT_SHA
+
+    mismatched = public_evidence_values()["run"]
+    mismatched["training_provenance"]["git_sha"] = TRAINING_GIT_SHA  # type: ignore[index]
+    mismatched["evaluation_provenance"]["git_sha"] = OTHER_EVALUATION_GIT_SHA  # type: ignore[index]
+    with pytest.raises(
+        ValidationError, match="evaluation commit must match the public release run"
+    ):
+        PublicRunSummary.model_validate(mismatched)
 
 
 @pytest.mark.parametrize(

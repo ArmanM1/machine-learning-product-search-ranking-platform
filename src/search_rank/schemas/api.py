@@ -560,8 +560,8 @@ class PublicRunSummary(ContractModel):
         evaluation = self.evaluation_provenance
         if training.config_hash != self.config_hash:
             raise ValueError("selected training config differs from the public run")
-        if training.git_sha != self.git_sha or evaluation.git_sha != self.git_sha:
-            raise ValueError("training and evaluation commits must match the public run")
+        if evaluation.git_sha != self.git_sha:
+            raise ValueError("evaluation commit must match the public release run")
         if training.selected_model_id != evaluation.candidate_model_id:
             raise ValueError("selected training model differs from the evaluated candidate")
         if (

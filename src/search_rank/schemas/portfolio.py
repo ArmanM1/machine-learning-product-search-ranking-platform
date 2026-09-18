@@ -230,6 +230,7 @@ class PortfolioPublicEvidence(ContractModel):
 
 
 class PortfolioReleaseIdentities(ContractModel):
+    model_source_git_sha: FullGitSha
     release_git_sha: FullGitSha
     deployment_git_sha: FullGitSha
     dataset_manifest_sha256: Sha256
@@ -414,7 +415,7 @@ class PortfolioReleaseEvidence(ContractModel):
         if self.deployment.public_url != self.redeployment.public_url:
             raise ValueError("portfolio deployment origins differ")
         if (
-            identities.release_git_sha != public.training_provenance.git_sha
+            identities.model_source_git_sha != public.training_provenance.git_sha
             or identities.release_git_sha != public.evaluation_provenance.git_sha
             or identities.dataset_manifest_sha256 != public.ablations.dataset_manifest_sha256
             or identities.model_artifact_sha256 != public.selected_release_model.artifact_sha256

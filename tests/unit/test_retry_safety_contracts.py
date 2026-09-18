@@ -66,6 +66,7 @@ def test_hidden_workflow_artifacts_are_explicitly_included() -> None:
         "bootstrap-baseline.yml",
         "freeze-trial-selection.yml",
         "prepare-data.yml",
+        "release.yml",
     }
 
 
@@ -132,29 +133,27 @@ def test_training_inputs_and_reports_are_immutable_and_exactly_inventoried() -> 
 
 def test_release_counter_reservations_recover_without_double_increment() -> None:
     workflow = (WORKFLOWS / "release.yml").read_text(encoding="utf-8")
-    jobs = workflow.split("name: Run two separately counted clean held-out Processing jobs", 1)[
-        1
-    ].split("name: Verify both clean outputs", 1)[0]
-    reservation = jobs.split("reserve_counter()", 1)[1].split("submit_and_wait()", 1)[0]
+    phase_workflow = (WORKFLOWS / "release-clean-evaluation.yml").read_text(encoding="utf-8")
+    jobs = (ROOT / "scripts/release_processing_phase.sh").read_text(encoding="utf-8")
+    reservation = jobs.split("reserve_counter()", 1)[1].split("build_request()", 1)[0]
 
     assert 'run_token="h$(printf \'%s\' "${GITHUB_RUN_ID}" | sha256sum | cut -c1-16)"' in jobs
     assert 'base_name="${PROJECT_NAME}-${ENVIRONMENT_NAME}-release-${run_token}"' in jobs
     assert "release-${GITHUB_RUN_ID}" not in jobs
     assert "GITHUB_RUN_ATTEMPT" not in jobs
-    assert 'test "${TEST_ACCESS_COUNTER}" -le 999999' in workflow
+    assert "(( TEST_ACCESS_COUNTER <= 999999 ))" in jobs
     assert (
         'reservation_key="runs/${base_name}/reservations/'
         'access-counter-clean-${clean_run}.json"' in reservation
     )
     assert "local counter_size_base=4096" in reservation
-    assert 'test "${expected}" -le 1000000' in reservation
-    assert 'expected_size="$((counter_size_base + expected))"' in reservation
+    assert 'expected_size="$((counter_size_base + counter))"' in reservation
     assert "printf '%*s'" in reservation
     assert "aws s3api get-bucket-versioning" in reservation
     assert "aws s3api list-object-versions" in reservation
     assert 'previous="$((latest_size - counter_size_base))"' in reservation
-    assert 'if [[ "${previous}" -eq "${expected}" ]]' in reservation
-    assert 'if [[ "${expected}" -ne "$((previous + 1))" ]]' in reservation
+    assert 'if [[ "${previous}" -eq "${counter}" ]]' in reservation
+    assert 'if [[ "${counter}" -ne "$((previous + 1))" ]]' in reservation
     assert "--if-match" not in reservation
     assert "write_condition=(--if-none-match '*')" in reservation
     assert "--content-md5" in reservation
@@ -169,20 +168,15 @@ def test_release_counter_reservations_recover_without_double_increment() -> None
         'aws s3api get-object \\\n+                --bucket "${ARTIFACT_BUCKET}" \\\n+                --key "${counter_key}"'
         not in reservation
     )
-    assert jobs.index('reserve_counter "${first_counter}" 1') < jobs.index(
-        'submit_and_wait 1 "${first_counter}"'
-    )
-    assert jobs.index('reserve_counter "${second_counter}" 2') < jobs.index(
-        'submit_and_wait 2 "${second_counter}"'
+    assert jobs.index("reserve_counter") < jobs.index("aws sagemaker create-processing-job")
+    assert "clean-evaluation-2:\n    needs: clean-evaluation-1" in workflow
+    assert 'bash scripts/release_processing_phase.sh reserve-submit "${{ inputs.clean_run }}"' in (
+        phase_workflow
     )
 
 
 def test_release_rerun_reuses_only_exact_processing_jobs() -> None:
-    workflow = (WORKFLOWS / "release.yml").read_text(encoding="utf-8")
-    jobs = workflow.split("name: Run two separately counted clean held-out Processing jobs", 1)[
-        1
-    ].split("name: Verify both clean outputs", 1)[0]
-    submission = jobs.split("submit_and_wait()", 1)[1]
+    submission = (ROOT / "scripts/release_processing_phase.sh").read_text(encoding="utf-8")
 
     assert submission.index("aws sagemaker describe-processing-job") < submission.index(
         "aws sagemaker create-processing-job"
@@ -324,7 +318,7 @@ def test_every_post_bootstrap_aws_job_reserves_before_its_first_mutation() -> No
         "freeze-trial-selection.yml": ("freeze",),
         "infrastructure.yml": ("terraform",),
         "prepare-data.yml": ("prepare-and-publish",),
-        "release.yml": ("evaluate-and-promote",),
+        "release.yml": ("prepare",),
         "train.yml": ("submit",),
     }
     protected_reservation_environment = {
@@ -339,7 +333,7 @@ def test_every_post_bootstrap_aws_job_reserves_before_its_first_mutation() -> No
         "TF_STATE_BUCKET": "${{ vars.AWS_TERRAFORM_STATE_BUCKET }}",
     }
     delayed_reservation_contracts = {
-        ("release.yml", "evaluate-and-promote"): (
+        ("release.yml", "prepare"): (
             (
                 "Prove one ml.m5.xlarge Processing instance is available",
                 "Bind the evaluation digest to the evaluated Git commit",
@@ -348,7 +342,7 @@ def test_every_post_bootstrap_aws_job_reserves_before_its_first_mutation() -> No
                 "Require the immutable treatment and both validation-only controls",
                 "Capture the required rollback-safe baseline pointer",
             ),
-            "Run two separately counted clean held-out Processing jobs",
+            "Stage immutable inputs shared by both clean evaluations",
         ),
         ("train.yml", "submit"): (
             (
@@ -387,10 +381,14 @@ def test_every_post_bootstrap_aws_job_reserves_before_its_first_mutation() -> No
                 workflow_name,
                 job_name,
             )
-            if (workflow_name, job_name) == ("train.yml", "submit"):
-                assert len(credential_positions) == 9
-            else:
-                assert len(credential_positions) == 1, (workflow_name, job_name)
+            expected_credential_count = {
+                ("train.yml", "submit"): 9,
+                ("release.yml", "prepare"): 2,
+            }.get((workflow_name, job_name), 1)
+            assert len(credential_positions) == expected_credential_count, (
+                workflow_name,
+                job_name,
+            )
             credential_position = credential_positions[0]
             reservation_position = reservation_positions[0]
             assert credential_position < reservation_position, (workflow_name, job_name)
@@ -410,7 +408,12 @@ def test_every_post_bootstrap_aws_job_reserves_before_its_first_mutation() -> No
                     assert (
                         credential_position < step_positions[preflight_name] < reservation_position
                     )
-                assert reservation_position + 1 == step_positions[first_mutation_name]
+                first_mutation_position = step_positions[first_mutation_name]
+                assert reservation_position < first_mutation_position
+                assert all(
+                    str(step.get("uses", "")).startswith("aws-actions/configure-aws-credentials@")
+                    for step in job["steps"][reservation_position + 1 : first_mutation_position]
+                )
 
             prior_commands = "\n".join(
                 step.get("run", "") for step in job["steps"][:reservation_position]
@@ -471,7 +474,8 @@ def test_oidc_subjects_and_roles_are_bound_to_exact_workflow_environments() -> N
         "freeze-trial-selection.yml": (("freeze",), "aws-trial-selection"),
         "infrastructure.yml": (("terraform",), "aws-infrastructure"),
         "prepare-data.yml": (("prepare-and-publish",), "aws-data"),
-        "release.yml": (("evaluate-and-promote",), "heldout-release"),
+        "release.yml": (("prepare", "finalize"), "heldout-release"),
+        "release-clean-evaluation.yml": (("evaluate",), "heldout-release"),
         "train.yml": (("submit",), "aws-training"),
     }
     for workflow_name, (job_names, environment) in workflow_environments.items():
@@ -515,11 +519,23 @@ def test_oidc_subjects_and_roles_are_bound_to_exact_workflow_environments() -> N
             continue
         environment, workflow_name = (part.strip() for part in line.split("=", 1))
         actual_mapping[environment] = workflow_name.strip('"')
+    # The IAM subject remains bound to the caller workflow. A local reusable
+    # workflow inherits that caller workflow_ref; its job_workflow_ref is a
+    # separate claim and is intentionally not the trust-policy identity.
     expected_mapping = {
         environment: workflow_name
         for workflow_name, (_, environment) in workflow_environments.items()
+        if workflow_name != "release-clean-evaluation.yml"
     }
     assert actual_mapping == expected_mapping
+
+    release = yaml.safe_load((WORKFLOWS / "release.yml").read_text(encoding="utf-8"))
+    assert release["jobs"]["clean-evaluation-1"]["uses"] == (
+        "./.github/workflows/release-clean-evaluation.yml"
+    )
+    assert release["jobs"]["clean-evaluation-2"]["uses"] == (
+        "./.github/workflows/release-clean-evaluation.yml"
+    )
 
     iam = (ROOT / "infra" / "terraform" / "modules" / "platform" / "iam.tf").read_text(
         encoding="utf-8"

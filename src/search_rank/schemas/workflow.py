@@ -331,7 +331,7 @@ class EvaluationCostPreflight(ContractModel):
     region: Literal["us-east-1"]
     instance_type: Literal["ml.m5.xlarge"]
     independent_processing_job_count: Literal[2]
-    maximum_runtime_seconds_per_job: Annotated[int, Field(ge=1, le=7200)]
+    maximum_runtime_seconds_per_job: Annotated[int, Field(ge=1, le=14_400)]
     maximum_total_instance_hours: NonNegativeDecimal
     on_demand_hourly_upper_bound_usd: NonNegativeDecimal
     maximum_job_estimate_usd: NonNegativeDecimal

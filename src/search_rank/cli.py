@@ -1966,6 +1966,9 @@ def promote(
             or provenance["test_access_count"] != report.test_access_count
         ):
             raise ValueError("held-out provenance does not match the evaluation report")
+        release_git_sha = _git_sha()
+        if provenance["evaluation_git_sha"] != release_git_sha:
+            raise ValueError("held-out evaluation belongs to a different release commit")
         if (
             provenance["checkpoint_checksum"] != result["checkpoint_checksum"]
             or provenance["config_hash"] != result["config_hash"]
@@ -2060,11 +2063,11 @@ def promote(
             or selection.selected_candidate_model_id != report.candidate_model_id
             or selection.selected_candidate_config_sha256 != provenance["config_hash"]
             or selection.dataset_manifest_hash != provenance["dataset_manifest_hash"]
-            or selection.git_sha != provenance["evaluation_git_sha"]
+            or selection.git_sha != training_manifest.git_sha
             or treatment.candidate_checkpoint_sha256 != provenance["checkpoint_checksum"]
         ):
             raise ValueError(
-                "trial selection, selected training run, and held-out evaluation are not identical"
+                "trial selection, selected training run, and held-out model inputs are not identical"
             )
         if int(provenance["independent_evaluation_count"]) != 2:
             raise ValueError("public release requires exactly two clean evaluation executions")

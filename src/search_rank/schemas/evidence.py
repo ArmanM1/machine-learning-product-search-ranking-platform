@@ -11,7 +11,7 @@ from .api import ModelSummary, PublicEvaluationProvenance, PublicTrainingProvena
 from .common import ContractModel, NonEmptyStr, Sha256
 
 GitSha = Annotated[str, Field(pattern=r"^[0-9a-f]{7,64}$", min_length=7, max_length=64)]
-EvaluationGitSha = Annotated[str, Field(pattern=r"^(?:unavailable|[0-9a-f]{7,64})$")]
+EvaluationGitSha = Annotated[str, Field(pattern=r"^(?:unavailable|[0-9a-f]{40})$")]
 EvaluationImageDigest = Annotated[str, Field(pattern=r"^(?:unavailable|sha256:[0-9a-f]{64})$")]
 RelativeArtifactPath = Annotated[
     str,
@@ -90,8 +90,6 @@ class ReleaseExecutionProvenance(ContractModel):
             != self.evaluation.candidate_model_artifact_checksum
         ):
             raise ValueError("training and evaluation model checksums differ")
-        if self.training.git_sha != self.evaluation.git_sha:
-            raise ValueError("training and evaluation commits differ")
         return self
 
 
@@ -144,8 +142,8 @@ class ReleaseManifest(ContractModel):
             )
             if self.provenance is None:
                 raise ValueError("verified releases require training and evaluation provenance")
-            if self.provenance.training.git_sha != self.git_sha:
-                raise ValueError("release Git SHA differs from execution provenance")
+            if self.provenance.evaluation.git_sha != self.git_sha:
+                raise ValueError("release Git SHA differs from evaluation provenance")
             candidate_id = self.provenance.training.selected_model_id
             candidate = by_id.get(candidate_id)
             if candidate is None or candidate.kind != "fine_tuned":

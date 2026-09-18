@@ -57,15 +57,17 @@ def test_processing_quota_contract_rejects_missing_or_nonfinite_capacity(
 
 def test_release_checks_exact_processing_quota_before_heldout_access() -> None:
     workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+    phase = (ROOT / "scripts" / "release_processing_phase.sh").read_text(encoding="utf-8")
     credentials = workflow.index("aws-actions/configure-aws-credentials")
     quota_check = workflow.index("aws service-quotas get-service-quota")
-    access_counter_function = workflow.index("reserve_counter()")
-    create_processing_job = workflow.index("aws sagemaker create-processing-job")
-    access_counter_call = workflow.index('reserve_counter "${first_counter}" 1')
-    processing_job_call = workflow.index('submit_and_wait 1 "${first_counter}"')
+    preflight_publication = workflow.index("heldout-release-preflight-${{ github.run_id }}")
+    access_counter_function = phase.index("reserve_counter()")
+    create_processing_job = phase.index("aws sagemaker create-processing-job")
 
-    assert credentials < quota_check < access_counter_function < create_processing_job
-    assert access_counter_call < processing_job_call
+    assert credentials < quota_check < preflight_publication
+    assert access_counter_function < create_processing_job
+    assert "clean-evaluation-1:\n    needs: prepare" in workflow
+    assert "clean-evaluation-2:\n    needs: clean-evaluation-1" in workflow
     assert '--region "${AWS_REGION}"' in workflow[quota_check : quota_check + 500]
     assert "--service-code sagemaker" in workflow[quota_check : quota_check + 500]
     assert "--quota-code L-0307F515" in workflow[quota_check : quota_check + 500]

@@ -389,6 +389,7 @@ def test_scope_cli_emits_hashes_but_not_raw_operation_inputs(
 def test_costed_workflows_revalidate_at_the_cost_incurrence_boundary() -> None:
     train = (ROOT / ".github/workflows/train.yml").read_text(encoding="utf-8")
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    release_phase = (ROOT / "scripts/release_processing_phase.sh").read_text(encoding="utf-8")
     benchmark = (ROOT / ".github/workflows/benchmark-serving.yml").read_text(encoding="utf-8")
 
     for source in (train, release, benchmark):
@@ -402,10 +403,10 @@ def test_costed_workflows_revalidate_at_the_cost_incurrence_boundary() -> None:
     train_create = train.index("aws sagemaker create-training-job")
     assert train.rindex("validate_financial_snapshot.py verify", 0, train_create) < train_create
 
-    release_create = release.index("aws sagemaker create-processing-job")
-    function_start = release.rindex("submit_and_wait()", 0, release_create)
+    release_create = release_phase.index("aws sagemaker create-processing-job")
+    function_start = release_phase.rindex("reserve-submit)", 0, release_create)
     assert (
-        release.rindex("validate_financial_snapshot.py verify", function_start, release_create)
+        release_phase.rindex("verify_financial_snapshot", function_start, release_create)
         < release_create
     )
 
@@ -435,7 +436,10 @@ def _assert_every_boundary_is_immediately_guarded(script: str, boundary: str) ->
     assert positions, boundary
     for position in positions:
         preceding_command = "\n".join(lines[max(0, position - 4) : position])
-        assert "validate_financial_snapshot.py" in preceding_command, (
+        assert (
+            "validate_financial_snapshot.py" in preceding_command
+            or "verify_financial_snapshot" in preceding_command
+        ), (
             boundary,
             lines[max(0, position - 6) : position + 2],
         )
@@ -558,39 +562,46 @@ def test_exact_existing_training_job_reuse_revalidates_the_bound_snapshot() -> N
 
 
 @pytest.mark.parametrize(
-    ("step_name", "boundary"),
+    ("job", "step_name", "boundary"),
     (
-        ("Run two separately counted clean held-out Processing jobs", "aws s3api put-object"),
         (
-            "Run two separately counted clean held-out Processing jobs",
-            "aws sagemaker create-processing-job",
+            "prepare",
+            "Stage immutable inputs shared by both clean evaluations",
+            "aws s3api put-object",
         ),
         (
+            "finalize",
             "Verify both clean outputs, bind them, and apply the promotion decision",
             "aws s3api put-object",
         ),
-        ("Build and publish the checksummed held-out outcome bundle", "aws s3api put-object"),
+        (
+            "finalize",
+            "Build and publish the checksummed held-out outcome bundle",
+            "aws s3api put-object",
+        ),
     ),
 )
 def test_release_write_boundaries_are_path_local_and_immediately_guarded(
-    step_name: str, boundary: str
+    job: str, step_name: str, boundary: str
 ) -> None:
     _assert_every_boundary_is_immediately_guarded(
-        _workflow_step("release.yml", "evaluate-and-promote", step_name), boundary
+        _workflow_step("release.yml", job, step_name), boundary
     )
 
 
 def test_each_exact_existing_processing_job_reuse_revalidates_the_bound_snapshot() -> None:
-    script = _workflow_step(
-        "release.yml",
-        "evaluate-and-promote",
-        "Run two separately counted clean held-out Processing jobs",
-    )
-    reuse = script.index('echo "Reusing exact existing held-out Processing job')
-    validation = script.rindex("validate_financial_snapshot.py verify", 0, reuse)
-    branch = script.rindex('case "${existing_status}"', 0, reuse)
-    assert branch < validation < reuse
-    assert 'reserve_counter "${second_counter}" 2\nsubmit_and_wait 2' in script
+    script = (ROOT / "scripts/release_processing_phase.sh").read_text(encoding="utf-8")
+    branch = script.index('validate_existing_job "existing-processing-job')
+    validation = script.index("verify_financial_snapshot", branch)
+    create = script.index("aws sagemaker create-processing-job", validation)
+    assert branch < validation < create
+    assert 'counter="$((TEST_ACCESS_COUNTER + clean_run - 1))"' in script
+
+
+def test_release_phase_mutations_are_immediately_snapshot_guarded() -> None:
+    script = (ROOT / "scripts/release_processing_phase.sh").read_text(encoding="utf-8")
+    _assert_every_boundary_is_immediately_guarded(script, "aws s3api put-object")
+    _assert_every_boundary_is_immediately_guarded(script, "aws sagemaker create-processing-job")
 
 
 def test_benchmark_matrix_and_publication_are_independently_revalidated() -> None:
@@ -712,6 +723,11 @@ def test_every_protected_balance_parser_rejects_non_finite_decimals() -> None:
         if "AWS_REMAINING_APPLICABLE_CREDIT_USD" not in source:
             continue
         functions = source.split("def amount(name: str) -> Decimal:")[1:]
+        if path.name == "release-clean-evaluation.yml":
+            assert "validate_financial_snapshot.py verify" in (
+                ROOT / "scripts/release_processing_phase.sh"
+            ).read_text(encoding="utf-8")
+            continue
         assert functions, path.name
         for function in functions:
             body = function.split("return value", 1)[0]
@@ -730,6 +746,7 @@ def test_every_consuming_job_configures_the_private_hmac_key() -> None:
         "infrastructure.yml": "infrastructure",
         "prepare-data.yml": "prepare-data",
         "release.yml": "release",
+        "release-clean-evaluation.yml": "release",
         "train.yml": "train",
     }
     for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
@@ -745,13 +762,18 @@ def test_every_consuming_job_configures_the_private_hmac_key() -> None:
                 environment.get("FINANCIAL_SNAPSHOT_AUTHORIZATION_WORKFLOW")
                 == (expected_workflows[path.name])
             ), (path.name, job_name)
+            expected_inputs = (
+                "${{ inputs.authorization_inputs_json }}"
+                if path.name == "release-clean-evaluation.yml"
+                else "${{ toJSON(inputs) }}"
+            )
             assert environment.get("FINANCIAL_SNAPSHOT_AUTHORIZATION_INPUTS_JSON") == (
-                "${{ toJSON(inputs) }}"
+                expected_inputs
             ), (path.name, job_name)
             assert environment.get("FINANCIAL_SNAPSHOT_AUTHORIZATION_COMMIT_SHA") == (
                 "${{ github.sha }}"
             ), (path.name, job_name)
-        if path.name in expected_workflows:
+        if path.name in expected_workflows and path.name != "release-clean-evaluation.yml":
             assert payload.get("concurrency") == {
                 "group": "aws-financial-operations",
                 "cancel-in-progress": False,

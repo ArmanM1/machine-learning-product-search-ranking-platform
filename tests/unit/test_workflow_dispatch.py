@@ -143,8 +143,8 @@ def test_release_dispatch_rejects_unbound_baseline_and_excess_runtime() -> None:
         validate_dispatch_config("release", json.dumps(values), EXTERNAL_ENVIRONMENTS["release"])
 
     values = json.loads(_example("release"))
-    values["maximum_timeout_seconds"] = "7201"
-    with pytest.raises(ValueError, match="exceeds two hours"):
+    values["maximum_timeout_seconds"] = "14401"
+    with pytest.raises(ValueError, match="exceeds four hours"):
         validate_dispatch_config("release", json.dumps(values), EXTERNAL_ENVIRONMENTS["release"])
 
     values = json.loads(_example("release"))
@@ -160,6 +160,14 @@ def test_release_dispatch_rejects_unbound_baseline_and_excess_runtime() -> None:
     for invalid_sha in ("a" * 39, "A" * 40):
         values = json.loads(_example("release"))
         values["baseline_evidence_git_sha"] = invalid_sha
+        with pytest.raises(ValueError, match="invalid format"):
+            validate_dispatch_config(
+                "release", json.dumps(values), EXTERNAL_ENVIRONMENTS["release"]
+            )
+
+    for invalid_sha in ("9" * 39, "G" * 40):
+        values = json.loads(_example("release"))
+        values["model_source_git_sha"] = invalid_sha
         with pytest.raises(ValueError, match="invalid format"):
             validate_dispatch_config(
                 "release", json.dumps(values), EXTERNAL_ENVIRONMENTS["release"]

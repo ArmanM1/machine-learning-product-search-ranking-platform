@@ -249,6 +249,11 @@ def test_trial_selection_rejects_missing_control_and_metric_tamper(tmp_path: Pat
     with pytest.raises(ValidationError, match="values do not match"):
         TrialSelection.model_validate(payload)
 
+    payload = selection.model_dump(mode="json")
+    payload["git_sha"] = "f" * 40
+    with pytest.raises(ValidationError, match="must equal every training trial"):
+        TrialSelection.model_validate(payload)
+
 
 def test_release_workflow_verifies_selection_before_any_heldout_access() -> None:
     release = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
@@ -264,13 +269,15 @@ def test_release_workflow_verifies_selection_before_any_heldout_access() -> None
 
     assert "trial_selection_s3_key" in dispatch_example
     assert "trial_selection_sha256" in dispatch_example
+    assert "model_source_git_sha" in dispatch_example
     assert '"trial_selection_s3_key": "TRIAL_SELECTION_S3_KEY"' in dispatch_validator
     assert '"trial_selection_sha256": "TRIAL_SELECTION_SHA256"' in dispatch_validator
     gate = release.index("Require the immutable treatment and both validation-only controls")
     first_counter = release.index("Capture the required rollback-safe baseline pointer")
-    first_job = release.index("Run two separately counted clean held-out Processing jobs")
+    first_job = release.index("clean-evaluation-1:")
     assert gate < first_counter < first_job
     assert "scripts/trial_selection.py verify" in release[gate:first_counter]
+    assert '--git-sha "${MODEL_SOURCE_GIT_SHA}"' in release[gate:first_counter]
 
     assert 'ALLOW_HELDOUT_EVAL: "0"' in freeze
     assert "scripts/trial_selection.py build" in freeze

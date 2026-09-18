@@ -1,6 +1,4 @@
 {
-  "$id": "https://schemas.example.invalid/search-rank/evaluation_cost_preflight.schema.json",
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$defs": {
     "ProtectedFinancialSnapshot": {
       "additionalProperties": false,
@@ -114,6 +112,8 @@
       "type": "object"
     }
   },
+  "$id": "https://schemas.example.invalid/search-rank/evaluation_cost_preflight.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
     "artifact_type": {
@@ -166,7 +166,7 @@
       "title": "Maximum Out Of Pocket Usd"
     },
     "maximum_runtime_seconds_per_job": {
-      "maximum": 7200,
+      "maximum": 14400,
       "minimum": 1,
       "title": "Maximum Runtime Seconds Per Job",
       "type": "integer"

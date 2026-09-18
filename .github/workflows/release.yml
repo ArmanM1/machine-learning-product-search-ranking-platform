@@ -31,10 +31,10 @@ env:
   MAXIMUM_OUT_OF_POCKET_USD: "0"
 
 jobs:
-  evaluate-and-promote:
+  prepare:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 350
+    timeout-minutes: 90
     environment: heldout-release
     env:
       ALLOW_HELDOUT_EVAL: ${{ inputs.allow_heldout_eval }}
@@ -65,6 +65,8 @@ jobs:
       OWNER_ALIAS: ${{ vars.TF_OWNER_ALIAS }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
@@ -140,6 +142,22 @@ jobs:
           : "${PROCESSING_ROLE_ARN:?Missing AWS_SAGEMAKER_PROCESSING_ROLE_ARN variable}"
           : "${EVAL_REPOSITORY:?Missing AWS_EVAL_ECR_REPOSITORY_URL variable}"
           [[ "${OWNER_ALIAS}" =~ ^[A-Za-z0-9_.-]{2,32}$ ]]
+      - name: Prove the frozen model inputs are unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${MODEL_SOURCE_GIT_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          git cat-file -e "${MODEL_SOURCE_GIT_SHA}^{commit}"
+          git merge-base --is-ancestor "${MODEL_SOURCE_GIT_SHA}" "${GITHUB_SHA}"
+          git diff --quiet "${MODEL_SOURCE_GIT_SHA}" "${GITHUB_SHA}" -- \
+            Dockerfile.eval pyproject.toml uv.lock \
+            configs/data configs/models \
+            configs/experiments/baselines-v1.yaml \
+            configs/experiments/candidate-v1.yaml \
+            configs/experiments/candidate-random-ablation-v1.yaml \
+            configs/experiments/candidate-title-ablation-v1.yaml \
+            configs/experiments/release-v1.yaml
+
       - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
@@ -265,8 +283,8 @@ jobs:
           if not prices:
               raise SystemExit("No current SageMaker processing price found; refusing held-out access")
           timeout = int(os.environ["MAX_TIMEOUT_SECONDS"])
-          if timeout <= 0 or timeout > 7200:
-              raise SystemExit("Each of the two Processing jobs must be capped at two hours")
+          if timeout <= 0 or timeout > 14400:
+              raise SystemExit("Each of the two Processing jobs must be capped at four hours")
           hours = (Decimal(timeout) / Decimal(3600)).quantize(Decimal("0.0001"), rounding=ROUND_UP)
           unit_price = max(prices)
           total_hours = hours * 2
@@ -455,7 +473,7 @@ jobs:
           uv run python scripts/trial_selection.py verify \
             --selection trial-selection.json \
             --repository-root . \
-            --git-sha "${GITHUB_SHA}" \
+            --git-sha "${MODEL_SOURCE_GIT_SHA}" \
             --dataset-manifest-hash "${DATASET_MANIFEST_HASH}" \
             --candidate-run-id "${CANDIDATE_RUN_ID}" \
             --candidate-model-id "${CANDIDATE_MODEL_ID}" \
@@ -513,7 +531,13 @@ jobs:
           PYTHONPATH=src python scripts/reserve_financial_capacity.py reserve \
             --bucket "${TF_STATE_BUCKET}" \
             --output financial-capacity-reservation.json
-      - name: Run two separately counted clean held-out Processing jobs
+      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-heldout-stage-${{ github.run_id }}
+          mask-aws-account-id: true
+      - name: Stage immutable inputs shared by both clean evaluations
         shell: bash
         run: |
           set -euo pipefail
@@ -599,345 +623,225 @@ jobs:
               "candidate-config/frozen-candidate.yaml",
               "evaluation/release.yaml"
             ] | map($prefix + .) | sort)' shared-input-objects.json >/dev/null
+      - name: Create the checksum-bound phase handoff
+        shell: bash
+        run: |
+          set -euo pipefail
+          treatment_source_tag="$(jq -er '.trials[] | select(.role == "candidate_treatment") |
+            .training_image_source_tag' trial-selection.json)"
+          test "${treatment_source_tag}" = "sha-${MODEL_SOURCE_GIT_SHA}"
+          jq -n \
+            --arg release_git_sha "${GITHUB_SHA}" \
+            --arg model_source_git_sha "${MODEL_SOURCE_GIT_SHA}" \
+            --arg dispatch_config_sha256 "${DISPATCH_CONFIG_SHA256}" \
+            --arg baseline_config_hash "${BASELINE_CONFIG_HASH}" \
+            --arg split_manifest_hash "${SPLIT_MANIFEST_HASH}" \
+            --arg evaluation_image_source_tag "sha-${GITHUB_SHA}" \
+            --arg training_image_source_tag "${treatment_source_tag}" \
+            '{schema_version: "1.0.0", artifact_type: "heldout_release_preflight",
+              release_git_sha: $release_git_sha,
+              model_source_git_sha: $model_source_git_sha,
+              dispatch_config_sha256: $dispatch_config_sha256,
+              baseline_config_hash: $baseline_config_hash,
+              split_manifest_hash: $split_manifest_hash,
+              evaluation_image_source_tag: $evaluation_image_source_tag,
+              training_image_source_tag: $training_image_source_tag}' \
+            > preflight-handoff.json
+          files=(
+            candidate-model.tar.gz
+            baseline-run-summary.json
+            baseline-selection.json
+            heldout-manifest.json
+            trial-selection.json
+            trial-selection-binding.json
+            trial-selection-verification.json
+            portfolio-ablation-evidence.json
+            previous-pointer.json
+            previous-pointer-version.txt
+            processing-quota-preflight.json
+            cost-preflight.json
+            financial-capacity-reservation.json
+            preflight-handoff.json
+          )
+          while IFS= read -r path; do files+=("${path}"); done \
+            < <(find .trial-selection-sources .trial-selection-manifests -type f | sort)
+          printf '%s\n' "${files[@]}" | sort -u > preflight-files.txt
+          test "$(wc -l < preflight-files.txt)" -eq "$(sort -u preflight-files.txt | wc -l)"
+          while IFS= read -r path; do test -f "${path}"; done < preflight-files.txt
+          xargs -d '\n' sha256sum < preflight-files.txt > preflight-checksums.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: heldout-release-preflight-${{ github.run_id }}
+          path: |
+            candidate-model.tar.gz
+            baseline-run-summary.json
+            baseline-selection.json
+            heldout-manifest.json
+            trial-selection.json
+            trial-selection-binding.json
+            trial-selection-verification.json
+            portfolio-ablation-evidence.json
+            previous-pointer.json
+            previous-pointer-version.txt
+            processing-quota-preflight.json
+            cost-preflight.json
+            financial-capacity-reservation.json
+            preflight-handoff.json
+            preflight-files.txt
+            preflight-checksums.txt
+            .trial-selection-sources/
+            .trial-selection-manifests/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 2
 
-          reserve_counter() {
-            local expected="$1"
-            local clean_run="$2"
-            local counter_key="heldout/access-counter.json"
-            local reservation_key="runs/${base_name}/reservations/access-counter-clean-${clean_run}.json"
-            local counter_size_base=4096
-            local current_size expected_size previous version_count latest_count latest_size
-            local local_md5 content_md5 checksum_sha256 expected_etag put_version_id
-            local write_condition=()
-            [[ "${expected}" =~ ^[1-9][0-9]*$ ]]
-            test "${expected}" -le 1000000
-            jq -n \
-              --argjson count "${expected}" \
-              --argjson clean_run "${clean_run}" \
-              --arg run "${CANDIDATE_RUN_ID}" \
-              --arg commit "${GITHUB_SHA}" \
-              --arg workflow_run "${GITHUB_RUN_ID}" \
-              '{schema_version: "1.0.0", artifact_type: "heldout_access_counter",
-                count: $count, clean_run: $clean_run, candidate_run_id: $run,
-                code_commit: $commit, workflow_run_id: $workflow_run}' \
-              > "access-counter-clean-${clean_run}.json"
-            current_size="$(wc -c < "access-counter-clean-${clean_run}.json")"
-            expected_size="$((counter_size_base + expected))"
-            test "${current_size}" -lt "${expected_size}"
-            printf '%*s' "$((expected_size - current_size))" '' \
-              >> "access-counter-clean-${clean_run}.json"
-            test "$(wc -c < "access-counter-clean-${clean_run}.json")" -eq \
-              "${expected_size}"
-            uv run python scripts/validate_release_artifacts.py file \
-              --kind access-counter "access-counter-clean-${clean_run}.json"
-            local_md5="$(md5sum "access-counter-clean-${clean_run}.json" | cut -d' ' -f1)"
-            content_md5="$(openssl dgst -md5 -binary \
-              "access-counter-clean-${clean_run}.json" | base64 -w0)"
-            checksum_sha256="$(openssl dgst -sha256 -binary \
-              "access-counter-clean-${clean_run}.json" | base64 -w0)"
-            expected_etag="\"${local_md5}\""
+  clean-evaluation-1:
+    needs: prepare
+    uses: ./.github/workflows/release-clean-evaluation.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      dispatch_config: ${{ inputs.dispatch_config }}
+      allow_heldout_eval: ${{ inputs.allow_heldout_eval }}
+      authorization: ${{ inputs.authorization }}
+      authorization_inputs_json: ${{ toJSON(inputs) }}
+      clean_run: 1
+    secrets: inherit
 
-            if aws s3api head-object \
-              --bucket "${ARTIFACT_BUCKET}" \
-              --key "${reservation_key}" > "reservation-head-${clean_run}.json" \
-              2> "reservation-head-${clean_run}.error"; then
-              put_immutable_or_verify_identical \
-                "access-counter-clean-${clean_run}.json" "${reservation_key}" \
-                application/json candidate
-              return 0
-            elif ! grep -Eq '(404|Not Found|NoSuchKey)' \
-              "reservation-head-${clean_run}.error"; then
-              cat "reservation-head-${clean_run}.error" >&2
-              return 1
-            fi
+  clean-evaluation-2:
+    needs: clean-evaluation-1
+    uses: ./.github/workflows/release-clean-evaluation.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      dispatch_config: ${{ inputs.dispatch_config }}
+      allow_heldout_eval: ${{ inputs.allow_heldout_eval }}
+      authorization: ${{ inputs.authorization }}
+      authorization_inputs_json: ${{ toJSON(inputs) }}
+      clean_run: 2
+    secrets: inherit
 
-            aws s3api get-bucket-versioning \
-              --bucket "${ARTIFACT_BUCKET}" \
-              > "counter-bucket-versioning-${clean_run}.json"
-            jq -e '.Status == "Enabled"' \
-              "counter-bucket-versioning-${clean_run}.json" >/dev/null
-            aws s3api list-object-versions \
-              --bucket "${ARTIFACT_BUCKET}" \
-              --prefix "${counter_key}" \
-              > "counter-versions-before-${clean_run}.json"
-            jq -e --arg key "${counter_key}" '
-              .IsTruncated != true and
-              ([.Versions[]? | select(.Key != $key)] | length) == 0 and
-              ([.DeleteMarkers[]?] | length) == 0' \
-              "counter-versions-before-${clean_run}.json" >/dev/null
-            version_count="$(jq -r '[.Versions[]?] | length' \
-              "counter-versions-before-${clean_run}.json")"
-            latest_count="$(jq -r --arg key "${counter_key}" \
-              '[.Versions[]? | select(.Key == $key and .IsLatest == true)] | length' \
-              "counter-versions-before-${clean_run}.json")"
-            if [[ "${version_count}" -eq 0 ]]; then
-              test "${latest_count}" -eq 0
-              previous=0
-              write_condition=(--if-none-match '*')
-            else
-              test "${latest_count}" -eq 1
-              jq -e --arg key "${counter_key}" '
-                [.Versions[]? | select(.Key == $key and .IsLatest == true)][0] |
-                (.VersionId | type == "string" and length > 0 and . != "null") and
-                (.ETag | type == "string" and test("^\\\"[0-9a-f]{32}\\\"$")) and
-                (.Size | type == "number") and
-                ((.ChecksumAlgorithm // []) | index("SHA256") != null)' \
-                "counter-versions-before-${clean_run}.json" >/dev/null
-              latest_size="$(jq -er --arg key "${counter_key}" \
-                '[.Versions[]? | select(.Key == $key and .IsLatest == true)][0].Size' \
-                "counter-versions-before-${clean_run}.json")"
-              previous="$((latest_size - counter_size_base))"
-              test "${previous}" -ge 1
-            fi
-
-            if [[ "${previous}" -eq "${expected}" ]]; then
-              jq -e \
-                --arg key "${counter_key}" \
-                --arg etag "${expected_etag}" \
-                --argjson size "${expected_size}" '
-                [.Versions[]? | select(.Key == $key and .IsLatest == true)][0] |
-                .ETag == $etag and .Size == $size and
-                ((.ChecksumAlgorithm // []) | index("SHA256") != null)' \
-                "counter-versions-before-${clean_run}.json" >/dev/null
-              put_immutable_or_verify_identical \
-                "access-counter-clean-${clean_run}.json" "${reservation_key}" \
-                application/json candidate
-              return 0
-            fi
-            if [[ "${expected}" -ne "$((previous + 1))" ]]; then
-              echo "Held-out counter must advance exactly once: observed ${previous}, requested ${expected}." >&2
-              return 1
-            fi
-
-            PYTHONPATH=src uv run python scripts/validate_financial_snapshot.py verify \
-              --cost-preflight cost-preflight.json
-            if aws s3api put-object \
-              --bucket "${ARTIFACT_BUCKET}" \
-              --key "${counter_key}" \
-              --body "access-counter-clean-${clean_run}.json" \
-              --content-type application/json \
-              --content-md5 "${content_md5}" \
-              --server-side-encryption AES256 \
-              --checksum-algorithm SHA256 \
-              --checksum-sha256 "${checksum_sha256}" \
-              --metadata "counter-size-base=${counter_size_base},workflow-run-id=${GITHUB_RUN_ID},clean-run=${clean_run}" \
-              "${write_condition[@]}" > "counter-put-${clean_run}.json" \
-              2> "counter-put-${clean_run}.error"; then
-              jq -e \
-                --arg checksum "${checksum_sha256}" \
-                --arg etag "${expected_etag}" '
-                .ChecksumSHA256 == $checksum and
-                .ETag == $etag and
-                .ServerSideEncryption == "AES256" and
-                (.VersionId | type == "string" and length > 0 and . != "null")' \
-                "counter-put-${clean_run}.json" >/dev/null
-              put_version_id="$(jq -er '.VersionId' "counter-put-${clean_run}.json")"
-            else
-              cat "counter-put-${clean_run}.error" >&2
-              put_version_id=""
-            fi
-
-            aws s3api list-object-versions \
-              --bucket "${ARTIFACT_BUCKET}" \
-              --prefix "${counter_key}" \
-              > "counter-versions-after-${clean_run}.json"
+  finalize:
+    needs: clean-evaluation-2
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    environment: heldout-release
+    env:
+      ALLOW_HELDOUT_EVAL: ${{ inputs.allow_heldout_eval }}
+      AUTHORIZATION: ${{ inputs.authorization }}
+      CAMPAIGN_SPEND_TO_DATE_USD: ${{ secrets.AWS_CAMPAIGN_SPEND_TO_DATE_USD }}
+      REMAINING_APPLICABLE_CREDIT_USD: ${{ secrets.AWS_REMAINING_APPLICABLE_CREDIT_USD }}
+      FINANCIAL_SNAPSHOT_OBSERVED_AT: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_OBSERVED_AT }}
+      FINANCIAL_SNAPSHOT_RECEIPT_SHA256: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_RECEIPT_SHA256 }}
+      FINANCIAL_SNAPSHOT_HMAC_KEY: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_HMAC_KEY }}
+      FINANCIAL_RESERVATION_MAX_USD: ${{ secrets.AWS_FINANCIAL_RESERVATION_MAX_USD }}
+      FINANCIAL_RESERVATION_REMAINING_COMMITTED_USD: ${{ secrets.AWS_FINANCIAL_RESERVATION_REMAINING_COMMITTED_USD }}
+      FINANCIAL_RESERVATION_CPU_HOURS: ${{ secrets.AWS_FINANCIAL_RESERVATION_CPU_HOURS }}
+      FINANCIAL_RESERVATION_GPU_HOURS: ${{ secrets.AWS_FINANCIAL_RESERVATION_GPU_HOURS }}
+      FINANCIAL_CPU_HOURS_USED_TO_DATE: ${{ secrets.AWS_FINANCIAL_CPU_HOURS_USED_TO_DATE }}
+      FINANCIAL_GPU_HOURS_USED_TO_DATE: ${{ secrets.AWS_FINANCIAL_GPU_HOURS_USED_TO_DATE }}
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_WORKFLOW: release
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_INPUTS_JSON: ${{ toJSON(inputs) }}
+      FINANCIAL_SNAPSHOT_AUTHORIZATION_COMMIT_SHA: ${{ github.sha }}
+      FINANCIAL_SNAPSHOT_SOURCE: "aws_billing_and_cost_management_console"
+      FINANCIAL_SNAPSHOT_MAX_AGE_SECONDS: "86400"
+      TF_STATE_BUCKET: ${{ vars.AWS_TERRAFORM_STATE_BUCKET }}
+      ARTIFACT_BUCKET: ${{ vars.AWS_ARTIFACT_BUCKET }}
+      PROCESSING_ROLE_ARN: ${{ vars.AWS_SAGEMAKER_PROCESSING_ROLE_ARN }}
+      EVAL_REPOSITORY: ${{ vars.AWS_EVAL_ECR_REPOSITORY_URL }}
+      INSTANCE_TYPE: ml.m5.xlarge
+      PROJECT_NAME: product-search-ranking
+      ENVIRONMENT_NAME: prod
+      OWNER_ALIAS: ${{ vars.TF_OWNER_ALIAS }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+      - name: Validate and unpack the finalization inputs
+        env:
+          DISPATCH_CONFIG_JSON: ${{ inputs.dispatch_config }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${AUTHORIZATION}" = "RUN TWO CLEAN HELDOUT EVALUATIONS"
+          test "${ALLOW_HELDOUT_EVAL}" = "1"
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          uv sync --frozen --all-extras
+          python scripts/validate_workflow_dispatch.py --workflow release
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: heldout-release-preflight-${{ github.run_id }}
+          path: .
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: heldout-clean-1-${{ github.run_id }}
+          path: .
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: heldout-clean-2-${{ github.run_id }}
+          path: .
+      - name: Verify both phase handoffs before reading held-out outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum --check preflight-checksums.txt
+          sha256sum --check processing-phase-checksums-clean-1.txt
+          sha256sum --check processing-phase-checksums-clean-2.txt
+          jq -e \
+            --arg release "${GITHUB_SHA}" \
+            --arg source "${MODEL_SOURCE_GIT_SHA}" \
+            --arg dispatch "${DISPATCH_CONFIG_SHA256}" '
+            .release_git_sha == $release and
+            .model_source_git_sha == $source and
+            .dispatch_config_sha256 == $dispatch and
+            (.baseline_config_hash | test("^sha256:[0-9a-f]{64}$")) and
+            (.split_manifest_hash | test("^sha256:[0-9a-f]{64}$"))' \
+            preflight-handoff.json >/dev/null
+          for clean_run in 1 2; do
+            counter="$((TEST_ACCESS_COUNTER + clean_run - 1))"
             jq -e \
-              --arg key "${counter_key}" \
-              --arg etag "${expected_etag}" \
-              --arg version "${put_version_id}" \
-              --argjson size "${expected_size}" '
-              .IsTruncated != true and
-              ([.Versions[]? | select(.Key != $key)] | length) == 0 and
-              ([.DeleteMarkers[]?] | length) == 0 and
-              ([.Versions[]? | select(.Key == $key and .IsLatest == true)] | length) == 1 and
-              ([.Versions[]? | select(.Key == $key and .IsLatest == true)][0] |
-                (.VersionId | type == "string" and length > 0 and . != "null") and
-                .ETag == $etag and .Size == $size and
-                ((.ChecksumAlgorithm // []) | index("SHA256") != null) and
-                ($version == "" or .VersionId == $version))' \
-              "counter-versions-after-${clean_run}.json" >/dev/null || {
-                echo "Held-out counter publication could not be proven from version metadata." >&2
-                return 1
-              }
-            put_immutable_or_verify_identical \
-              "access-counter-clean-${clean_run}.json" "${reservation_key}" \
-              application/json candidate
-          }
-
-          submit_and_wait() {
-            local clean_run="$1"
-            local counter="$2"
-            local job_name="${base_name}-clean-${clean_run}"
-            local output_uri="s3://${ARTIFACT_BUCKET}/runs/${job_name}/reports/"
-            local image_digest="${EVALUATION_IMAGE_URI##*@}"
-            jq -n \
-              --arg job "${job_name}" \
-              --arg role "${PROCESSING_ROLE_ARN}" \
-              --arg image "${EVALUATION_IMAGE_URI}" \
-              --arg image_digest "${image_digest}" \
-              --arg instance "${INSTANCE_TYPE}" \
-              --arg config "${config_prefix}" \
-              --arg candidate_config "${candidate_config_prefix}" \
-              --arg baseline "${baseline_prefix}" \
-              --arg data "${HELDOUT_DATA_S3_URI}" \
-              --arg model "${CANDIDATE_ARTIFACT_S3_URI}" \
-              --arg output "${output_uri}" \
-              --arg candidate_run "${CANDIDATE_RUN_ID}" \
-              --arg candidate_model "${CANDIDATE_MODEL_ID}" \
-              --arg candidate_hash "${CANDIDATE_CHECKPOINT_SHA256}" \
-              --arg candidate_config_hash "${CANDIDATE_CONFIG_SHA256}" \
-              --arg config_hash "${FROZEN_CONFIG_SHA256}" \
-              --arg dataset_hash "${DATASET_MANIFEST_HASH}" \
-              --arg baselines "${BASELINE_IDS}" \
-              --arg strongest_baseline "${STRONGEST_BASELINE_ID}" \
-              --arg baseline_config_hash "${BASELINE_CONFIG_HASH}" \
-              --arg counter "${counter}" \
-              --arg clean_run "${clean_run}" \
-              --arg commit "${GITHUB_SHA}" \
-              --arg region "${AWS_REGION}" \
-              --arg project "${PROJECT_NAME}" \
-              --arg environment "${ENVIRONMENT_NAME}" \
-              --arg owner "${OWNER_ALIAS}" \
-              --argjson timeout "${MAX_TIMEOUT_SECONDS}" \
-              '{
-                ProcessingJobName: $job,
-                RoleArn: $role,
-                AppSpecification: {
-                  ImageUri: $image,
-                  ContainerEntrypoint: ["python", "/app/scripts/container_eval.py"],
-                  ContainerArguments: [
-                    "--config", "/opt/ml/processing/input/config/release.yaml",
-                    "--heldout",
-                    "--candidate-bundle", "/opt/ml/processing/input/candidate",
-                    "--candidate-config", "/opt/ml/processing/input/candidate-config/frozen-candidate.yaml",
-                    "--heldout-input", "/opt/ml/processing/input/heldout",
-                    "--baseline-summary", "/opt/ml/processing/input/baseline",
-                    "--strongest-baseline-id", $strongest_baseline,
-                    "--test-access-counter", $counter,
-                    "--candidate-checkpoint-sha256", $candidate_hash,
-                    "--candidate-config-sha256", $candidate_config_hash,
-                    "--dataset-processed-sha256", $dataset_hash
-                  ]
-                },
-                ProcessingResources: {ClusterConfig: {InstanceCount: 1, InstanceType: $instance, VolumeSizeInGB: 30}},
-                StoppingCondition: {MaxRuntimeInSeconds: $timeout},
-                ProcessingInputs: [
-                  {InputName: "config", S3Input: {S3Uri: $config, LocalPath: "/opt/ml/processing/input/config", S3DataType: "S3Prefix", S3InputMode: "File"}},
-                  {InputName: "candidate-config", S3Input: {S3Uri: $candidate_config, LocalPath: "/opt/ml/processing/input/candidate-config", S3DataType: "S3Prefix", S3InputMode: "File"}},
-                  {InputName: "baseline", S3Input: {S3Uri: $baseline, LocalPath: "/opt/ml/processing/input/baseline", S3DataType: "S3Prefix", S3InputMode: "File"}},
-                  {InputName: "heldout", S3Input: {S3Uri: $data, LocalPath: "/opt/ml/processing/input/heldout", S3DataType: "S3Prefix", S3InputMode: "File"}},
-                  {InputName: "candidate", S3Input: {S3Uri: $model, LocalPath: "/opt/ml/processing/input/candidate", S3DataType: "S3Prefix", S3InputMode: "File"}}
-                ],
-                ProcessingOutputConfig: {Outputs: [{OutputName: "reports", S3Output: {S3Uri: $output, LocalPath: "/opt/ml/processing/output", S3UploadMode: "EndOfJob"}}]},
-                Environment: {
-                  ALLOW_HELDOUT_EVAL: "1",
-                  CANDIDATE_RUN_ID: $candidate_run,
-                  CANDIDATE_MODEL_ID: $candidate_model,
-                  CANDIDATE_CHECKPOINT_SHA256: $candidate_hash,
-                  CANDIDATE_CONFIG_SHA256: $candidate_config_hash,
-                  FROZEN_CONFIG_SHA256: $config_hash,
-                  DATASET_MANIFEST_HASH: $dataset_hash,
-                  BASELINE_IDS: $baselines,
-                  STRONGEST_BASELINE_ID: $strongest_baseline,
-                  VALIDATION_BASELINE_CONFIG_HASH: $baseline_config_hash,
-                  TEST_ACCESS_COUNTER: $counter,
-                  CLEAN_RUN_ORDINAL: $clean_run,
-                  CODE_COMMIT: $commit,
-                  SEARCH_RANK_EVALUATION_IMAGE_DIGEST: $image_digest,
-                  SEARCH_RANK_HARDWARE_CLASS: $instance,
-                  SEARCH_RANK_GIT_SHA: $commit,
-                  AWS_REGION: $region
-                },
-                Tags: [
-                  {Key: "Project", Value: $project},
-                  {Key: "Environment", Value: $environment},
-                  {Key: "Owner", Value: $owner},
-                  {Key: "RunId", Value: $job},
-                  {Key: "CleanRun", Value: $clean_run},
-                  {Key: "HeldoutAccessCounter", Value: $counter}
-                ]
-              }' > "processing-job-clean-${clean_run}.json"
-            if aws sagemaker describe-processing-job \
-              --processing-job-name "${job_name}" \
-              > "existing-processing-job-clean-${clean_run}.json" \
-              2> "existing-processing-job-clean-${clean_run}.error"; then
-              jq -e --slurpfile expected "processing-job-clean-${clean_run}.json" '
-                .ProcessingJobName == $expected[0].ProcessingJobName and
-                .RoleArn == $expected[0].RoleArn and
-                .AppSpecification == $expected[0].AppSpecification and
-                .ProcessingResources == $expected[0].ProcessingResources and
-                .StoppingCondition == $expected[0].StoppingCondition and
-                .ProcessingInputs == $expected[0].ProcessingInputs and
-                .ProcessingOutputConfig == $expected[0].ProcessingOutputConfig and
-                .Environment == $expected[0].Environment' \
-                "existing-processing-job-clean-${clean_run}.json" >/dev/null
-              local existing_arn existing_status
-              existing_arn="$(jq -er '.ProcessingJobArn' \
-                "existing-processing-job-clean-${clean_run}.json")"
-              aws sagemaker list-tags --resource-arn "${existing_arn}" \
-                > "existing-processing-tags-clean-${clean_run}.json"
-              jq -e --slurpfile expected "processing-job-clean-${clean_run}.json" '
-                (.Tags | sort_by(.Key, .Value)) ==
-                ($expected[0].Tags | sort_by(.Key, .Value))' \
-                "existing-processing-tags-clean-${clean_run}.json" >/dev/null
-              existing_status="$(jq -er '.ProcessingJobStatus' \
-                "existing-processing-job-clean-${clean_run}.json")"
-              case "${existing_status}" in
-                InProgress|Stopping|Completed) ;;
-                Failed|Stopped)
-                  echo "Existing held-out job ${clean_run} is terminal and unsuccessful: ${existing_status}" >&2
-                  return 1
-                  ;;
-                *) echo "Unexpected Processing status: ${existing_status}" >&2; return 1 ;;
-              esac
-              PYTHONPATH=src uv run python scripts/validate_financial_snapshot.py verify \
-                --cost-preflight cost-preflight.json
-              echo "Reusing exact existing held-out Processing job ${job_name}."
-            elif grep -Eq 'ValidationException.*(Requested resource not found|Could not find)' \
-              "existing-processing-job-clean-${clean_run}.error"; then
-              PYTHONPATH=src uv run python scripts/validate_financial_snapshot.py verify \
-                --cost-preflight cost-preflight.json
-              aws sagemaker create-processing-job \
-                --cli-input-json "file://processing-job-clean-${clean_run}.json" >/dev/null
-            else
-              cat "existing-processing-job-clean-${clean_run}.error" >&2
-              return 1
-            fi
-            printf '%s' "${job_name}" > "job-name-clean-${clean_run}.txt"
-            printf '%s' "${output_uri}" > "output-uri-clean-${clean_run}.txt"
-            set +e
-            aws sagemaker wait processing-job-completed-or-stopped --processing-job-name "${job_name}"
-            local waiter_status=$?
-            set -e
-            aws sagemaker describe-processing-job --processing-job-name "${job_name}" > "processing-job-description-clean-${clean_run}-private.json"
-            jq --arg region "${AWS_REGION}" --argjson clean_run "${clean_run}" '{
-              schema_version: "1.0.0",
-              artifact_type: "heldout_processing_job_evidence",
-              processing_job_name: .ProcessingJobName,
-              status: .ProcessingJobStatus,
-              instance_type: .ProcessingResources.ClusterConfig.InstanceType,
-              instance_count: .ProcessingResources.ClusterConfig.InstanceCount,
-              creation_time: .CreationTime,
-              end_time: .ProcessingEndTime,
-              image_digest: (.AppSpecification.ImageUri | split("@") | .[-1]),
-              region: $region,
-              clean_run: $clean_run,
-              exit_message_present: (.ExitMessage != null)
-            }' "processing-job-description-clean-${clean_run}-private.json" > "processing-job-evidence-clean-${clean_run}.json"
-            local status
-            status="$(jq -r '.status' "processing-job-evidence-clean-${clean_run}.json")"
-            if [[ "${waiter_status}" -ne 0 || "${status}" != "Completed" ]]; then
-              echo "Clean held-out Processing job ${clean_run} did not complete; previous promotion remains unchanged." >&2
-              return 1
-            fi
-          }
-
-          first_counter="${TEST_ACCESS_COUNTER}"
-          second_counter="$((TEST_ACCESS_COUNTER + 1))"
-          reserve_counter "${first_counter}" 1
-          submit_and_wait 1 "${first_counter}"
-          reserve_counter "${second_counter}" 2
-          submit_and_wait 2 "${second_counter}"
+              --argjson clean_run "${clean_run}" \
+              --argjson counter "${counter}" \
+              --arg release "${GITHUB_SHA}" \
+              --arg source "${MODEL_SOURCE_GIT_SHA}" '
+              .artifact_type == "heldout_processing_phase" and
+              .clean_run == $clean_run and .test_access_counter == $counter and
+              .release_git_sha == $release and .model_source_git_sha == $source and
+              (.request_sha256 | test("^sha256:[0-9a-f]{64}$"))' \
+              "processing-phase-clean-${clean_run}.json" >/dev/null
+          done
+          printf 'BASELINE_CONFIG_HASH=%s\nSPLIT_MANIFEST_HASH=%s\n' \
+            "$(jq -er '.baseline_config_hash' preflight-handoff.json)" \
+            "$(jq -er '.split_manifest_hash' preflight-handoff.json)" >>"${GITHUB_ENV}"
+      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-heldout-final-${{ github.run_id }}
+          mask-aws-account-id: true
+      - name: Atomically reserve the signed campaign capacity
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPATH=src uv run python scripts/reserve_financial_capacity.py reserve \
+            --bucket "${TF_STATE_BUCKET}" \
+            --output financial-capacity-reservation-final.json
+      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-heldout-bind-${{ github.run_id }}
+          mask-aws-account-id: true
       - name: Verify both clean outputs, bind them, and apply the promotion decision
         id: release_gate
         shell: bash
@@ -1255,6 +1159,12 @@ jobs:
           if [[ "${decision}" == "retain_baseline" ]]; then
             echo "Promotion gate retained the frozen baseline; the negative evaluation will be published without activating the candidate." >> "${GITHUB_STEP_SUMMARY}"
           fi
+      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-heldout-final-publish-${{ github.run_id }}
+          mask-aws-account-id: true
       - name: Build and publish the checksummed held-out outcome bundle
         env:
           REPORT_ID: ${{ steps.release_gate.outputs.report_id }}
