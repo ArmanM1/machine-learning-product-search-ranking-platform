@@ -183,8 +183,71 @@ export interface OverviewData {
   primary_metric_interval: ConfidenceInterval | null
   p95_inference_latency_ms: number | null
   measured_candidate_count: number
+  operational_evidence: OperationalEvidence
   default_query: CuratedQuery
 }
+
+export interface OperationalEvidencePending {
+  schema_version: '1.0.0'
+  status: 'pending'
+  release_id: string
+  model_id: string
+  note: 'Deployment evidence is publishing.'
+}
+
+export interface OperationalEvidenceUnavailable {
+  schema_version: '1.0.0'
+  status: 'unavailable'
+  release_id: 'unavailable'
+  model_id: string
+  note: 'Deployment evidence is temporarily unavailable.'
+}
+
+export interface LatencyPercentiles {
+  p50: number
+  p95: number
+  p99: number
+}
+
+export interface OperationalEvidenceVerified {
+  schema_version: '1.0.0'
+  status: 'verified'
+  release_id: string
+  model_id: string
+  code_commit: string
+  serving_image_digest: string
+  warm: {
+    scope: 'deployed_api_gateway_lambda_gate'
+    candidate_count: number
+    warmup_request_count: number
+    measured_request_count: number
+    successful_request_count: number
+    failure_count: number
+    concurrency: number
+    end_to_end_latency_ms: LatencyPercentiles
+    model_latency_ms: LatencyPercentiles
+    lambda_memory_mb: number
+    architecture: 'x86_64' | 'arm64'
+    region: 'us-east-1'
+    reserved_concurrency: number
+    provisioned_concurrency: number
+    controlled_cold_sample_included: false
+  }
+  controlled_cold_start: {
+    measurement_class: 'controlled_on_demand_lambda_cold_start'
+    sample_count: 1
+    candidate_count: number
+    end_to_end_latency_ms: number
+    init_duration_ms: number
+    model_load_duration_ms: number
+    excluded_from_warm_latency: true
+  }
+}
+
+export type OperationalEvidence =
+  | OperationalEvidencePending
+  | OperationalEvidenceUnavailable
+  | OperationalEvidenceVerified
 
 export interface SliceResult {
   slice_id: string

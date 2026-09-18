@@ -298,6 +298,11 @@
   .metric-label { margin-top: 1.5rem; color: var(--muted); font-family: var(--sans); font-size: 0.79rem; font-weight: 650; letter-spacing: 0; }
   .metric-value { margin-top: 0.75rem; color: inherit; font-family: var(--display); font-size: clamp(2.8rem, 5vw, 4.8rem); line-height: 1; letter-spacing: -0.045em; }
   .metric-note { margin-top: 1.4rem; font-size: 0.76rem; }
+  .operations-detail { border-bottom: 1px solid var(--rule-dark); }
+  .operations-detail summary { padding: 1rem 0; color: var(--ink); cursor: pointer; font-size: 0.76rem; font-weight: 700; }
+  .operations-detail summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+  .operations-detail > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2rem; padding: 0 0 1.4rem; }
+  .operations-detail p { max-width: 68ch; font-size: 0.76rem; }
 
   .table-scroll {
     width: 100%;
@@ -637,6 +642,7 @@
     .metric-grid { grid-template-columns: 1fr; }
     .metric-card { min-height: 210px; }
     .metric-card + .metric-card { border-top: 1px solid var(--rule); border-left: 0; }
+    .operations-detail > div { grid-template-columns: 1fr; gap: 0.7rem; }
     .method-strip > header { grid-template-columns: 1fr; }
     .method-strip ol { grid-template-columns: 1fr 1fr; }
     .method-strip li:nth-child(3) { border-left: 0; }
