@@ -160,7 +160,7 @@ export function ExperimentPage() {
         <div>
           <p className="eyebrow">Clean-checkout entry point</p>
           <h2 id="reproduction-title">
-            {run.evidence_mode === 'fixture' ? 'Published with verified evidence.' : 'Trace the selected run.'}
+            {run.evidence_mode === 'fixture' ? 'No published run yet.' : 'Trace the selected run.'}
           </h2>
           <p>{run.evidence_mode === 'fixture'
             ? 'A real release publishes its clean-checkout invocation reference here; fixture mode does not invent one.'
