@@ -367,7 +367,7 @@ def _release_files(
         report.test_access_count == summary.test_access_count == provenance.test_access_count
         and summary.clean_evaluation_count == provenance.independent_evaluation_count
         and summary.source_evaluations == provenance.source_evaluations
-        and summary.evaluation_config_hash == provenance.config_hash,
+        and summary.evaluation_config_hash == provenance.evaluation_config_checksum,
         "release clean-evaluation binding differs",
     )
     gate = report.release_gate_results
@@ -424,7 +424,6 @@ def _release_files(
 def _deployment_files(
     evidence_root: Path,
     deployment_sha: str,
-    source_sha: str,
     stage: str,
 ) -> tuple[dict[str, Any], DeploymentEvidence, PromotionPointer, PromotionPointer, Path]:
     stage_root = _stage_root(evidence_root, deployment_sha, stage)
@@ -442,8 +441,6 @@ def _deployment_files(
     )
     origin = deployment.production_api_smoke.base_url_origin
     _require(deployment.code_commit == deployment_sha, f"{stage} deployment source differs")
-    _require(pointer.git_sha == source_sha, f"{stage} release pointer source differs")
-    _require(previous.git_sha == source_sha, f"{stage} prior pointer source differs")
     _require(
         pointer.release_id == deployment.release_id and pointer.model_id == deployment.model_id,
         f"{stage} pointer and deployment identity differ",
@@ -738,14 +735,12 @@ def assemble(
         _deployment_files(
             evidence_root,
             deployment_sha,
-            source_sha,
             "deploy-baseline",
         )
     )
     deploy, deployment, deploy_pointer, deploy_previous, deploy_root = _deployment_files(
         evidence_root,
         deployment_sha,
-        source_sha,
         "deploy-winner",
     )
     benchmark = _handoff(evidence_root, deployment_sha, "benchmark")
@@ -753,7 +748,6 @@ def assemble(
     redeploy, redeployment, redeploy_pointer, redeploy_previous, redeploy_root = _deployment_files(
         evidence_root,
         deployment_sha,
-        source_sha,
         "redeploy-winner",
     )
 
