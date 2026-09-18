@@ -564,13 +564,11 @@ def bootstrap_baseline_release(
         if output_dir.exists():
             raise FileExistsError(f"immutable baseline release already exists: {output_dir}")
 
-        summary = _latest_summary(baseline_summary)
-        if summary.get("command") != "baseline-run" or summary.get("status") != "succeeded":
+        summary = CommandSummary.model_validate(_latest_summary(baseline_summary))
+        if summary.command != "baseline-run" or summary.status != "succeeded":
             raise ValueError("baseline release requires a successful baseline-run summary")
-        result = summary.get("result")
-        hashes = summary.get("artifact_hashes")
-        if not isinstance(result, dict) or not isinstance(hashes, dict):
-            raise ValueError("baseline command summary is missing result or artifact hashes")
+        result = summary.result
+        hashes = summary.artifact_hashes
         artifact_path = Path(str(result.get("baseline_summary", "")))
         if not artifact_path.is_file():
             artifact_path = baseline_summary.resolve().parent / "baseline-summary.json"
@@ -639,8 +637,8 @@ def bootstrap_baseline_release(
             pretrained_checksum = f"sha256:{sha256_directory(pretrained_dir)}"
             pretrained_relative = "models/pretrained"
 
-        evidence_id = f"validation-{summary['run_id']}"
-        promoted_at = datetime.now(UTC)
+        evidence_id = f"validation-{summary.run_id}"
+        promoted_at = summary.ended_at
         public_models: list[PublicModelMetricRow] = []
         release_models: list[dict[str, Any]] = []
         model_config = _read_yaml(validated_config.cross_encoder.model_config_path)
@@ -708,7 +706,7 @@ def bootstrap_baseline_release(
 
         selected_metric = float(metrics[selected_id]["graded_ndcg@10"])
         run_summary = PublicValidationRunSummary(
-            run_id=str(summary["run_id"]),
+            run_id=summary.run_id,
             selected_model_id=selected_id,
             config_hash=config_hash,
             dataset_manifest_hash=manifest.processed_checksum,
@@ -731,7 +729,7 @@ def bootstrap_baseline_release(
             hardware_class=hardware_class,
             region=region,
             metrics=PublicValidationRunMetrics(selected_model_graded_ndcg_at_10=selected_metric),
-            duration_seconds=float(summary.get("duration_seconds", 0.0)),
+            duration_seconds=summary.duration_seconds,
             actual_cost_usd=None,
             cost_evidence="No cloud billing record is attached to validation-only evidence.",
             validation_only_notice=(
@@ -774,7 +772,7 @@ def bootstrap_baseline_release(
             "LICENSE": f"sha256:{sha256_file(staging / 'LICENSE')}",
             "NOTICE": f"sha256:{sha256_file(staging / 'NOTICE')}",
         }
-        release_id = f"baseline-{summary['run_id']}"
+        release_id = f"baseline-{summary.run_id}"
         release_manifest = ReleaseManifest.model_validate(
             {
                 "schema_version": "1.0.0",
