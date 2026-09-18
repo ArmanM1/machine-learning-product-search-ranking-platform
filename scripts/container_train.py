@@ -9,6 +9,29 @@ import subprocess
 import sys
 from pathlib import Path
 
+FAILURE_DIAGNOSTIC_PATH = Path("/opt/ml/output/failure")
+
+
+def _write_failure_diagnostic(
+    *,
+    phase: str,
+    error_type: str | None = None,
+    exit_code: int | None = None,
+) -> None:
+    """Best-effort SageMaker failure detail without paths, inputs, or cloud identifiers."""
+
+    fields = [f"phase={phase}"]
+    if error_type is not None:
+        fields.append(f"error_type={error_type}")
+    if exit_code is not None:
+        fields.append(f"exit_code={exit_code}")
+    try:
+        FAILURE_DIAGNOSTIC_PATH.parent.mkdir(parents=True, exist_ok=True)
+        FAILURE_DIAGNOSTIC_PATH.write_text("; ".join(fields) + "\n", encoding="utf-8")
+    except OSError:
+        # The original failure must win even if SageMaker's diagnostic mount is unavailable.
+        return
+
 
 def _discover_file(
     explicit: str | None,
@@ -95,11 +118,27 @@ def build_command(argv: list[str]) -> tuple[list[str], Path]:
 def main(argv: list[str] | None = None) -> int:
     try:
         command, model_dir = build_command(sys.argv[1:] if argv is None else argv)
-        completed = subprocess.run(command, cwd=model_dir, check=False)
-        return completed.returncode
+    except SystemExit as error:
+        exit_code = error.code if isinstance(error.code, int) else 2
+        if exit_code != 0:
+            _write_failure_diagnostic(phase="argument_validation", exit_code=exit_code)
+        return exit_code
     except (OSError, ValueError) as error:
+        _write_failure_diagnostic(phase="preflight", error_type=type(error).__name__)
         print(f"training container preflight failed: {error}", file=sys.stderr)
         return 2
+    try:
+        completed = subprocess.run(command, cwd=model_dir, check=False)
+    except OSError as error:
+        _write_failure_diagnostic(phase="subprocess_start", error_type=type(error).__name__)
+        print(f"training container subprocess failed to start: {error}", file=sys.stderr)
+        return 2
+    if completed.returncode != 0:
+        _write_failure_diagnostic(
+            phase="training_subprocess",
+            exit_code=completed.returncode,
+        )
+    return completed.returncode
 
 
 if __name__ == "__main__":

@@ -58,6 +58,12 @@ This is the exact applied resource inventory represented by Terraform. Runtime s
 
 Terraform never creates a SageMaker endpoint, notebook, schedule, NAT Gateway, load balancer, RDS database, or OpenSearch domain. SageMaker jobs are created only by the manual run workflows.
 
+The train and evaluation images run as root inside their isolated, short-lived SageMaker batch
+containers so the service-owned `/opt/ml` input and output mounts are writable. Cloud access is still
+bounded by their separate least-privilege execution roles. The long-lived public serving image remains
+non-root. Training entry-point failures also leave a redacted, best-effort diagnostic at SageMaker's
+standard `/opt/ml/output/failure` path so a missing log stream does not erase the failure phase.
+
 ## Local review before approval
 
 Copy examples; never edit or commit the example files with private values:

@@ -34,12 +34,18 @@ All repository workflows and Terraform backends use HTTPS/TLS for S3, and every 
 ### SageMaker training role
 
 Reads a run-scoped staging prefix containing only `manifest.json`, `artifact-checksums.json`, `train.parquet`, and `validation.parquet`, plus base-model inputs and its versioned configuration. It has no `data/processed/*` or `test.parquet` permission. Writes only run checkpoint and metric prefixes. Pulls only the training repository.
+The short-lived training container runs as root because SageMaker owns and mounts its `/opt/ml`
+input, model, output, and checkpoint paths at runtime. Its effective cloud authority remains limited by
+the training execution role, and a failed entry point writes only a bounded phase, exception class, or
+exit code to SageMaker's `/opt/ml/output/failure` diagnostic file.
 
 The serving process verifies every file declared by the immutable release manifest before readiness can become true. Missing files, symbolic links, path escapes, or byte-checksum differences—including changes to curated queries or public evidence—keep `/readyz` unavailable. Its embedded web build is separately attested as API mode so the public API origin cannot expose fixture results.
 
 ### SageMaker processing role
 
 Reads processed data, run artifacts, and promoted inputs. Writes only run-scoped reports; the held-out GitHub workflow separately validates and publishes the sanitized release evidence. Pulls only the evaluation repository.
+The short-lived evaluation container likewise runs as root only to use SageMaker-mounted `/opt/ml`
+processing paths; it does not broaden the processing role or the held-out access contract.
 
 ### Lambda role
 
@@ -113,6 +119,6 @@ The financial observation time, spend, credit, reservation maximum/commitment, C
 - [x] The applied Lambda role contains no raw-data access; the public function is still disabled pending release.
 - [x] Applied configuration fixes reserved concurrency at two and creates no provisioned-concurrency resource.
 - [ ] The private financial ledger denies unconditional writes, a stale ETag loses, and public serving expires within 24 hours; neither control is represented as a hard USD 0 guarantee.
-- [x] Container source contracts require a non-root user and model loading uses `trust_remote_code=False`; deployed-image inspection remains part of cloud evidence.
+- [x] The public serving container requires a non-root user; isolated SageMaker batch images use root for platform-owned `/opt/ml` mounts, retain least-privilege execution roles, and load models with `trust_remote_code=False`. Deployed-image inspection remains part of cloud evidence.
 - [x] Pull-request dependency, container, secret, and Terraform scans have no unreviewed blocking findings.
 - [x] Public errors and structured allowlist logs pass local redaction/field tests; CloudWatch evidence remains pending.

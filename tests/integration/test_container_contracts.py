@@ -13,22 +13,24 @@ DOCKERFILES = ("Dockerfile.train", "Dockerfile.eval", "Dockerfile.serve")
 
 
 @pytest.mark.parametrize("filename", DOCKERFILES)
-def test_container_contract_is_digest_pinned_and_non_root(filename: str) -> None:
+def test_container_contract_is_digest_pinned_and_uses_scoped_runtime_user(filename: str) -> None:
     text = (ROOT / filename).read_text(encoding="utf-8")
     from_lines = [line for line in text.splitlines() if line.startswith("FROM ")]
     assert from_lines
     assert all("@sha256:" in line for line in from_lines)
     assert all("latest" not in line.casefold() for line in from_lines)
-    assert "USER ${APP_UID}:${APP_GID}" in text
-    assert "USER root" not in text
     assert "LICENSE NOTICE" in text
     if filename == "Dockerfile.serve":
+        assert "USER ${APP_UID}:${APP_GID}" in text
+        assert "USER root" not in text
         assert 'ENTRYPOINT ["/opt/search-rank-venv/bin/python", "-m", "awslambdaric"]' in text
         assert 'CMD ["search_rank.serving.app.handler"]' in text
         assert "ARG VITE_DATA_MODE=api" in text
         assert 'test "${VITE_DATA_MODE}" = "api"' in text
         assert 'c.data_mode!=="api"' in text
     else:
+        assert "USER root" in text
+        assert "USER ${APP_UID}:${APP_GID}" not in text
         assert "ENTRYPOINT" in text
     if filename == "Dockerfile.train":
         assert 'ENTRYPOINT ["python", "/app/scripts/container_train.py"]' in text
@@ -42,7 +44,8 @@ def test_ci_executes_installed_training_cli_and_attests_api_mode() -> None:
 
     assert '--entrypoint python "${image}" -m search_rank.cli --help' in pull_request
     assert 'os.environ["CUBLAS_WORKSPACE_CONFIG"] == ":4096:8"' in pull_request
-    assert '"${image}" train --help' not in pull_request
+    assert '"${image}" train --help' in pull_request
+    assert pull_request.count("assert os.geteuid() == 0") == 2
     for name in (
         "VITE_DATA_MODE",
         "VITE_API_BASE_URL",
@@ -76,11 +79,8 @@ def test_container_builds_and_executes_documented_probe(filename: str) -> None:
             "docker",
             "run",
             "--rm",
-            "--entrypoint",
-            "python",
             tag,
-            "-m",
-            "search_rank.cli",
+            "train",
             "--help",
         ]
     elif kind == "eval":

@@ -118,12 +118,15 @@ jobs:
           image="local/${IMAGE_KIND}:${GITHUB_SHA}"
           case "${IMAGE_KIND}" in
             train)
+              docker run --rm "${image}" train --help
               docker run --rm --entrypoint python "${image}" -m search_rank.cli --help
               docker run --rm --entrypoint python "${image}" -c \
-                'import os; assert os.environ["CUBLAS_WORKSPACE_CONFIG"] == ":4096:8"'
+                'import os; assert os.geteuid() == 0; assert os.environ["CUBLAS_WORKSPACE_CONFIG"] == ":4096:8"'
               ;;
             eval)
               docker run --rm "${image}" --help
+              docker run --rm --entrypoint python "${image}" -c \
+                'import os; assert os.geteuid() == 0'
               ;;
             serve)
               docker run --rm --entrypoint python "${image}" -c \
