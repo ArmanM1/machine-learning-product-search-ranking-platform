@@ -17,7 +17,10 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-RUN groupadd --gid "${APP_GID}" app \
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends --only-upgrade libpcre2-8-0 \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid "${APP_GID}" app \
     && useradd --uid "${APP_UID}" --gid "${APP_GID}" --create-home --shell /usr/sbin/nologin app \
     && mkdir -p /opt/ml/processing/input /opt/ml/processing/output /opt/ml/cache/huggingface \
     && chown -R app:app /app /opt/ml
