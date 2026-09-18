@@ -20,11 +20,18 @@ function routeName(pathname: string) {
   return 'Page not found'
 }
 
+export function evidenceStatusPresentation(fixture: boolean) {
+  return fixture
+    ? { className: 'fixture', label: 'Fixture data' }
+    : { className: 'published', label: 'Published evidence' }
+}
+
 export function AppShell() {
   const location = useLocation()
   const previousPath = useRef(location.pathname)
   const pageName = routeName(location.pathname)
   const evidenceActive = isEvidencePath(location.pathname)
+  const evidenceStatus = evidenceStatusPresentation(isFixtureMode)
 
   useEffect(() => {
     document.title = `${pageName} | Rerank`
@@ -82,9 +89,9 @@ export function AppShell() {
             </Link>
           </nav>
 
-          <div className={`mode-badge ${isFixtureMode ? 'fixture' : 'verified'}`}>
+          <div className={`mode-badge ${evidenceStatus.className}`}>
             <span aria-hidden="true" />
-            {isFixtureMode ? 'Fixture data' : 'Verified release'}
+            {evidenceStatus.label}
           </div>
         </div>
 
