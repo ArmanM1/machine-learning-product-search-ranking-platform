@@ -484,6 +484,23 @@ def test_serving_git_sha_is_bound_through_terraform_and_health_smoke() -> None:
     assert deploy.count('.status == "ok" and .service_version == $version') >= 3
 
 
+def test_serving_throttle_supports_product_flows_but_preserves_compute_bound() -> None:
+    serving = (ROOT / "infra/terraform/modules/platform/serving.tf").read_text(encoding="utf-8")
+    deploy = (WORKFLOWS / "deploy.yml").read_text(encoding="utf-8")
+    benchmark = (WORKFLOWS / "benchmark-serving.yml").read_text(encoding="utf-8")
+    variables = (ROOT / "infra/terraform/modules/platform/variables.tf").read_text(
+        encoding="utf-8"
+    )
+
+    assert serving.count("throttling_burst_limit = 40") == 2
+    assert serving.count("throttling_rate_limit  = 20") == 2
+    assert "sleep 0.06" in deploy
+    assert "TARGET_API_REQUEST_RATE = 18.0" in benchmark
+    assert "for offset in range(0, count, offered_concurrency)" in benchmark
+    assert '"wave_pacing_enabled": True' in benchmark
+    assert "var.lambda_reserved_concurrency == 2" in variables
+
+
 def test_deploy_retry_forces_a_fresh_identity_bound_lambda_version() -> None:
     deploy = (WORKFLOWS / "deploy.yml").read_text(encoding="utf-8")
     serving = (ROOT / "infra/terraform/modules/platform/serving.tf").read_text(encoding="utf-8")
