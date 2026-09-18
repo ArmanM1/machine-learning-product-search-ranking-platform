@@ -473,9 +473,12 @@ def test_deploy_browser_checks_use_real_mode_status_and_candidate_canary() -> No
     assert deploy.count("verified: 'Verified release'") >= 2
     assert deploy.count("validation_only: 'Validation-only evidence'") >= 2
     assert "printf 'RELEASE_EVIDENCE_MODE=%s\\n'" in deploy
-    assert deploy.count(
-        "await page.locator('.release-state').filter({ hasText: expectedStatus }).waitFor()"
-    ) == 3
+    assert (
+        deploy.count(
+            "await page.locator('.release-state').filter({ hasText: expectedStatus }).waitFor()"
+        )
+        == 3
+    )
     assert deploy.count("name: 'Rerank workspace home', exact: true") == 3
     assert deploy.count("/Compare product rankings|Inspect the selected baseline/i") == 3
     assert "Compare a query" not in deploy
