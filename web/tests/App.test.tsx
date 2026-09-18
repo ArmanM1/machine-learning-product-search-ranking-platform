@@ -1,8 +1,16 @@
 import { render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { App } from '../src/App'
+import { evidenceStatusPresentation } from '../src/components/AppShell'
 
 describe('application shell and ranking workspace', () => {
+  it.each([
+    [true, 'fixture', 'Fixture data'],
+    [false, 'published', 'Published evidence'],
+  ] as const)('labels fixture=%s without overstating the evidence', (fixture, className, label) => {
+    expect(evidenceStatusPresentation(fixture)).toEqual({ className, label })
+  })
+
   it('opens on the ranking action and labels fixture evidence', async () => {
     render(<MemoryRouter initialEntries={['/']}><App /></MemoryRouter>)
 
