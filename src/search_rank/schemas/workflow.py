@@ -569,7 +569,7 @@ class BenchmarkProtocol(ContractModel):
     candidate_counts: tuple[Literal[10], Literal[20], Literal[40]]
     offered_concurrency_levels: tuple[Literal[1], Literal[4], Literal[8]]
     api_gateway_rate_limit_rps: Literal[20]
-    target_request_rate_rps: Literal[18.0]
+    target_request_rate_rps: Annotated[float, Field(json_schema_extra={"const": 18.0})]
     wave_pacing_enabled: Literal[True]
     warmup_requests_per_condition: Literal[10]
     measured_requests_per_condition: Literal[200]
@@ -583,6 +583,12 @@ class BenchmarkProtocol(ContractModel):
     secondary_latency_minimum_successes: Literal[20]
     controlled_cold_sample_included: Literal[False]
     pre_benchmark_observations_included: Literal[False]
+
+    @model_validator(mode="after")
+    def target_request_rate_is_fixed(self) -> BenchmarkProtocol:
+        if self.target_request_rate_rps != 18.0:
+            raise ValueError("benchmark target request rate must be exactly 18.0 rps")
+        return self
 
 
 class EndpointObservation(ContractModel):
