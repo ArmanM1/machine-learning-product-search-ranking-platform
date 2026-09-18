@@ -63,9 +63,11 @@ The same-origin demo exposes a small, evidence-first contract:
 | `GET /api/v1/queries` | Curated public query set |
 | `POST /api/v1/rank` | Rerank a supplied candidate list |
 | `GET /api/v1/comparisons/{query_id}` | Side-by-side ranking movement |
-| `GET /api/v1/evaluation` | Sanitized quality and latency evidence |
+| `GET /api/v1/runs/{run_id}` | Sanitized quality, interval, provenance, and limitation evidence |
+| `GET /api/v1/operations` | Version-bound warm serving measurements and cold-start disclosure |
 
-See [API documentation](docs/api.md) for schemas, limits, and error behavior.
+The running service publishes its typed OpenAPI contract at `/openapi.json`; the source
+models and error semantics live in [`src/search_rank/schemas/api.py`](src/search_rank/schemas/api.py).
 
 ## Run the local preview
 
@@ -81,13 +83,13 @@ npm --prefix web test
 npm --prefix web run dev
 ```
 
-Open `http://localhost:5173`. The default frontend mode uses explicit fixtures, labels every value as illustrative, and never presents them as measured results. Set the deployment-time `VITE_DATA_MODE=api` configuration to bind the UI to a verified public release.
+Open `http://localhost:4173`. The default frontend mode uses explicit fixtures, labels every value as illustrative, and never presents them as measured results. Set the deployment-time `VITE_DATA_MODE=api` configuration to bind the UI to a verified public release.
 
 ## Reproduce the evidence path
 
 ```powershell
 uv run search-rank --help
-uv run python scripts/validate_experiment_config.py configs/experiments/candidate-v1.yaml
+uv run python scripts/validate_training_contracts.py config --config configs/experiments/candidate-v1.yaml --instance-type ml.g4dn.xlarge --accelerator gpu
 uv run pytest tests/unit tests/contract tests/integration
 ```
 
@@ -98,7 +100,7 @@ Cloud writes are intentionally restricted to protected GitHub environments on `m
 - [Architecture](docs/architecture.md)
 - [Data card](docs/data-card.md)
 - [Model card](docs/model-card.md)
-- [Evaluation protocol](docs/evaluation.md)
+- [Evaluation protocol](docs/evaluation-methodology.md)
 - [Reproducibility](docs/reproducibility.md)
 - [Security model](docs/security.md)
 - [Failure analysis](docs/failure-analysis.md)
