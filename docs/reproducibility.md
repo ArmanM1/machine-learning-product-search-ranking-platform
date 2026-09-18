@@ -33,6 +33,35 @@ uv run python -m search_rank.cli train --config configs/experiments/candidate-v1
 uv run python -m search_rank.cli evaluate --config configs/experiments/validation-v1.yaml
 ```
 
+The PRD's one-argument promotion line is a command index, not the complete release boundary.
+Promotion deliberately requires the frozen selection, selected training execution and model
+artifact, and separately observed evaluation runtime and cost. From the staged inputs created by
+`release.yml`, the exact executable form is:
+
+```bash
+uv run python -m search_rank.cli promote \
+  --report-id "$(pwd)/.release/evaluation/evaluation-report.json" \
+  --trial-selection "$(pwd)/trial-selection.json" \
+  --selected-training-run-manifest \
+    "$(pwd)/.trial-selection-manifests/candidate_treatment.json" \
+  --selected-training-model-artifact \
+    "$(pwd)/.release/training-model-artifact.json" \
+  --evaluation-runtime-seconds "${evaluation_runtime_seconds}" \
+  --evaluation-estimated-cost-usd "${evaluation_estimated_cost_usd}"
+```
+
+The two numeric variables must come from the verified Processing-job intervals and checksummed
+cost preflight, respectively. Supply `--evaluation-actual-cost-usd` only after reconciliation.
+ADR 0005 records why these inputs are required instead of inferred from ambient files.
+
+Cloud training injects only allowlisted non-secret identities into the trainer. Every
+`training_epoch_complete` JSON event repeats the run/job ID, full Git SHA, image digest, semantic
+dataset and experiment hashes, hardware, actual accelerator, resolved precision, epoch timing,
+loss, validation metric, checkpoint decision, and success status. Local calls retain the same
+field shape with explicit `unavailable` identities. Account IDs, ARNs, bucket/object locations,
+and training text are not part of the logging context; the immutable training `RunManifest`
+remains the durable source for full job lifecycle and artifact checksums.
+
 ## Local validation baseline evidence
 
 The original scoring process and the later full reproduction used the same canonical `baselines-v1` config hash, dataset-manifest hash, 2,057-query validation set, and zero held-out test accesses. Across 249,000 rows, all parsed non-latency fields were exactly equal. The deterministic semantic comparison reproduced both `(query_id, product_id, rank)` and `(query_id, product_id, rank, score)` hashes for every system. All six complete quality vectors were also exactly equal. The unchanged strongest system was `pretrained-cross-encoder@233902d25c440f23af6f7d6e94d2946bac0bee0a-enriched_v1` at graded nDCG@10 `0.8490371644459062` in both runs.

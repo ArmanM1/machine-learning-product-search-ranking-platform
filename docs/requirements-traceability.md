@@ -35,7 +35,7 @@ Status legend: **code path** means an implementation location exists or is reser
 |---|---|---|
 | FR-ML-001 | `src/search_rank/baselines/`, `baseline.yml` | `tests/unit/test_baselines.py`; two separate local scoring processes in `evidence/baselines/milestone-2-validation.json` reproduce exact config/data/query identity, all six quality vectors, ranks, and scores; controlled latency and clean-checkout reproduction remain pending |
 | FR-ML-002 | `src/search_rank/training/mine_hard_examples.py` | `tests/unit/test_training_data.py`; miner artifact pending |
-| FR-ML-003 | `src/search_rank/training/trainer.py` | Tiny-overfit and candidate run evidence pending |
+| FR-ML-003 | `src/search_rank/training/trainer.py` | Tiny-overfit plus allowlisted epoch-provenance tests; candidate run evidence pending |
 | FR-ML-004 | `src/search_rank/training/callbacks.py`, `checkpoints.py` | Checkpoint fixture/run manifest pending |
 | FR-ML-005 | Exact experiment configs, `scripts/trial_selection.py`, `freeze-trial-selection.yml` | Contract tests enforce treatment plus both validation-only controls, exact single-factor differences, disclosed three-trial scope, and predeclared selection; immutable cloud selection pending |
 | FR-ML-006 | Training RunManifest plus immutable candidate inputs, Pydantic `TrialSelection`, and `schemas/json/trial_selection.schema.json` | Schema-parity and hash/provenance tests; three generated cloud runs and frozen selection pending |

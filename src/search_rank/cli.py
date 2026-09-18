@@ -86,6 +86,7 @@ from search_rank.serving.query_store import (
     write_curated_queries,
 )
 from search_rank.training import (
+    TrainingLogContext,
     build_mixed_sample,
     freeze_experiment_config,
     load_frozen_experiment,
@@ -878,6 +879,14 @@ def train(
             if expected_accelerator is None or declared_accelerator != expected_accelerator:
                 raise ValueError("runtime instance and accelerator declarations are inconsistent")
             training_device = "cuda" if declared_accelerator == "gpu" else "cpu"
+        cloud_job_id = os.environ.get("SEARCH_RANK_CLOUD_RUN_ID", "unavailable")
+        training_log_context = TrainingLogContext(
+            run_id=cloud_job_id if cloud_job_id != "unavailable" else run.run_id,
+            job_id=cloud_job_id,
+            git_sha=os.environ.get("SEARCH_RANK_GIT_SHA", "unavailable"),
+            image_digest=os.environ.get("SEARCH_RANK_TRAINING_IMAGE_DIGEST", "unavailable"),
+            hardware_class=cloud_hardware or "local-runtime",
+        )
         manifest, _ = load_dataset_manifest(dataset_manifest)
         manifest_hash = manifest.processed_checksum
         if manifest_hash != experiment.dataset_manifest_hash:
@@ -955,6 +964,7 @@ def train(
             output_dir=run.run_dir / "candidate",
             device=training_device,
             checkpoint_dir=os.environ.get("SEARCH_RANK_CHECKPOINT_DIR"),
+            log_context=training_log_context,
         )
         if declared_accelerator is not None and result.accelerator_type != declared_accelerator:
             raise RuntimeError("actual training accelerator differs from the frozen cloud request")

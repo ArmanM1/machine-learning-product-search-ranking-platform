@@ -12,6 +12,7 @@ import shutil
 import time
 import uuid
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol, cast
 
@@ -30,6 +31,10 @@ from .checkpoints import assert_any_parameter_changed, load_checkpoint, snapshot
 
 LOGGER = logging.getLogger(__name__)
 _EPOCH_CHECKPOINT = re.compile(r"^epoch-([0-9]{4})$")
+_LOG_IDENTITY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,62}$")
+_GIT_SHA = re.compile(r"^(?:unavailable|[0-9a-f]{40})$")
+_IMAGE_DIGEST = re.compile(r"^(?:unavailable|sha256:[0-9a-f]{64})$")
+_HARDWARE_CLASS = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$")
 
 
 class _CrossEncoderPredictor(Protocol):
@@ -61,6 +66,29 @@ class TrainingResult:
     cuda_available: bool
     cuda_device_count: int
     accelerator_type: str
+
+
+@dataclass(frozen=True)
+class TrainingLogContext:
+    """Allowlisted, non-secret identities repeated on every training epoch log."""
+
+    run_id: str
+    job_id: str
+    git_sha: str
+    image_digest: str
+    hardware_class: str
+
+    def __post_init__(self) -> None:
+        checks = {
+            "run_id": (_LOG_IDENTITY, self.run_id),
+            "job_id": (_LOG_IDENTITY, self.job_id),
+            "git_sha": (_GIT_SHA, self.git_sha),
+            "image_digest": (_IMAGE_DIGEST, self.image_digest),
+            "hardware_class": (_HARDWARE_CLASS, self.hardware_class),
+        }
+        for name, (pattern, value) in checks.items():
+            if pattern.fullmatch(value) is None:
+                raise ValueError(f"unsafe or malformed training log {name}")
 
 
 @dataclass(frozen=True)
@@ -492,6 +520,7 @@ def train_candidate(
     output_dir: str | Path,
     device: str = "auto",
     checkpoint_dir: str | Path | None = None,
+    log_context: TrainingLogContext | None = None,
 ) -> TrainingResult:
     required_train = {"query", "input_text", "target", "query_id", "project_split"}
     required_validation = {
@@ -528,6 +557,13 @@ def train_candidate(
         cuda_device_count,
         accelerator_type,
     ) = _resolve_training_device(device)
+    effective_log_context = log_context or TrainingLogContext(
+        run_id="unavailable",
+        job_id="unavailable",
+        git_sha="unavailable",
+        image_digest="unavailable",
+        hardware_class=f"local-{accelerator_type}",
+    )
     model = _model(config, selected_device)
     before = snapshot_parameters(model)
     checkpoint_root = Path(checkpoint_dir).expanduser().resolve() if checkpoint_dir else None
@@ -571,6 +607,7 @@ def train_candidate(
         ),
     )
     use_autocast, autocast_dtype = _precision(config, selected_device)
+    resolved_precision = str(autocast_dtype).removeprefix("torch.") if use_autocast else "float32"
     patience, min_delta = _early_stopping(config)
     stopper = EarlyStopper(patience, min_delta)
     output = Path(output_dir)
@@ -599,6 +636,8 @@ def train_candidate(
     for epoch in range(first_epoch, config.max_epochs + 1):
         if training_complete:
             break
+        epoch_started_at = datetime.now(UTC)
+        epoch_started_clock = time.perf_counter()
         generator = torch.Generator().manual_seed(config.seed + epoch)
         indices = torch.randperm(len(training_sample), generator=generator).tolist()
         optimizer.zero_grad(set_to_none=True)
@@ -655,14 +694,28 @@ def train_candidate(
             )
         )
         improved, should_stop = stopper.update(validation_metric)
+        epoch_ended_at = datetime.now(UTC)
         log_event(
             LOGGER,
             "training_epoch_complete",
+            run_id=effective_log_context.run_id,
+            job_id=effective_log_context.job_id,
+            git_sha=effective_log_context.git_sha,
+            image_digest=effective_log_context.image_digest,
+            dataset_manifest_hash=config.dataset_manifest_hash,
+            config_hash=config.config_hash,
+            hardware_class=effective_log_context.hardware_class,
             epoch=epoch,
             training_loss=average_loss,
             validation_ndcg_at_10=validation_metric,
             checkpoint_selected=improved,
             learning_rate=scheduler.get_last_lr()[0],
+            accelerator=accelerator_type,
+            precision=resolved_precision,
+            started_at=epoch_started_at.isoformat(),
+            ended_at=epoch_ended_at.isoformat(),
+            duration_seconds=time.perf_counter() - epoch_started_clock,
+            status="succeeded",
         )
         if improved:
             best_epoch = epoch
