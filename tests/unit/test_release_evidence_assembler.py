@@ -30,6 +30,7 @@ from tests.unit.test_durable_evidence_contracts import (
 
 SOURCE_SHA = "a" * 40
 DEPLOYMENT_SHA = "b" * 40
+BASELINE_SHA = "c" * 40
 DIGEST_A = "sha256:" + "1" * 64
 DIGEST_B = "sha256:" + "2" * 64
 DIGEST_C = "sha256:" + "3" * 64
@@ -297,7 +298,7 @@ def _release_summary(report: dict[str, Any]) -> dict[str, Any]:
         "paired_differences": report["paired_differences"],
         "code_commit": SOURCE_SHA,
         "evaluation_image_digest": DIGEST_B,
-        "evaluation_config_hash": DIGEST_D,
+        "evaluation_config_hash": DIGEST_A,
         "trial_selection_id": TRIAL_ID,
         "trial_selection_sha256": DIGEST_C,
     }
@@ -310,7 +311,7 @@ def _baseline_pointer() -> dict[str, Any]:
         "model_id": BASELINE_MODEL,
         "bundle_s3_key": f"promoted/{BASELINE_MODEL}/",
         "evaluation_report_id": "validation-report",
-        "git_sha": SOURCE_SHA,
+        "git_sha": BASELINE_SHA,
         "evidence_mode": "validation_only",
         "release_decision": "validation_baseline",
         "gate_passed": None,
@@ -865,6 +866,23 @@ def test_assembler_cross_binds_clean_evaluation_receipts(tmp_path: Path) -> None
     summary["test_access_count"] = 1
     _write(path, summary)
 
+    with pytest.raises(assembler.ReleaseEvidenceError, match="clean-evaluation binding differs"):
+        _assemble(root)
+
+
+def test_assembler_binds_summary_to_the_evaluation_config_checksum(tmp_path: Path) -> None:
+    root = tmp_path / "local-evidence"
+    _fixture(root)
+    release_root = root / SOURCE_SHA / "release"
+    provenance = _read(release_root / "evaluation-provenance.json")
+    summary_path = release_root / "release-summary.json"
+    summary = _read(summary_path)
+    assert summary["evaluation_config_hash"] == provenance["evaluation_config_checksum"]
+    assert summary["evaluation_config_hash"] != provenance["config_hash"]
+    _assemble(root)
+
+    summary["evaluation_config_hash"] = DIGEST_C
+    _write(summary_path, summary)
     with pytest.raises(assembler.ReleaseEvidenceError, match="clean-evaluation binding differs"):
         _assemble(root)
 
