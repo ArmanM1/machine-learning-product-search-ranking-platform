@@ -15,6 +15,7 @@ import type {
   EvaluationData,
   FailureAnalysisData,
   ModelSummary,
+  OperationalEvidence,
   OverviewData,
   PublicEvidenceEnvelope,
   PublicRunSummary,
@@ -119,6 +120,7 @@ export function buildOverviewData(
   queries: CuratedQuery[],
   evaluation: EvaluationData,
   ids: { candidateId: string; baselineId: string; queryId: string },
+  operationalEvidence?: OperationalEvidence,
 ): OverviewData {
   const promotedModels = models.filter((model) => model.promoted_at !== null)
   const promotedModel = promotedModels[0]
@@ -129,6 +131,13 @@ export function buildOverviewData(
   const defaultQuery = queries.find((query) => query.query_id === ids.queryId) ?? queries[0]
   if (promotedModels.length !== 1 || !promotedModel || !defaultQuery) {
     throw new ApiClientError('The public release manifest is incomplete.', 409, 'manifest_not_ready')
+  }
+  if (operationalEvidence && operationalEvidence.model_id !== promotedModel.model_id) {
+    throw new ApiClientError(
+      'The deployment evidence conflicts with the active model.',
+      409,
+      'operational_evidence_conflict',
+    )
   }
   if (evaluation.release_status === 'validation_only') {
     const selectedMetrics = evaluation.models.find(
@@ -147,6 +156,13 @@ export function buildOverviewData(
       primary_metric_interval: null,
       p95_inference_latency_ms: selectedMetrics?.p95_inference_latency_ms ?? null,
       measured_candidate_count: defaultQuery.candidate_count,
+      operational_evidence: operationalEvidence ?? {
+        schema_version: '1.0.0',
+        status: 'pending',
+        release_id: 'not-published',
+        model_id: promotedModel.model_id,
+        note: 'Deployment evidence is publishing.',
+      },
       default_query: defaultQuery,
     }
   }
@@ -179,6 +195,13 @@ export function buildOverviewData(
     primary_metric_interval: evaluation.delta.interval,
     p95_inference_latency_ms: candidateMetrics?.p95_inference_latency_ms ?? null,
     measured_candidate_count: defaultQuery.candidate_count,
+    operational_evidence: operationalEvidence ?? {
+      schema_version: '1.0.0',
+      status: 'pending',
+      release_id: 'not-published',
+      model_id: promotedModel.model_id,
+      note: 'Deployment evidence is publishing.',
+    },
     default_query: defaultQuery,
   }
 }
@@ -464,17 +487,39 @@ export const apiClient = {
     }
   },
 
+  async getOperations(signal?: AbortSignal): Promise<OperationalEvidence> {
+    if (isFixtureMode) {
+      await waitForFixture(signal)
+      return fixtureOverview.operational_evidence
+    }
+    return getJson<OperationalEvidence>('/api/v1/operations', signal)
+  },
+
   async getOverview(signal?: AbortSignal): Promise<OverviewData> {
     if (isFixtureMode) {
       await waitForFixture(signal)
       return fixtureOverview
     }
 
-    const [models, queries, evaluation] = await Promise.all([
+    const operationsRequest = apiClient.getOperations(signal).catch((error: unknown) => {
+      if (error instanceof DOMException && error.name === 'AbortError') throw error
+      if (error instanceof ApiClientError && error.status === 409) throw error
+      return null
+    })
+    const [models, queries, evaluation, operations] = await Promise.all([
       apiClient.getModels(signal),
       apiClient.getQueries('', signal),
       apiClient.getEvaluation(config.runId, signal),
+      operationsRequest,
     ])
-    return buildOverviewData(models, queries, evaluation, config)
+    const promotedModel = models.find((model) => model.promoted_at !== null)
+    const operationalEvidence = operations ?? {
+      schema_version: '1.0.0' as const,
+      status: 'unavailable' as const,
+      release_id: 'unavailable' as const,
+      model_id: promotedModel?.model_id ?? 'not-published',
+      note: 'Deployment evidence is temporarily unavailable.' as const,
+    }
+    return buildOverviewData(models, queries, evaluation, config, operationalEvidence)
   },
 }

@@ -30,6 +30,25 @@ export function OverviewPage() {
     : validationOnly
       ? 'Validation-only evidence'
       : 'Verified release'
+  const operational = overview.operational_evidence
+  const operationalVerified = operational.status === 'verified'
+  const latencyLabel = overview.evidence_mode === 'fixture'
+    ? 'Illustrative offline p95'
+    : 'Warm API Gateway/Lambda p95'
+  const latencyValue = overview.evidence_mode === 'fixture'
+    ? overview.p95_inference_latency_ms === null
+      ? 'Not measured'
+      : `${Math.round(overview.p95_inference_latency_ms)} ms`
+    : operationalVerified
+      ? `${Math.round(operational.warm.end_to_end_latency_ms.p95)} ms`
+      : operational.status === 'unavailable'
+        ? 'Unavailable'
+        : 'Publishing'
+  const latencyNote = overview.evidence_mode === 'fixture'
+    ? `${overview.measured_candidate_count} candidates · no cloud-run claim`
+    : operationalVerified
+      ? `${operational.warm.candidate_count} candidates · ${operational.warm.successful_request_count}/${operational.warm.measured_request_count} successful · cold excluded`
+      : operational.note
 
   return (
     <div className="page-container overview-page">
@@ -125,10 +144,22 @@ export function OverviewPage() {
         <div className="metric-grid">
           <MetricCard
             eyebrow={fixtureLabel}
-            label={validationOnly ? overview.primary_metric_name : `${overview.primary_metric_name} delta`}
-            value={validationOnly ? 'Validation only' : signed(overview.primary_metric_delta!)}
-            note={validationOnly ? 'Selected baseline; no held-out difference' : `95% paired interval [${interval}]`}
-            accent
+            label={validationOnly
+              ? overview.primary_metric_name
+              : overview.release_status === 'failed'
+                ? 'Release gate'
+                : `${overview.primary_metric_name} delta`}
+            value={validationOnly
+              ? 'Validation only'
+              : overview.release_status === 'failed'
+                ? 'Baseline retained'
+                : signed(overview.primary_metric_delta!)}
+            note={validationOnly
+              ? 'Selected baseline; no held-out difference'
+              : overview.release_status === 'failed'
+                ? 'Held-out delta and interval remain on the Evaluation page'
+                : `95% paired interval [${interval}]`}
+            accent={overview.release_status !== 'failed'}
           />
           <MetricCard
             eyebrow={fixtureLabel}
@@ -137,12 +168,37 @@ export function OverviewPage() {
             note={validationOnly ? 'Selection evidence only' : 'Query-level evaluation unit'}
           />
           <MetricCard
-            eyebrow={fixtureLabel}
-            label="Inference p95 latency"
-            value={overview.p95_inference_latency_ms === null ? 'Not measured' : `${Math.round(overview.p95_inference_latency_ms)} ms`}
-            note={overview.p95_inference_latency_ms === null ? 'No published inference p95 measurement' : `Offline model timing · ${overview.measured_candidate_count} candidates`}
+            eyebrow={overview.evidence_mode === 'fixture'
+              ? fixtureLabel
+              : operationalVerified
+                ? 'Verified deployment'
+                : 'Deployment evidence'}
+            label={latencyLabel}
+            value={latencyValue}
+            note={latencyNote}
           />
         </div>
+        {overview.evidence_mode !== 'fixture' && operationalVerified ? (
+          <details className="operations-detail">
+            <summary>Serving measurement protocol</summary>
+            <div>
+              <p>
+                <strong>Warm:</strong> {operational.warm.warmup_request_count} warmups,
+                {' '}{operational.warm.measured_request_count} measured requests at concurrency
+                {' '}{operational.warm.concurrency}; model p95
+                {' '}{Math.round(operational.warm.model_latency_ms.p95)} ms.
+              </p>
+              <p>
+                <strong>Controlled cold start:</strong>
+                {' '}{Math.round(operational.controlled_cold_start.end_to_end_latency_ms)} ms
+                {' '}end to end from one observation, including
+                {' '}{Math.round(operational.controlled_cold_start.init_duration_ms)} ms initialization
+                {' '}and {Math.round(operational.controlled_cold_start.model_load_duration_ms)} ms model load.
+                It is reported separately and excluded from warm percentiles.
+              </p>
+            </div>
+          </details>
+        ) : null}
       </section>
 
       <section className="method-strip" aria-labelledby="method-title">

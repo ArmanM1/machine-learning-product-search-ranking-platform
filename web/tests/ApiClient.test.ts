@@ -1,4 +1,5 @@
 import { buildComparisonPath, buildOverviewData } from '../src/api/client'
+import { fixtureEvaluation, fixtureModels, fixtureQueries } from '../src/api/fixtures'
 import type { CuratedQuery, EvaluationData, ModelSummary } from '../src/types/api'
 
 describe('API client contract', () => {
@@ -117,5 +118,31 @@ describe('negative release overview', () => {
     expect(overview.release_status).toBe('failed')
     expect(overview.promoted_model.model_id).toBe('baseline-v1')
     expect(overview.evaluated_candidate?.model_id).toBe('candidate-v1')
+  })
+})
+
+describe('operational evidence identity', () => {
+  it('rejects operations measurements for a model other than the active release', () => {
+    const models = fixtureModels.map((model) => ({
+      ...model,
+      promoted_at: model.model_id === 'candidate-v1' ? '2026-09-02T00:00:00Z' : null,
+    }))
+    expect(() => buildOverviewData(
+      models,
+      fixtureQueries,
+      fixtureEvaluation,
+      {
+        candidateId: 'candidate-v1',
+        baselineId: 'pretrained-v1',
+        queryId: fixtureQueries[0].query_id,
+      },
+      {
+        schema_version: '1.0.0',
+        status: 'pending',
+        release_id: 'another-release',
+        model_id: 'another-model',
+        note: 'Deployment evidence is publishing.',
+      },
+    )).toThrow('deployment evidence conflicts with the active model')
   })
 })

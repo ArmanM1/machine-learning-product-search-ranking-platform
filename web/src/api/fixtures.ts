@@ -278,6 +278,13 @@ export const fixtureOverview: OverviewData = {
   primary_metric_interval: fixtureEvaluation.delta!.interval!,
   p95_inference_latency_ms: 468.2,
   measured_candidate_count: 40,
+  operational_evidence: {
+    schema_version: '1.0.0',
+    status: 'pending',
+    release_id: 'release-demo-fixture',
+    model_id: 'candidate-v1',
+    note: 'Deployment evidence is publishing.',
+  },
   default_query: fixtureQueries[0],
 }
 
