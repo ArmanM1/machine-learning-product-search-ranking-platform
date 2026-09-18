@@ -270,15 +270,11 @@ class ServiceState:
         )
         if not self.settings.artifact_bucket:
             if self.settings.release_mode:
-                raise OperationalEvidenceUnavailable(
-                    "deployment evidence store is not configured"
-                )
+                raise OperationalEvidenceUnavailable("deployment evidence store is not configured")
             return pending
         if not self.settings.lambda_function_version:
             if self.settings.release_mode:
-                raise OperationalEvidenceUnavailable(
-                    "executing Lambda version is unavailable"
-                )
+                raise OperationalEvidenceUnavailable("executing Lambda version is unavailable")
             return pending
 
         key = f"{self.settings.public_prefix}{manifest.release_id}/deployment-evidence.json"
@@ -336,15 +332,11 @@ class ServiceState:
                 if callable(close):
                     close()
         except Exception as exc:
-            raise OperationalEvidenceUnavailable(
-                "deployment evidence body is unavailable"
-            ) from exc
+            raise OperationalEvidenceUnavailable("deployment evidence body is unavailable") from exc
         if not isinstance(payload, bytes):
             raise OperationalEvidenceConflict("deployment evidence object body is invalid")
         if len(payload) != content_length:
-            raise OperationalEvidenceUnavailable(
-                "deployment evidence body was not read completely"
-            )
+            raise OperationalEvidenceUnavailable("deployment evidence body was not read completely")
         if len(payload) > _MAX_OPERATIONAL_EVIDENCE_BYTES:
             raise OperationalEvidenceConflict("deployment evidence object length is invalid")
         expected_checksum = base64.b64encode(hashlib.sha256(payload).digest()).decode("ascii")

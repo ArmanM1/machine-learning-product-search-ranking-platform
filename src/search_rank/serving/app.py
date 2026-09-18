@@ -189,9 +189,7 @@ def create_app(
         response_model=PublicOperationsEvidence,
         responses={409: {"model": ApiError}, 503: {"model": ApiError}},
     )
-    def operations(
-        request: Request, response: Response
-    ) -> PublicOperationsEvidence | JSONResponse:
+    def operations(request: Request, response: Response) -> PublicOperationsEvidence | JSONResponse:
         response.headers["Cache-Control"] = "no-store"
         try:
             return service_state.operational_evidence()
