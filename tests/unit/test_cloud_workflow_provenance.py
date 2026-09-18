@@ -103,8 +103,14 @@ def test_main_only_training_quota_probe_is_fixed_read_only_and_mutually_exclusiv
     submit = workflow["jobs"]["submit"]
     probe = workflow["jobs"]["quota-probe"]
 
-    assert submit["if"] == ("github.ref == 'refs/heads/main' && inputs.quota_probe_only == false")
-    assert probe["if"] == ("github.ref == 'refs/heads/main' && inputs.quota_probe_only == true")
+    assert submit["if"] == (
+        "github.ref == 'refs/heads/main' && inputs.quota_probe_only == false && "
+        "inputs.diagnostic_only == false"
+    )
+    assert probe["if"] == (
+        "github.ref == 'refs/heads/main' && inputs.quota_probe_only == true && "
+        "inputs.diagnostic_only == false"
+    )
     assert probe["environment"] == "aws-training"
     assert probe["timeout-minutes"] == 10
     authorization = probe["steps"][0]

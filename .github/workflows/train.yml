@@ -8,11 +8,16 @@ on:
         required: true
         type: string
       authorization:
-        description: Type the exact authorization phrase for training or the read-only quota probe
+        description: Type the exact authorization phrase for training or a read-only diagnostic
         required: true
         type: string
       quota_probe_only:
         description: Read the fixed live SageMaker quota allowlist without submitting a job
+        required: false
+        default: false
+        type: boolean
+      diagnostic_only:
+        description: Sanitize one failed job description without submitting compute
         required: false
         default: false
         type: boolean
@@ -33,8 +38,26 @@ env:
   MAXIMUM_OUT_OF_POCKET_USD: "0"
 
 jobs:
+  validate-mode:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Reject mutually exclusive read-only modes
+        env:
+          QUOTA_PROBE_ONLY: ${{ inputs.quota_probe_only }}
+          DIAGNOSTIC_ONLY: ${{ inputs.diagnostic_only }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${QUOTA_PROBE_ONLY}" == "true" && "${DIAGNOSTIC_ONLY}" == "true" ]]; then
+            echo "Read-only workflow modes are mutually exclusive." >&2
+            exit 1
+          fi
+
   submit:
-    if: github.ref == 'refs/heads/main' && inputs.quota_probe_only == false
+    if: github.ref == 'refs/heads/main' && inputs.quota_probe_only == false && inputs.diagnostic_only == false
+    needs: validate-mode
     runs-on: ubuntu-latest
     timeout-minutes: 360
     environment: aws-training
@@ -1335,7 +1358,8 @@ jobs:
           retention-days: 30
 
   quota-probe:
-    if: github.ref == 'refs/heads/main' && inputs.quota_probe_only == true
+    if: github.ref == 'refs/heads/main' && inputs.quota_probe_only == true && inputs.diagnostic_only == false
+    needs: validate-mode
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: aws-training
@@ -1404,3 +1428,74 @@ jobs:
               "${quota_code}" "${quota_name}" "${applied_value}" \
               >> "${GITHUB_STEP_SUMMARY}"
           done
+
+  diagnose-failed-job:
+    if: github.ref == 'refs/heads/main' && inputs.diagnostic_only == true && inputs.quota_probe_only == false
+    needs: validate-mode
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: aws-training
+    env:
+      TARGET_JOB_NAME: ${{ secrets.AWS_FAILED_TRAINING_JOB_NAME }}
+      ARTIFACT_BUCKET: ${{ vars.AWS_ARTIFACT_BUCKET }}
+    steps:
+      - name: Validate explicit read-only diagnostic authorization
+        env:
+          AUTHORIZATION: ${{ inputs.authorization }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${AUTHORIZATION}" = "DIAGNOSE FAILED TRAINING READ ONLY"
+          : "${TARGET_JOB_NAME:?Missing temporary failed-training job secret}"
+          : "${ARTIFACT_BUCKET:?Missing AWS_ARTIFACT_BUCKET variable}"
+          [[ "${TARGET_JOB_NAME}" =~ ^product-search-ranking-prod-(development|final|ablation)-h[0-9a-f]{16}$ ]]
+      - uses: actions/checkout@3d3c42e5aac5ba805825a76410c181273ba90b1 # v7.0.1
+      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-training-failure-diagnostic-${{ github.run_id }}
+          mask-aws-account-id: true
+      - name: Capture only an identifier-free failure diagnostic
+        shell: bash
+        run: |
+          set -euo pipefail
+          private_description="$(mktemp)"
+          private_checkpoints="$(mktemp)"
+          trap 'rm -f -- "${private_description}" "${private_checkpoints}"' EXIT
+          checkpoint_uri="s3://${ARTIFACT_BUCKET}/runs/${TARGET_JOB_NAME}/checkpoints/"
+          aws sagemaker describe-training-job \
+            --training-job-name "${TARGET_JOB_NAME}" \
+            > "${private_description}"
+          aws s3api list-objects-v2 \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --prefix "runs/${TARGET_JOB_NAME}/checkpoints/" \
+            --max-keys 1000 \
+            --no-paginate \
+            > "${private_checkpoints}"
+          python scripts/sanitize_training_failure.py \
+            --description "${private_description}" \
+            --checkpoint-listing "${private_checkpoints}" \
+            --expected-job-name "${TARGET_JOB_NAME}" \
+            --expected-checkpoint-uri "${checkpoint_uri}" \
+            --output training-failure-diagnostic.json
+          {
+            echo "### Sanitized failed-training diagnostic"
+            echo
+            jq -r '"- Failure class: `" + .failure_class + "`"' \
+              training-failure-diagnostic.json
+            jq -r '"- Container phase: `" + (.container_phase // "unavailable") + "`"' \
+              training-failure-diagnostic.json
+            jq -r '"- Exit code: `" + ((.exit_code // "unavailable") | tostring) + "`"' \
+              training-failure-diagnostic.json
+            jq -r '"- Completed epoch checkpoints: `" + (.completed_checkpoint_count | tostring) + "`"' \
+              training-failure-diagnostic.json
+            jq -r '"- Secondary statuses: `" + (.secondary_statuses | join(" → ")) + "`"' \
+              training-failure-diagnostic.json
+          } >> "${GITHUB_STEP_SUMMARY}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: training-failure-diagnostic-${{ github.run_id }}
+          path: training-failure-diagnostic.json
+          if-no-files-found: error
+          retention-days: 7
