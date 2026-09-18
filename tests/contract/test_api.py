@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import math
 import uuid
 from dataclasses import dataclass
@@ -132,6 +133,116 @@ def test_rank_distinguishes_malformed_json_from_valid_request_validation() -> No
         )
         assert valid_but_invalid.status_code == 422
         assert valid_but_invalid.json()["code"] == "validation_error"
+
+
+def test_rank_enforces_the_body_limit_without_trusting_content_length() -> None:
+    request = {"query_id": "q1", "model_id": "candidate-v1", "top_k": 2}
+    encoded = json.dumps(request).encode("utf-8")
+    at_limit = encoded + (b" " * (16_384 - len(encoded)))
+    over_limit = at_limit + b" "
+
+    with client() as api:
+        accepted = api.post(
+            "/api/v1/rank", content=at_limit, headers={"content-type": "application/json"}
+        )
+        assert accepted.status_code == 200
+
+        missing_length = api.post(
+            "/api/v1/rank",
+            content=iter([over_limit]),
+            headers={"content-type": "application/json"},
+        )
+        understated_length = api.post(
+            "/api/v1/rank",
+            content=over_limit,
+            headers={"content-type": "application/json", "content-length": "1"},
+        )
+
+    for response in (missing_length, understated_length):
+        assert response.status_code == 413
+        assert response.json() == {
+            "status": 413,
+            "code": "request_too_large",
+            "message": "Request body exceeds the limit.",
+            "request_id": response.headers["x-request-id"],
+            "details": None,
+        }
+
+
+@pytest.mark.parametrize("content_length", ["invalid", "-1", "1, 1"])
+def test_rank_rejects_invalid_content_length(content_length: str) -> None:
+    with client() as api:
+        response = api.post(
+            "/api/v1/rank",
+            content=b"{}",
+            headers={"content-type": "application/json", "content-length": content_length},
+        )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "status": 400,
+        "code": "invalid_content_length",
+        "message": "Content-Length header is invalid.",
+        "request_id": response.headers["x-request-id"],
+        "details": None,
+    }
+
+
+def test_rank_rejects_duplicate_content_length_headers() -> None:
+    with client() as api:
+        response = api.post(
+            "/api/v1/rank",
+            content=b"{}",
+            headers=[
+                ("content-type", "application/json"),
+                ("content-length", "2"),
+                ("content-length", "2"),
+            ],
+        )
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "invalid_content_length"
+
+
+def test_rank_rejects_content_length_that_does_not_match_the_body() -> None:
+    with client() as api:
+        response = api.post(
+            "/api/v1/rank",
+            content=b"{}",
+            headers={"content-type": "application/json", "content-length": "1"},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "invalid_content_length"
+    assert response.json()["message"] == "Content-Length header does not match the request body."
+
+
+def test_unhandled_errors_return_only_the_sanitized_500_contract() -> None:
+    private_detail = "private-internal-bucket-key traceback detail"
+    api = client()
+    ranker = api.app.state.service.rankers["candidate-v1"]
+
+    def fail(_: CuratedQuery) -> RankingOutput:
+        raise RuntimeError(private_detail)
+
+    ranker.rank = fail
+
+    with TestClient(api.app, raise_server_exceptions=False) as safe_api:
+        response = safe_api.post(
+            "/api/v1/rank",
+            json={"query_id": "q1", "model_id": "candidate-v1", "top_k": 2},
+        )
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "status": 500,
+        "code": "internal_error",
+        "message": "Unexpected server error.",
+        "request_id": response.headers["x-request-id"],
+        "details": None,
+    }
+    assert private_detail not in response.text
+    assert "traceback" not in response.text.lower()
 
 
 def test_comparison_distinguishes_judgments() -> None:
