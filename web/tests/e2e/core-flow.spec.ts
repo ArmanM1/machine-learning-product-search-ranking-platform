@@ -25,6 +25,33 @@ test('failure filters and experiment provenance work on a narrow viewport', asyn
   await expect(page.getByText(/no cloud run has been recorded/i)).toBeVisible()
 })
 
+const evaluationPreviewStates = [
+  { state: 'loading', heading: 'Gathering evidence', canRetry: false },
+  { state: 'empty', heading: 'Nothing to show yet', canRetry: false },
+  { state: 'conflict', heading: 'Evidence version conflict', canRetry: true },
+  { state: 'error', heading: 'Evidence unavailable', canRetry: true },
+] as const
+
+for (const preview of evaluationPreviewStates) {
+  test(`evaluation exposes its ${preview.state} state`, async ({ page }) => {
+    await page.goto(`/evaluation?state=${preview.state}`)
+    const panel = page.locator('section.status-panel')
+
+    await expect(panel.getByRole('heading', { name: preview.heading })).toBeVisible()
+    await expect(panel).toHaveAttribute('aria-busy', preview.state === 'loading' ? 'true' : 'false')
+    await expect(panel.getByRole('button', { name: /try again/i })).toHaveCount(preview.canRetry ? 1 : 0)
+  })
+}
+
+test('unknown experiment renders the public 404 state', async ({ page }) => {
+  await page.goto('/experiments/run-that-does-not-exist')
+  const panel = page.locator('section.status-panel')
+
+  await expect(panel.getByText('404 · Experiment', { exact: true })).toBeVisible()
+  await expect(panel.getByRole('heading', { name: 'Evidence unavailable' })).toBeVisible()
+  await expect(panel.getByText('This experiment run does not exist.', { exact: true })).toBeVisible()
+})
+
 test('evaluation keeps wide evidence inside bounded scrollers on a 360px viewport', async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 800 })
   await page.goto('/evaluation')
