@@ -1,0 +1,91 @@
+name: Poll one bounded SageMaker training window
+description: Poll a fixed training job for less than one AWS credential session
+
+inputs:
+  job-name-file:
+    description: File containing the attempt-stable SageMaker training job name
+    required: false
+    default: job-name.txt
+  window-seconds:
+    description: Maximum wall-clock duration of this credential window
+    required: false
+    default: "2840"
+  poll-interval-seconds:
+    description: Delay between non-terminal status reads
+    required: false
+    default: "30"
+
+outputs:
+  terminal:
+    description: Whether SageMaker reported a terminal status
+    value: ${{ steps.poll.outputs.terminal }}
+  status:
+    description: Last allowlisted SageMaker status observed
+    value: ${{ steps.poll.outputs.status }}
+
+runs:
+  using: composite
+  steps:
+    - id: poll
+      shell: bash
+      env:
+        JOB_NAME_FILE: ${{ inputs.job-name-file }}
+        POLL_WINDOW_SECONDS: ${{ inputs.window-seconds }}
+        POLL_INTERVAL_SECONDS: ${{ inputs.poll-interval-seconds }}
+        AWS_MAX_ATTEMPTS: "2"
+        AWS_RETRY_MODE: standard
+      run: |
+        set -euo pipefail
+        [[ "${POLL_WINDOW_SECONDS}" =~ ^[1-9][0-9]*$ ]]
+        [[ "${POLL_INTERVAL_SECONDS}" =~ ^[1-9][0-9]*$ ]]
+        (( POLL_WINDOW_SECONDS <= 3000 ))
+        (( POLL_INTERVAL_SECONDS <= 30 ))
+        job_name="$(cat "${JOB_NAME_FILE}")"
+        (( ${#job_name} <= 63 ))
+        [[ "${job_name}" =~ ^[A-Za-z0-9](-*[A-Za-z0-9]){0,62}$ ]]
+
+        deadline="$((SECONDS + POLL_WINDOW_SECONDS))"
+        consecutive_errors=0
+        status=InProgress
+        while (( SECONDS < deadline )); do
+          if ! observed_status="$(timeout --signal=TERM --kill-after=5s 20s \
+            aws sagemaker describe-training-job \
+              --training-job-name "${job_name}" \
+              --query TrainingJobStatus \
+              --output text \
+              --cli-connect-timeout 5 \
+              --cli-read-timeout 10 \
+              2>/dev/null)"; then
+            consecutive_errors="$((consecutive_errors + 1))"
+            if (( consecutive_errors >= 3 )); then
+              echo "SageMaker status polling failed three consecutive times." >&2
+              exit 1
+            fi
+          else
+            consecutive_errors=0
+            status="${observed_status}"
+            case "${status}" in
+              Completed|Failed|Stopped)
+                printf 'terminal=true\nstatus=%s\n' "${status}" >> "${GITHUB_OUTPUT}"
+                echo "SageMaker training reached terminal status ${status}."
+                exit 0
+                ;;
+              InProgress|Stopping) ;;
+              *)
+                echo "SageMaker returned an unexpected training status." >&2
+                exit 1
+                ;;
+            esac
+          fi
+          remaining="$((deadline - SECONDS))"
+          if (( remaining > 0 )); then
+            sleep_seconds="${POLL_INTERVAL_SECONDS}"
+            if (( remaining < sleep_seconds )); then
+              sleep_seconds="${remaining}"
+            fi
+            sleep "${sleep_seconds}"
+          fi
+        done
+
+        printf 'terminal=false\nstatus=%s\n' "${status}" >> "${GITHUB_OUTPUT}"
+        echo "SageMaker training remains non-terminal after this bounded polling window."
