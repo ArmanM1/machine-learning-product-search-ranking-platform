@@ -55,6 +55,6 @@ time, USD reservation/remaining commitment, CPU/GPU reservation and usage counte
 receipt described in `docs/cloud-deployment.md` also never belong in these examples. The receipt binds the
 full canonical workflow input object, including this JSON and the separate authorization fields, to one
 workflow, commit, and financial observation. Changing any input requires a new receipt. Sanitized provenance
-is schema-validated and rechecked against the non-overridable six-hour TTL at every protected mutation
+is schema-validated and rechecked against the non-overridable 24-hour TTL at every protected mutation
 boundary; the exact operation must also hold its conditional private-ledger reservation before the first
 ordinary AWS write.

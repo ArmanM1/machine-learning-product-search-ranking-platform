@@ -7,17 +7,18 @@ interface CopyFieldProps {
 }
 
 export function CopyField({ value, label }: CopyFieldProps) {
-  const [copied, setCopied] = useState(false)
+  const [status, setStatus] = useState<'idle' | 'copied' | 'failed'>('idle')
 
   if (!value) return <span className="not-recorded">Not published</span>
 
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(value)
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1600)
+      setStatus('copied')
+      window.setTimeout(() => setStatus('idle'), 1600)
     } catch {
-      setCopied(false)
+      setStatus('failed')
+      window.setTimeout(() => setStatus('idle'), 2400)
     }
   }
 
@@ -25,8 +26,11 @@ export function CopyField({ value, label }: CopyFieldProps) {
     <div className="copy-field">
       <code title={value}>{value}</code>
       <button type="button" onClick={copy} aria-label={`Copy ${label}`} title={`Copy ${label}`}>
-        {copied ? <CheckIcon /> : <CopyIcon />}
+        {status === 'copied' ? <CheckIcon /> : <CopyIcon />}
       </button>
+      <span className="sr-only" role="status" aria-live="polite">
+        {status === 'copied' ? `${label} copied` : status === 'failed' ? `${label} could not be copied` : ''}
+      </span>
     </div>
   )
 }

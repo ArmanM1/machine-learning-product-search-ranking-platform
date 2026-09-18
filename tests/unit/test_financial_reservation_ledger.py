@@ -17,7 +17,7 @@ def _environment(**overrides: str) -> dict[str, str]:
         "FINANCIAL_SNAPSHOT_OBSERVED_AT": (NOW - timedelta(minutes=1)).isoformat(),
         "FINANCIAL_SNAPSHOT_HMAC_KEY": "4" * 64,
         "FINANCIAL_SNAPSHOT_SOURCE": "aws_billing_and_cost_management_console",
-        "FINANCIAL_SNAPSHOT_MAX_AGE_SECONDS": "21600",
+        "FINANCIAL_SNAPSHOT_MAX_AGE_SECONDS": "86400",
         "CAMPAIGN_SPEND_TO_DATE_USD": "0",
         "REMAINING_APPLICABLE_CREDIT_USD": "100",
         "FINANCIAL_SNAPSHOT_AUTHORIZATION_WORKFLOW": "train",

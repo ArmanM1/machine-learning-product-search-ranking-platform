@@ -10,6 +10,10 @@ describe('application shell and overview', () => {
     expect(screen.getByText(/a trained reranker learns which products/i)).toBeInTheDocument()
     expect(screen.getAllByText(/illustrative fixture/i).length).toBeGreaterThan(0)
     expect(screen.getByRole('link', { name: /compare a query/i })).toHaveAttribute('href', '/compare?q=query-fixture-001')
+    expect(screen.getByRole('link', { name: 'Source' })).toHaveAttribute(
+      'href',
+      'https://github.com/ArmanM1/machine-learning-product-search-ranking-platform',
+    )
   })
 
   it('renders a helpful 404 without replacing it with nearby content', () => {

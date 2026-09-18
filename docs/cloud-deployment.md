@@ -1,10 +1,6 @@
 # AWS cloud deployment
 
-Status: locally validated configuration. The repository-bound OIDC provider and state-bootstrap role exist,
-but the live state role still needs the generated complete refresh-read policy and both GitHub and AWS trust
-must be migrated to the workflow-bound subject before first use. The external permissions boundary and
-one-time platform seed role are not claimed as created. The owner waived AWS Budget/email setup. No
-Terraform apply, campaign-ledger reservation, SageMaker job, model promotion, or public release is claimed.
+Status: bootstrap and production Terraform are applied in `us-east-1`; all 57 managed resources completed a post-apply no-drift plan. Workflow-bound GitHub OIDC roles are live, the private campaign ledger is initialized, the immutable dataset is published, and live quota probes confirm capacity for the selected GPU Training and Processing instance classes. No candidate training, held-out evaluation, model promotion, or public release is claimed yet.
 
 ## Prerequisite evidence
 
@@ -31,7 +27,7 @@ state and atomic ledger reservation preserve the campaign and USD 40 credit rese
 
 ## Bounded bootstrap plan
 
-This is the exact resource inventory represented by Terraform. It is a proposal, not authorization and not evidence that the resources exist.
+This is the exact applied resource inventory represented by Terraform. Runtime serving resources stay disabled until an immutable release is ready.
 
 ### State bootstrap
 
@@ -71,7 +67,7 @@ Copy-Item infra/terraform/environments/bootstrap/terraform.tfvars.example infra/
 Copy-Item infra/terraform/environments/prod/terraform.tfvars.example infra/terraform/environments/prod/terraform.tfvars
 ```
 
-The public repository exists. Application and verification of the workflow-bound OIDC trust remain pending.
+The public repository and workflow-bound OIDC trust are applied and verified by successful short-lived role sessions.
 Inspect whether the account already has `token.actions.githubusercontent.com`; duplicate creation will fail.
 Keep `enable_budgets=false` under the recorded waiver and both `enable_serving=false` and
 `enable_public_serving=false` until public-deployment approval and an immutable serving digest exist.
@@ -372,7 +368,7 @@ canonical `toJSON(inputs)` digest in the validator environment, run
 input, so a receipt cannot be reused for another workflow, commit, or changed dispatch input. The workflow
 recomputes it before every protected boundary and fails if any exact value differs. The public receipt is
 safe against low-entropy balance guessing because the key is never written to repository evidence or Actions
-artifacts. The source is fixed to `aws_billing_and_cost_management_console` and the TTL to six hours. No
+artifacts. The source is fixed to `aws_billing_and_cost_management_console` and the TTL to 24 hours, matching the console's approximate daily estimate refresh. No
 private balance, reservation, hour counter, or HMAC key is accepted from workflow dispatch or written to
 public evidence.
 
@@ -450,13 +446,6 @@ full typed and cross-artifact validation against the readback directory. There i
 
 ## Current unresolved prerequisites and owner inputs
 
-- Applied SageMaker Processing quota `L-0307F515` is currently zero. Submit its increase request as soon
-  as AWS closes either pending Spot Training quota request, then retain a live applied-capacity receipt of
-  at least one before held-out evaluation.
-- Application and readback verification of the exact immutable repository/environment/workflow-bound OIDC
-  subject template and the matching state-bootstrap trust.
-- Root/account-owner MFA remains declined as an accepted exception; the default PRD security gate therefore remains unmet, but this exception is not itself an operational apply blocker.
-- Verified temporary non-root AWS CLI/STS access.
-- Verified visible applicable-credit balance and expiration.
-- Exact AWS bootstrap-plan authorization.
-- Later job-specific, held-out, and public-deployment authorizations.
+- Root/account-owner MFA remains declined as an accepted exception; this does not block the remaining protected workflows.
+- Each mutating workflow still requires an operation-bound fresh financial receipt and its exact authorization phrase.
+- Candidate training, frozen trial selection, the two clean held-out jobs, deployment, benchmark, rollback, and exact redeployment must complete before the project claims a verified release.

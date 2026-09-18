@@ -1,6 +1,6 @@
 # Data card: Amazon Shopping Queries ESCI
 
-Status: local preparation and source-license review complete; independent commit-bound review remains pending.
+Status: the commit-bound cloud preparation completed and published its content-addressed artifact set; source-license review is complete. Final model evaluation remains pending.
 
 ## Intended use
 
@@ -70,8 +70,11 @@ Populate from `DatasetManifest`, never by hand:
 |---|---|
 | Source revision | `7916cdf6ab75a462e77f20ab40428a10923998d5` |
 | Source file SHA-256 values | examples `4a735b…4263a`; products `251244…5a265`; sources `a5fed8…778c50` (full values in the generated manifest) |
-| Canonical split-manifest identity | Pending a new preparation run under the required `query-split-manifest-v1` contract; do not infer it from a historical dataset or transport hash |
-| Historical semantic processed-dataset identity | `sha256:420735e9…e24f6` (`DatasetManifest.processed_checksum` from the pre-split-identity evidence run) |
+| Canonical split-manifest identity | `sha256:fa7dba0f7e4676e0c386efff0f6e4e184880de10abed683126dddc32c662f528` (`query-split-manifest-v1`) |
+| Current semantic processed-dataset identity | `sha256:814e06ceba032871d1cac66cd4dd59177f4348c9928fdf417f2a2f3218a29525` |
+| Current immutable key prefix | `data/processed/814e06ceba032871d1cac66cd4dd59177f4348c9928fdf417f2a2f3218a29525` |
+| Cloud preparation evidence | [Sanitized receipt](../evidence/cloud/live-data-preparation.json) · [workflow run](https://github.com/ArmanM1/machine-learning-product-search-ranking-platform/actions/runs/33719826237) |
+| Historical pre-split-contract identity | `sha256:420735e9…e24f6` (`DatasetManifest.processed_checksum` from the earlier local evidence run) |
 | Historical serialized `manifest.json` transport SHA-256 | `sha256:3f6902e7…4cf09d`; this is not either semantic identity |
 | Train queries/rows/products | 18,831 / 378,153 / 320,610 |
 | Validation queries/rows/products | 2,057 / 41,500 / 40,431 |
@@ -82,7 +85,7 @@ Populate from `DatasetManifest`, never by hand:
 | Dropped rows and reasons | 0 duplicate rows |
 | Join cardinality delta | 0 missing product joins |
 
-The shortened hashes above are display aids only. The recorded processed and transport hashes are historical evidence and must not be edited to impersonate a run under the new required split contract. A fresh preparation run must publish the complete `split_manifest_hash`, refreshed `processed_checksum`, and transport checksum before those values can be reported as current.
+The cloud workflow published and read back the exact seven-file processed inventory before publishing its sanitized handoff. Its full semantic dataset identity and split identity above are the current training/release inputs. Shortened historical hashes remain display aids only and are not interchangeable with either current identity or a serialized transport hash.
 
 ## Limitations
 

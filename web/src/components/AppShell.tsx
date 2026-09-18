@@ -11,6 +11,8 @@ const navItems = [
   { to: `/experiments/${publicConfig.runId}`, label: 'Experiment' },
 ]
 
+const repositoryUrl = 'https://github.com/ArmanM1/machine-learning-product-search-ranking-platform'
+
 function routeName(pathname: string) {
   if (pathname === '/') return 'Evidence overview'
   if (pathname === '/compare') return 'Query comparison'
@@ -104,6 +106,12 @@ export function AppShell() {
         <div>
           <p className="footer-title">Machine Learning Product Search Ranking Platform</p>
           <p>Reranks supplied candidate lists. It is not a full marketplace search engine.</p>
+          <nav className="footer-links" aria-label="Project resources">
+            <a href={repositoryUrl}>Source</a>
+            <a href={`${repositoryUrl}/blob/main/docs/architecture.md`}>Architecture</a>
+            <a href={`${repositoryUrl}/blob/main/docs/model-card.md`}>Model card</a>
+            <a href={`${repositoryUrl}/blob/main/docs/data-card.md`}>Data card</a>
+          </nav>
         </div>
         <div className="footer-meta">
           <span>US English</span>

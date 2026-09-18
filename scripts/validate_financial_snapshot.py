@@ -50,7 +50,7 @@ CAMPAIGN_BUDGET_ENV = "CAMPAIGN_BUDGET_USD"
 REQUIRED_CREDIT_RESERVE_ENV = "REQUIRED_CREDIT_RESERVE_USD"
 MAXIMUM_OUT_OF_POCKET_ENV = "MAXIMUM_OUT_OF_POCKET_USD"
 EXPECTED_SOURCE = "aws_billing_and_cost_management_console"
-MAXIMUM_AGE_SECONDS = 21_600
+MAXIMUM_AGE_SECONDS = 86_400
 RECEIPT_PATTERN = re.compile(r"^sha256:(?!0{64}$)[0-9a-f]{64}$")
 HMAC_KEY_PATTERN = re.compile(r"^(?!0{64}$)[0-9a-f]{64}$")
 WORKFLOW_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{1,63}$")
@@ -249,7 +249,7 @@ def build_snapshot(
         )
     raw_maximum_age = _required(environment, MAXIMUM_AGE_ENV)
     if raw_maximum_age != str(MAXIMUM_AGE_SECONDS):
-        raise FinancialSnapshotError("snapshot maximum age must be exactly six hours")
+        raise FinancialSnapshotError("snapshot maximum age must be exactly 24 hours")
 
     validated_at = _utc_now(now)
     elapsed_seconds = (validated_at - observed_at).total_seconds()
@@ -355,7 +355,7 @@ def main(
     except (FinancialSnapshotError, OSError):
         print(
             "Financial snapshot rejected; verify its protected UTC timestamp, source, "
-            "HMAC-bound operation scope, finite balances, and six-hour TTL.",
+            "HMAC-bound operation scope, finite balances, and 24-hour TTL.",
             file=sys.stderr,
         )
         return 1

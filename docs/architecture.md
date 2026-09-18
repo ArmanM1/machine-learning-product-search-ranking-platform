@@ -1,6 +1,6 @@
 # Architecture
 
-Status: implemented as local code and Terraform configuration; no AWS resource or workload execution is claimed here.
+Status: the AWS foundation is applied, its post-apply Terraform plan is clean, and the content-addressed dataset is published. Candidate training, held-out evaluation, public activation, benchmark, and rollback evidence remain pending.
 
 ## Product boundary
 

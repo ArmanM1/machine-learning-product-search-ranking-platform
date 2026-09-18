@@ -51,7 +51,7 @@ def protected_environment(
     environment = {
         "FINANCIAL_SNAPSHOT_OBSERVED_AT": observed_at.isoformat(),
         "FINANCIAL_SNAPSHOT_SOURCE": EXPECTED_SOURCE,
-        "FINANCIAL_SNAPSHOT_MAX_AGE_SECONDS": "21600",
+        "FINANCIAL_SNAPSHOT_MAX_AGE_SECONDS": "86400",
         "FINANCIAL_SNAPSHOT_HMAC_KEY": HMAC_KEY,
         "CAMPAIGN_SPEND_TO_DATE_USD": spend,
         "REMAINING_APPLICABLE_CREDIT_USD": credit,
@@ -133,10 +133,10 @@ def benchmark_cost(snapshot: ProtectedFinancialSnapshot) -> dict[str, object]:
 def test_protected_snapshot_accepts_the_boundary_and_records_no_balances() -> None:
     snapshot = build_snapshot(
         protected_environment(),
-        now=OBSERVED_AT + timedelta(hours=6),
+        now=OBSERVED_AT + timedelta(hours=24),
     )
 
-    assert snapshot.age_seconds_at_validation == 21_600
+    assert snapshot.age_seconds_at_validation == 86_400
     assert snapshot.receipt_binding_algorithm == "hmac-sha256-v2"
     assert snapshot.authorization_workflow == AUTHORIZATION_WORKFLOW
     assert snapshot.authorization_commit_sha == AUTHORIZATION_COMMIT
@@ -240,12 +240,12 @@ def test_receipt_rejects_cost_state_or_operation_input_replay(
 @pytest.mark.parametrize(
     ("environment", "checked_at", "message"),
     (
-        (protected_environment(), OBSERVED_AT + timedelta(hours=6, microseconds=1), "stale"),
+        (protected_environment(), OBSERVED_AT + timedelta(hours=24, microseconds=1), "stale"),
         (protected_environment(), OBSERVED_AT - timedelta(seconds=1), "future"),
         (
-            {**protected_environment(), "FINANCIAL_SNAPSHOT_MAX_AGE_SECONDS": "86400"},
+            {**protected_environment(), "FINANCIAL_SNAPSHOT_MAX_AGE_SECONDS": "21600"},
             OBSERVED_AT,
-            "six hours",
+            "24 hours",
         ),
         (
             {
@@ -323,7 +323,7 @@ def test_submission_revalidation_binds_receipt_and_rechecks_ttl(
         verify_cost_preflight(
             path,
             protected_environment(),
-            now=OBSERVED_AT + timedelta(hours=6),
+            now=OBSERVED_AT + timedelta(hours=24),
         ).receipt_sha256
         == protected_environment()["FINANCIAL_SNAPSHOT_RECEIPT_SHA256"]
     )
@@ -331,7 +331,7 @@ def test_submission_revalidation_binds_receipt_and_rechecks_ttl(
         verify_cost_preflight(
             path,
             protected_environment(),
-            now=OBSERVED_AT + timedelta(hours=6, seconds=1),
+            now=OBSERVED_AT + timedelta(hours=24, seconds=1),
         )
     with pytest.raises(FinancialSnapshotError, match="not bound"):
         verify_cost_preflight(
@@ -395,7 +395,7 @@ def test_costed_workflows_revalidate_at_the_cost_incurrence_boundary() -> None:
         assert "secrets.AWS_FINANCIAL_SNAPSHOT_OBSERVED_AT" in source
         assert "secrets.AWS_FINANCIAL_SNAPSHOT_RECEIPT_SHA256" in source
         assert "secrets.AWS_FINANCIAL_SNAPSHOT_HMAC_KEY" in source
-        assert 'FINANCIAL_SNAPSHOT_MAX_AGE_SECONDS: "21600"' in source
+        assert 'FINANCIAL_SNAPSHOT_MAX_AGE_SECONDS: "86400"' in source
         assert 'FINANCIAL_SNAPSHOT_SOURCE: "aws_billing_and_cost_management_console"' in source
         assert '"financial_snapshot"' in source
 
@@ -765,7 +765,7 @@ def _assert_protected_snapshot_environment(source: str) -> None:
     assert "FINANCIAL_SNAPSHOT_AUTHORIZATION_WORKFLOW" in source
     assert "FINANCIAL_SNAPSHOT_AUTHORIZATION_INPUTS_JSON" in source
     assert "FINANCIAL_SNAPSHOT_AUTHORIZATION_COMMIT_SHA" in source
-    assert 'FINANCIAL_SNAPSHOT_MAX_AGE_SECONDS: "21600"' in source
+    assert 'FINANCIAL_SNAPSHOT_MAX_AGE_SECONDS: "86400"' in source
     assert 'FINANCIAL_SNAPSHOT_SOURCE: "aws_billing_and_cost_management_console"' in source
 
 

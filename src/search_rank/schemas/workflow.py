@@ -185,8 +185,8 @@ class ProtectedFinancialSnapshot(ContractModel):
     schema_version: Literal["1.0.0"]
     observed_at: UtcDateTime
     validated_at: UtcDateTime
-    maximum_age_seconds: Literal[21_600]
-    age_seconds_at_validation: Annotated[int, Field(ge=0, le=21_600)]
+    maximum_age_seconds: Literal[86_400]
+    age_seconds_at_validation: Annotated[int, Field(ge=0, le=86_400)]
     source: Literal["aws_billing_and_cost_management_console"]
     authorization_workflow: Annotated[
         str,

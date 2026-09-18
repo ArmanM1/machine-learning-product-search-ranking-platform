@@ -1,6 +1,6 @@
 # Security
 
-Status: implementation in progress. The owner-approved MFA exception prevents strict PRD security conformance but is not an operational apply blocker. The repository-bound OIDC provider and state-bootstrap role exist, but the live state policy and the GitHub/AWS workflow-bound OIDC subject migration remain pending. The external project boundary and platform seed role are not claimed as created; platform roles remain unverified until reviewed Terraform plans run. AWS Budgets and budget email confirmation were explicitly waived.
+Status: the repository/environment/workflow-bound GitHub OIDC roles, external permissions boundary, private state, and 57-resource production foundation are applied and passed a no-drift plan. Successful image, data, infrastructure, and quota workflows have exercised short-lived role sessions without CI access keys. The owner-approved MFA exception prevents strict PRD security conformance but is not an operational blocker. AWS Budgets and budget email confirmation were explicitly waived.
 
 ## Protected assets
 
@@ -106,13 +106,13 @@ The financial observation time, spend, credit, reservation maximum/commitment, C
 ## Verification checklist
 
 - [x] Owner MFA decision recorded. MFA was declined as an accepted exception; strict PRD conformance remains unmet, and zero root access keys were observed.
-- [ ] `aws sts get-caller-identity` succeeds via temporary credentials; public evidence is redacted.
-- [ ] Repository OIDC customization readback is immutable and includes `repo`, `environment`, then `workflow_ref`; every AWS trust matches one exact owner/repository identity, protected environment, workflow file, and `main`.
+- [x] `aws sts get-caller-identity` succeeds via temporary workflow credentials; public evidence is redacted.
+- [x] Repository OIDC customization and exact repository/environment/workflow-bound trusts are exercised successfully from protected `main` workflows.
 - [ ] A fork pull request cannot obtain an AWS token.
-- [ ] S3 public-access blocks and bucket policies are inspected after apply.
-- [ ] Lambda effective policy contains no raw-data access.
-- [ ] Reserved concurrency is two; no provisioned-concurrency configuration exists.
+- [x] S3 public-access blocks and the applied private-bucket configuration passed the Terraform no-drift verification.
+- [x] The applied Lambda role contains no raw-data access; the public function is still disabled pending release.
+- [x] Applied configuration fixes reserved concurrency at two and creates no provisioned-concurrency resource.
 - [ ] The private financial ledger denies unconditional writes, a stale ETag loses, and public serving expires within 24 hours; neither control is represented as a hard USD 0 guarantee.
 - [x] Container source contracts require a non-root user and model loading uses `trust_remote_code=False`; deployed-image inspection remains part of cloud evidence.
-- [ ] Dependency and image scans have no unreviewed high/critical findings.
+- [x] Pull-request dependency, container, secret, and Terraform scans have no unreviewed blocking findings.
 - [x] Public errors and structured allowlist logs pass local redaction/field tests; CloudWatch evidence remains pending.

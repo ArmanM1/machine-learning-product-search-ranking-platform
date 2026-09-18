@@ -63,5 +63,16 @@ describe('verified experiment provenance', () => {
     expect(screen.getByText(run.split_manifest_hash)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Copy split manifest hash' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Hardware and boundary' })).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Experiment configuration and execution evidence')).toHaveClass('verified-layout')
+    expect(screen.getByRole('button', { name: 'Copy release invocation reference' })).toBeInTheDocument()
+  })
+
+  it('does not invent a reproduction command for fixture evidence', async () => {
+    vi.spyOn(apiClient, 'getRun').mockResolvedValue(fixtureRun)
+
+    render(<MemoryRouter><ExperimentPage /></MemoryRouter>)
+
+    expect(await screen.findByText(/not available for an illustrative fixture/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /copy reproduction command/i })).not.toBeInTheDocument()
   })
 })
