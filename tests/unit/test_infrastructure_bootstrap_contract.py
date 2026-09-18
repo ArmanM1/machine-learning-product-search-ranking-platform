@@ -314,6 +314,15 @@ def test_platform_plan_digest_binds_reviewed_commit_and_locked_providers() -> No
     assert 'test "${plan_hash}" = "${APPROVED_PLAN_SHA256}"' in source
 
 
+def test_platform_roles_use_their_own_environment_state_key() -> None:
+    iam = (ROOT / "infra/terraform/modules/platform/iam.tf").read_text(encoding="utf-8")
+
+    assert iam.count(
+        "${var.project_name}/${var.environment}/terraform.tfstate"
+    ) == 8
+    assert "${var.project_name}/prod/terraform.tfstate" not in iam
+
+
 def test_platform_plan_mismatch_artifacts_are_structural_and_redacted_only() -> None:
     source = (ROOT / ".github/workflows/infrastructure.yml").read_text(encoding="utf-8")
     workflow = yaml.load(source, Loader=yaml.BaseLoader)
@@ -427,8 +436,8 @@ def test_infrastructure_and_production_roles_have_separate_non_escalating_author
     )[0]
 
     for block in (infrastructure, production):
-        assert '${var.project_name}/prod/terraform.tfstate"' in block
-        assert '${var.project_name}/prod/terraform.tfstate.tflock"' in block
+        assert '${var.project_name}/${var.environment}/terraform.tfstate"' in block
+        assert '${var.project_name}/${var.environment}/terraform.tfstate.tflock"' in block
         assert 'actions   = ["s3:GetObject", "s3:PutObject"]' in block
         assert 'actions   = ["s3:DeleteObject", "s3:GetObject", "s3:PutObject"]' in block
 
