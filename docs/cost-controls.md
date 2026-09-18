@@ -57,7 +57,7 @@ commit, canonical digest of every dispatch input, and these protected reservatio
 - CPU/GPU hours reserved by this operation; and
 - authoritative CPU/GPU hours already used.
 
-The maximum age is fixed at six hours. Sanitized preflight evidence publishes only timestamps, operation
+The maximum age is fixed at 24 hours, matching the billing console's approximate daily estimate refresh while keeping the authorization bounded to one exact day. Sanitized preflight evidence publishes only timestamps, operation
 and reservation digests, workflow/commit identity, the keyed receipt, and explicit redaction flags. It does
 not publish balances, hour counters, reservation amounts, account identifiers, the HMAC key, or a billing
 export. A receipt is valid for one exact workflow, commit, and input object; changing an authorization

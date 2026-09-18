@@ -368,7 +368,7 @@ canonical `toJSON(inputs)` digest in the validator environment, run
 input, so a receipt cannot be reused for another workflow, commit, or changed dispatch input. The workflow
 recomputes it before every protected boundary and fails if any exact value differs. The public receipt is
 safe against low-entropy balance guessing because the key is never written to repository evidence or Actions
-artifacts. The source is fixed to `aws_billing_and_cost_management_console` and the TTL to six hours. No
+artifacts. The source is fixed to `aws_billing_and_cost_management_console` and the TTL to 24 hours, matching the console's approximate daily estimate refresh. No
 private balance, reservation, hour counter, or HMAC key is accepted from workflow dispatch or written to
 public evidence.
 

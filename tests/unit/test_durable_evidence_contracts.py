@@ -31,7 +31,7 @@ FINANCIAL_SNAPSHOT = {
     "schema_version": "1.0.0",
     "observed_at": "2026-09-02T12:00:00Z",
     "validated_at": "2026-09-02T12:00:00Z",
-    "maximum_age_seconds": 21_600,
+    "maximum_age_seconds": 86_400,
     "age_seconds_at_validation": 0,
     "source": "aws_billing_and_cost_management_console",
     "authorization_workflow": "train",

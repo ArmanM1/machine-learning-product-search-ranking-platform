@@ -72,7 +72,7 @@ jobs:
       FINANCIAL_SNAPSHOT_AUTHORIZATION_INPUTS_JSON: ${{ toJSON(inputs) }}
       FINANCIAL_SNAPSHOT_AUTHORIZATION_COMMIT_SHA: ${{ github.sha }}
       FINANCIAL_SNAPSHOT_SOURCE: "aws_billing_and_cost_management_console"
-      FINANCIAL_SNAPSHOT_MAX_AGE_SECONDS: "21600"
+      FINANCIAL_SNAPSHOT_MAX_AGE_SECONDS: "86400"
       TF_STATE_BUCKET: ${{ vars.AWS_TERRAFORM_STATE_BUCKET }}
       TREATMENT_RELEASE_INPUTS_S3_KEY: ${{ inputs.treatment_release_inputs_s3_key }}
       TREATMENT_RELEASE_INPUTS_SHA256: ${{ inputs.treatment_release_inputs_sha256 }}
