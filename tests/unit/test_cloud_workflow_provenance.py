@@ -484,6 +484,21 @@ def test_serving_git_sha_is_bound_through_terraform_and_health_smoke() -> None:
     assert deploy.count('.status == "ok" and .service_version == $version') >= 3
 
 
+def test_deploy_build_config_is_available_in_the_current_shell_and_later_steps() -> None:
+    deploy = (WORKFLOWS / "deploy.yml").read_text(encoding="utf-8")
+    build = deploy.split("name: Verify promotion and build immutable serving image", 1)[1]
+
+    first_use = build.index('--arg mode "${VITE_DATA_MODE}"')
+    assert build.index('VITE_DATA_MODE="api"') < first_use
+    assert build.index('VITE_API_BASE_URL=""') < first_use
+    assert build.index("export VITE_DATA_MODE VITE_API_BASE_URL VITE_PUBLIC_RUN_ID") < first_use
+    assert (
+        build.index("export VITE_DEFAULT_QUERY_ID VITE_BASELINE_MODEL_ID VITE_CANDIDATE_MODEL_ID")
+        < first_use
+    )
+    assert build.index('} >> "${GITHUB_ENV}"') < first_use
+
+
 def test_serving_throttle_supports_product_flows_but_preserves_compute_bound() -> None:
     serving = (ROOT / "infra/terraform/modules/platform/serving.tf").read_text(encoding="utf-8")
     deploy = (WORKFLOWS / "deploy.yml").read_text(encoding="utf-8")
