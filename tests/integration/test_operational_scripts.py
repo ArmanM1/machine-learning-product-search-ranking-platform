@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from search_rank.artifacts.checksums import sha256_file
 from search_rank.config import sha256_value
@@ -320,6 +321,13 @@ def test_release_verifier_accepts_exact_validation_bundle_and_rejects_tamper(
     write_public_evidence(evidence, tmp_path / "public-evidence.json")
     for name in ("LICENSE", "NOTICE"):
         (tmp_path / name).write_bytes((ROOT / name).read_bytes())
+    model_support = tmp_path / "models" / "pretrained" / "modules.json"
+    model_support.parent.mkdir(parents=True)
+    model_support.write_text(
+        json.dumps([{"idx": 0, "name": "", "type": "sentence_transformers.models.Transformer"}])
+        + "\n",
+        encoding="utf-8",
+    )
     artifact_names = (
         "baseline-summary.json",
         "curated-queries.json",
@@ -377,6 +385,13 @@ def test_release_verifier_accepts_exact_validation_bundle_and_rejects_tamper(
     assert result["evidence_mode"] == "validation_only"
     assert result["split_manifest_hash"] == split_hash
     validate_release_artifacts.validate_bundle(tmp_path)
+    validate_release_artifacts.JsonObjectArray.model_validate_json(
+        model_support.read_text(encoding="utf-8")
+    )
+    with pytest.raises(ValidationError, match="dict_type"):
+        validate_release_artifacts.JsonObject.model_validate_json(
+            model_support.read_text(encoding="utf-8")
+        )
 
     with (tmp_path / "public-evidence.json").open("a", encoding="utf-8") as handle:
         handle.write(" \n")

@@ -50,6 +50,10 @@ class JsonObject(RootModel[dict[str, Any]]):
     """Object-root JSON for third-party model support files without project semantics."""
 
 
+class JsonObjectArray(RootModel[list[dict[str, Any]]]):
+    """Object-array JSON for third-party model module registries."""
+
+
 MODELS: dict[str, type[BaseModel]] = {
     "access-counter": HeldoutAccessCounter,
     "baseline-summary": BaselineSummary,
@@ -104,7 +108,8 @@ def validate_bundle(root: Path) -> None:
                 raise ValueError(f"unrecognized root release JSON artifact: {relative}")
             validate_file(path, kind)
         elif relative.startswith("models/"):
-            JsonObject.model_validate_json(path.read_text(encoding="utf-8"))
+            validator = JsonObjectArray if path.name == "modules.json" else JsonObject
+            validator.model_validate_json(path.read_text(encoding="utf-8"))
         else:
             raise ValueError(f"unrecognized nested release JSON artifact: {relative}")
 
