@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import io
 import json
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -91,6 +93,7 @@ def test_private_failure_is_reduced_to_allowlisted_facts(
         "failure_class",
         "container_phase",
         "error_type",
+        "application_failure_category",
         "exit_code",
         "managed_spot",
         "training_seconds",
@@ -109,6 +112,69 @@ def test_private_failure_is_reduced_to_allowlisted_facts(
         "product-search-ranking-prod-final-hsensitive",
     ):
         assert private not in encoded
+
+
+def _write_failure_archive(path: Path, failure: str) -> None:
+    payload = json.dumps(
+        {
+            "command": "train",
+            "status": "failed",
+            "failure": failure,
+            "run_id": "private-run-identifier",
+            "artifact_paths": {"private": "/private/path"},
+        }
+    ).encode()
+    member = tarfile.TarInfo("artifacts/runs/train-20260918T120000Z-deadbeef/summary.json")
+    member.size = len(payload)
+    with tarfile.open(path, mode="w:gz") as archive:
+        archive.addfile(member, io.BytesIO(payload))
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected"),
+    (
+        ("CUDA training was requested but CUDA is unavailable", "cuda_unavailable"),
+        ("CUDA out of memory. Tried to allocate private tensor", "cuda_out_of_memory"),
+        ("CUBLAS_WORKSPACE_CONFIG must be configured", "cuda_determinism"),
+        ("training and validation query IDs overlap", "dataset_contract"),
+        (
+            "hard fraction requested but no hard examples are available",
+            "hard_example_sampling",
+        ),
+        ("managed-spot checkpoint optimizer state is malformed", "checkpoint_resume"),
+        ("private unrecognized application failure", "unknown"),
+    ),
+)
+def test_private_model_archive_failure_is_reduced_to_allowlisted_category(
+    tmp_path: Path, failure: str, expected: str
+) -> None:
+    archive = tmp_path / "model.tar.gz"
+    _write_failure_archive(archive, failure)
+
+    category = sanitizer._category_from_model_archive(archive)
+    diagnostic = sanitize_training_failure(
+        _description("AlgorithmError: phase=training_subprocess; exit_code=1"),
+        application_failure_category=category,
+    )
+    encoded = json.dumps(diagnostic, sort_keys=True)
+
+    assert diagnostic["application_failure_category"] == expected
+    assert "application_failure_summary_present" in diagnostic["signals"]
+    assert failure not in encoded
+    assert "private-run-identifier" not in encoded
+    assert "/private/path" not in encoded
+
+
+def test_model_archive_rejects_noncanonical_failure_summary_member(tmp_path: Path) -> None:
+    archive_path = tmp_path / "model.tar.gz"
+    payload = b'{"command":"train","status":"failed","failure":"private"}'
+    member = tarfile.TarInfo("../artifacts/runs/train-private/summary.json")
+    member.size = len(payload)
+    with tarfile.open(archive_path, mode="w:gz") as archive:
+        archive.addfile(member, io.BytesIO(payload))
+
+    with pytest.raises(TrainingFailureDiagnosticError):
+        sanitizer._category_from_model_archive(archive_path)
 
 
 @pytest.mark.parametrize(
@@ -170,12 +236,30 @@ def test_cli_never_echoes_private_reason(
 ) -> None:
     source = tmp_path / "private.json"
     output = tmp_path / "diagnostic.json"
+    archive = tmp_path / "model.tar.gz"
     secret_reason = "AlgorithmError: phase=training_subprocess; exit_code=1; secret-token"
+    private_application_reason = "private unrecognized application failure"
     source.write_text(json.dumps(_description(secret_reason)), encoding="utf-8")
+    _write_failure_archive(archive, private_application_reason)
 
-    assert main(["--description", str(source), "--output", str(output)]) == 0
+    assert (
+        main(
+            [
+                "--description",
+                str(source),
+                "--model-archive",
+                str(archive),
+                "--output",
+                str(output),
+            ]
+        )
+        == 0
+    )
     assert secret_reason not in capsys.readouterr().out
-    assert secret_reason not in output.read_text(encoding="utf-8")
+    rendered = output.read_text(encoding="utf-8")
+    assert secret_reason not in rendered
+    assert private_application_reason not in rendered
+    assert '"application_failure_category": "unknown"' in rendered
 
 
 def test_status_transitions_and_checkpoint_markers_prove_resume_progress() -> None:
@@ -270,6 +354,9 @@ def test_read_only_diagnostic_job_cannot_submit_compute_or_publish_raw_reason() 
     assert "--no-paginate" in diagnostic_source
     assert "--expected-job-name" in diagnostic_source
     assert "--expected-checkpoint-uri" in diagnostic_source
+    assert "--model-archive" in diagnostic_source
+    assert "head-object" in diagnostic_source
+    assert "1073741824" in diagnostic_source
     assert "create-training-job" not in diagnostic_source
     assert "stop-training-job" not in diagnostic_source
     assert "FailureReason" not in diagnostic_source

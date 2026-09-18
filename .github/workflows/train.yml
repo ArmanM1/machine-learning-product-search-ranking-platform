@@ -1464,8 +1464,11 @@ jobs:
           set -euo pipefail
           private_description="$(mktemp)"
           private_checkpoints="$(mktemp)"
-          trap 'rm -f -- "${private_description}" "${private_checkpoints}"' EXIT
+          private_model_head="$(mktemp)"
+          private_model_archive="$(mktemp)"
+          trap 'rm -f -- "${private_description}" "${private_checkpoints}" "${private_model_head}" "${private_model_archive}"' EXIT
           checkpoint_uri="s3://${ARTIFACT_BUCKET}/runs/${TARGET_JOB_NAME}/checkpoints/"
+          artifact_prefix="s3://${ARTIFACT_BUCKET}/"
           aws sagemaker describe-training-job \
             --training-job-name "${TARGET_JOB_NAME}" \
             > "${private_description}"
@@ -1475,11 +1478,39 @@ jobs:
             --max-keys 1000 \
             --no-paginate \
             > "${private_checkpoints}"
+          model_archive_args=()
+          model_uri="$(jq -r '.ModelArtifacts.S3ModelArtifacts // empty' "${private_description}")"
+          if [[ -n "${model_uri}" ]]; then
+            [[ "${model_uri}" == "${artifact_prefix}runs/${TARGET_JOB_NAME}/"* ]]
+            model_key="${model_uri#"${artifact_prefix}"}"
+            [[ "${model_key}" == "runs/${TARGET_JOB_NAME}/"* ]]
+            [[ "${model_key}" == *.tar.gz ]]
+            [[ "${model_key}" != *".."* ]]
+            [[ "${model_key}" != *[$'\r\n\t ']* ]]
+            if aws s3api head-object \
+              --bucket "${ARTIFACT_BUCKET}" \
+              --key "${model_key}" \
+              > "${private_model_head}" 2>/dev/null; then
+              jq -e '(.ContentLength | type == "number") and .ContentLength > 0' \
+                "${private_model_head}" >/dev/null
+              model_size="$(jq -r '.ContentLength' "${private_model_head}")"
+              [[ "${model_size}" =~ ^[0-9]+$ ]]
+              if (( model_size <= 1073741824 )); then
+                if ! aws s3 cp "${model_uri}" "${private_model_archive}" \
+                  --no-progress 1>/dev/null 2>/dev/null; then
+                  echo "Failed to read the bounded training output archive." >&2
+                  exit 1
+                fi
+                model_archive_args=(--model-archive "${private_model_archive}")
+              fi
+            fi
+          fi
           python scripts/sanitize_training_failure.py \
             --description "${private_description}" \
             --checkpoint-listing "${private_checkpoints}" \
             --expected-job-name "${TARGET_JOB_NAME}" \
             --expected-checkpoint-uri "${checkpoint_uri}" \
+            "${model_archive_args[@]}" \
             --output training-failure-diagnostic.json
           {
             echo "### Sanitized failed-training diagnostic"
@@ -1487,6 +1518,8 @@ jobs:
             jq -r '"- Failure class: `" + .failure_class + "`"' \
               training-failure-diagnostic.json
             jq -r '"- Container phase: `" + (.container_phase // "unavailable") + "`"' \
+              training-failure-diagnostic.json
+            jq -r '"- Application category: `" + (.application_failure_category // "unavailable") + "`"' \
               training-failure-diagnostic.json
             jq -r '"- Exit code: `" + ((.exit_code // "unavailable") | tostring) + "`"' \
               training-failure-diagnostic.json
