@@ -303,6 +303,7 @@ Create these protected environments with required reviewer approval:
 |---|---|---|
 | `aws-state-bootstrap` | `bootstrap-infrastructure.yml` | External, one-time state role; create and migrate the six-resource backend only |
 | `aws-infrastructure` | `infrastructure.yml` | Review/reconcile approved Terraform plans; use the temporary platform seed only for identity changes |
+| `aws-dev-lifecycle` | `dev-teardown.yml` | External, dev-only role; review and destroy only the exact non-serving disposable fixture |
 | `aws-images` | `build-images.yml` | Push immutable images |
 | `aws-data` | `prepare-data.yml` | Publish one checksum-verified, content-addressed prepared dataset and sanitized handoff |
 | `aws-baseline` | `baseline.yml` | Run validation-only unchanged baselines; cannot submit SageMaker jobs or read `test.parquet` |
@@ -316,8 +317,9 @@ Create these protected environments with required reviewer approval:
 Required non-secret variables include:
 
 ```text
-AWS_DEPLOY_ROLE_ARN  # environment-specific role in all ordinary environments except the three dedicated roles below
+AWS_DEPLOY_ROLE_ARN  # environment-specific role in all ordinary environments except the four dedicated roles below
 AWS_BOOTSTRAP_ROLE_ARN  # aws-state-bootstrap only; remove after the state handoff
+AWS_DEV_LIFECYCLE_ROLE_ARN  # aws-dev-lifecycle only; remove after the verified dev destroy
 AWS_BASELINE_ROLE_ARN  # aws-baseline only
 AWS_TRIAL_SELECTION_ROLE_ARN  # aws-trial-selection only
 AWS_BENCHMARK_ROLE_ARN  # production-benchmark only
@@ -420,10 +422,11 @@ access acknowledgement separate as well.
     deployment decision under `promoted/decisions/<release-id>.json` but does not mutate the live pointer.
 12. `deploy.yml`: separate manual candidate deployment; Terraform state detection keeps an existing public surface enabled while a new private candidate version is reconciled. Before any smoke traffic, one first rank request against that newly published candidate version is correlated with its CloudWatch initialization report and structured model-load/memory logs, and the observed Lambda resolved-image URI must exactly equal the verified ECR repository-plus-digest URI. The workflow tests the candidate API, then maps staged browser static requests to the immutable release prefix without changing live-root objects. Its same-origin API check uses a brief revision-ID-CAS `production` canary that must restore the exact captured alias state or disable traffic. Durable activation verifies the exact CloudFront root, every release-object byte, and the complete desktop/mobile/keyboard browser/API flow, then may advance `promoted/current.json`. Activation and manual rollback compensate on normal errors, `INT`, `TERM`, and job cancellation; incomplete restoration forces Lambda concurrency to zero. The production alias revision and resolved image are re-observed immediately before deployment evidence advances a versioned canonical key with an ETag precondition, allowing a fresh-version retry while retaining every earlier S3 version.
 13. `benchmark-serving.yml`: optional manual post-deployment evidence run over candidate counts 10/20/40 and offered concurrency 1/4/8, with 10 explicit warmups and 200 measured requests per condition. Fixed concurrency waves are paced to 18 requests/second below the API stage's 20 requests/second throttle, leaving reserved Lambda concurrency two as the measured capacity bound. Each successful rank response carries a numeric server-side serialization duration for the validated response's JSON-mode export and final byte rendering; the benchmark retains every raw value and recomputes separate percentiles rather than estimating serialization as end-to-end minus model time. It checksum-binds the separate controlled cold observation, excludes it and pre-benchmark observations from all warm percentiles, reports throttles above the reserved bound, and makes no throughput or scaling claim.
+14. `dev-teardown.yml`: separate plan/destroy dispatches for the exact non-serving 56-resource dev proof fixture. The protected external role has no production deletion authority; the destroy dispatch reproduces the reviewed value-free fingerprint, empties both versioned dev buckets, applies that exact plan, and publishes count-only absence evidence. The human bootstrap operator deletes the external lifecycle role last before `FR-CLOUD-009` is marked verified.
 
 The baseline is the first public serving revision. Candidate deployment is allowed only after a valid promotion manifest exists.
 
-`bootstrap-infrastructure.yml` and `infrastructure.yml` deliberately separate review from apply. A plan run emits a redacted plan and canonical SHA-256. A later protected apply dispatch must provide that exact hash and reviewed commit; any changed source, production dependency lock, selected provider, or plan fails, and both workflows reject delete or replacement actions. The state-bootstrap workflow accepts create-only changes for exactly six resources. Destructive teardown remains a separately audited temporary-human procedure.
+`bootstrap-infrastructure.yml` and `infrastructure.yml` deliberately separate review from apply. A plan run emits a redacted plan and canonical SHA-256. A later protected apply dispatch must provide that exact hash and reviewed commit; any changed source, production dependency lock, selected provider, or plan fails, and both workflows reject delete or replacement actions. The state-bootstrap workflow accepts create-only changes for exactly six resources. Production and arbitrary-state teardown remain temporary-human procedures; only the fixed disposable-dev proof profile has a dedicated repository workflow, documented in [`teardown.md`](teardown.md).
 
 The baseline bundle carries typed `validation_only` public evidence with a zero test-access count. Candidate bundles carry typed `verified` evidence from the bound held-out report. Both modes are checksum-covered; neither is assembled with shell JSON projection.
 

@@ -82,7 +82,7 @@ Status legend: **code path** means an implementation location exists or is reser
 | FR-CLOUD-006 | `infra/terraform/`, `reserve_financial_capacity.py` | Format/validate passed locally; apply/plan plus conditional ledger create/conflict/idempotency evidence pending |
 | FR-CLOUD-007 | `iam.tf`, `render_bootstrap_iam.py`, `docs/cloud-deployment.md` | Repository OIDC customization readback, applied one-workflow-per-role trust inspection, and fork/wrong-workflow denial tests pending |
 | FR-CLOUD-008 | Lambda aliases/S3 versions/ECR retention, `deploy.yml` | Successful rollback artifact |
-| FR-CLOUD-009 | `docs/teardown.md` | Verified disposable-environment destroy evidence |
+| FR-CLOUD-009 | `dev-teardown.yml`, `dev_teardown_contract.py`, version-aware S3/ECR cleanup scripts, `docs/teardown.md` | Repository-side exact dev-only plan/destroy/absence path implemented; one-time external role bootstrap, live destroy, role removal, and billing confirmation pending |
 | FR-CLOUD-010 | One versioned CLI/image path plus bounded instance choices in `train.yml` | Completed CPU and authorized GPU parity evidence as applicable |
 | FR-CLOUD-011 | `cold_start_evidence.py`, `deploy.yml`, `benchmark-serving.yml`, logs/metrics | Deploy proves a newly published, previously uninvoked on-demand candidate version and correlates its first rank request with CloudWatch Init Duration plus structured model-load/memory evidence; the post-deploy warm matrix excludes that sample |
 
