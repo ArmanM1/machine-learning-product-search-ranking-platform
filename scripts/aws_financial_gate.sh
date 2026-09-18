@@ -31,11 +31,22 @@ if [[ "${requires_financial_gate}" -eq 1 ]]; then
   PYTHONPATH="${GITHUB_WORKSPACE}/src" \
     uv run --project "${GITHUB_WORKSPACE}" --frozen --no-dev python \
     "${GITHUB_WORKSPACE}/scripts/validate_financial_snapshot.py" emit --output /dev/null
-  PYTHONPATH="${GITHUB_WORKSPACE}/src" \
-    uv run --project "${GITHUB_WORKSPACE}" --frozen --no-dev python \
-    "${GITHUB_WORKSPACE}/scripts/reserve_financial_capacity.py" verify \
-      --bucket "${TF_STATE_BUCKET}" \
-      --output /dev/null
+  reservation_required="${FINANCIAL_CAPACITY_RESERVATION_REQUIRED:-true}"
+  case "${reservation_required}" in
+    true)
+      PYTHONPATH="${GITHUB_WORKSPACE}/src" \
+        uv run --project "${GITHUB_WORKSPACE}" --frozen --no-dev python \
+        "${GITHUB_WORKSPACE}/scripts/reserve_financial_capacity.py" verify \
+          --bucket "${TF_STATE_BUCKET}" \
+          --output /dev/null
+      ;;
+    false)
+      ;;
+    *)
+      echo "FINANCIAL_CAPACITY_RESERVATION_REQUIRED must be true or false" >&2
+      exit 2
+      ;;
+  esac
 fi
 
 exec "${REAL_AWS_CLI}" "$@"

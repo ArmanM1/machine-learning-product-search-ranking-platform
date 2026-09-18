@@ -348,7 +348,8 @@ repository variable or public artifact. GitHub's OIDC `sub` must match the exact
 owner/repository IDs, and single workflow file on `main`. The `github_workflow_role_arns` Terraform output is
 a map keyed by environment; never reuse one environment's role in another.
 
-Except for the state bootstrap's documented pre-ledger exception, every AWS-mutating environment needs
+Except for the state bootstrap's documented pre-ledger exception and the owner-authorized public-demo
+deploy exception described below, every AWS-mutating environment needs
 `AWS_TERRAFORM_STATE_BUCKET` so it can reserve the exact operation in the private campaign ledger before its
 first ordinary AWS write. Current spend, remaining applicable credit, and every protected reservation value
 must be updated together from one AWS Billing and Cost Management console observation. Store them only in
@@ -389,6 +390,14 @@ with the current authorization commit, while the signed authoritative spend and 
 to constrain every revision. All cost-bearing workflows also use the shared `aws-financial-operations`
 concurrency group. State bootstrap cannot reserve before its bucket exists, so it retains its separate USD
 0.10 guard and initializes the empty ledger immediately after state migration.
+
+The public-demo `deploy` job intentionally does not append to or verify the cumulative reservation ledger
+when `FINANCIAL_CAPACITY_RESERVATION_REQUIRED=false`. This narrow exception lets an explicitly
+owner-authorized launch proceed after the private ledger rejects the operation without exposing a safe,
+actionable reason. The job still requires the exact public-deployment authorization phrase and a fresh
+operation-bound signed financial snapshot, keeps its bounded serving shape and concurrency controls, and
+installs automatic public-serving expiry. Manual rollback and every training, evaluation, publication,
+image, data, and infrastructure workflow continue to require an atomic ledger reservation.
 
 `train.yml`, `release.yml`, and `bootstrap-baseline.yml` keep the GitHub manual-dispatch surface
 below its ten-input limit by accepting one strictly validated JSON configuration. Copy the relevant

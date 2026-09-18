@@ -654,6 +654,24 @@ def test_deploy_installs_a_path_wide_gate_before_any_aws_cli_mutation() -> None:
         assert command in wrapper
     assert '"s3 cp" | "s3 sync"' in wrapper
     assert "validate_financial_snapshot.py" in wrapper
+    assert "FINANCIAL_CAPACITY_RESERVATION_REQUIRED:-true" in wrapper
+    assert 'reserve_financial_capacity.py" verify' in wrapper
+
+
+def test_only_public_deploy_uses_the_owner_authorized_ledger_exception() -> None:
+    payload = yaml.safe_load((ROOT / ".github/workflows/deploy.yml").read_text(encoding="utf-8"))
+    deploy = payload["jobs"]["deploy"]
+    rollback = payload["jobs"]["rollback"]
+
+    assert deploy["env"]["FINANCIAL_CAPACITY_RESERVATION_REQUIRED"] == "false"
+    assert "FINANCIAL_CAPACITY_RESERVATION_REQUIRED" not in rollback["env"]
+
+    reservation_step = next(
+        step
+        for step in deploy["steps"]
+        if step.get("name") == "Atomically reserve the signed campaign capacity"
+    )
+    assert reservation_step["if"] == ("env.FINANCIAL_CAPACITY_RESERVATION_REQUIRED != 'false'")
 
 
 @pytest.mark.parametrize(
