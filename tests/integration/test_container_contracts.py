@@ -32,6 +32,7 @@ def test_container_contract_is_digest_pinned_and_non_root(filename: str) -> None
         assert "ENTRYPOINT" in text
     if filename == "Dockerfile.train":
         assert 'ENTRYPOINT ["python", "/app/scripts/container_train.py"]' in text
+        assert "CUBLAS_WORKSPACE_CONFIG=:4096:8" in text
         assert "SEARCH_RANK_CHECKPOINT_DIR=/opt/ml/checkpoints" in text
 
 
@@ -40,6 +41,7 @@ def test_ci_executes_installed_training_cli_and_attests_api_mode() -> None:
     deploy = (ROOT / ".github/workflows/deploy.yml").read_text(encoding="utf-8")
 
     assert '--entrypoint python "${image}" -m search_rank.cli --help' in pull_request
+    assert 'os.environ["CUBLAS_WORKSPACE_CONFIG"] == ":4096:8"' in pull_request
     assert '"${image}" train --help' not in pull_request
     for name in (
         "VITE_DATA_MODE",

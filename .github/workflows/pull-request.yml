@@ -119,6 +119,8 @@ jobs:
           case "${IMAGE_KIND}" in
             train)
               docker run --rm --entrypoint python "${image}" -m search_rank.cli --help
+              docker run --rm --entrypoint python "${image}" -c \
+                'import os; assert os.environ["CUBLAS_WORKSPACE_CONFIG"] == ":4096:8"'
               ;;
             eval)
               docker run --rm "${image}" --help

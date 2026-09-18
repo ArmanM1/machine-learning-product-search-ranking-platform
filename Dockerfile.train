@@ -14,6 +14,7 @@ ENV PYTHONUNBUFFERED=1 \
     PATH="/app/.venv/bin:${PATH}" \
     HF_HOME=/opt/ml/cache/huggingface \
     TRANSFORMERS_CACHE=/opt/ml/cache/huggingface \
+    CUBLAS_WORKSPACE_CONFIG=:4096:8 \
     SEARCH_RANK_CHECKPOINT_DIR=/opt/ml/checkpoints
 
 WORKDIR /app
