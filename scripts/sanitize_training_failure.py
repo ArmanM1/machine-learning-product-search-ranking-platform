@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import tarfile
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -31,6 +32,94 @@ _EXIT_CODE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _CHECKPOINT_KEY_PATTERN = re.compile(r"/checkpoints/epoch-([0-9]{4})/COMPLETE$")
+_FAILURE_SUMMARY_MEMBER_PATTERN = re.compile(
+    r"^(?:\./)?artifacts/runs/train-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}/summary\.json$"
+)
+_MAX_MODEL_ARCHIVE_BYTES = 1024 * 1024 * 1024
+_MAX_ARCHIVE_MEMBERS = 100_000
+_MAX_FAILURE_SUMMARY_BYTES = 1024 * 1024
+_APPLICATION_FAILURE_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        "cuda_out_of_memory",
+        ("cuda out of memory", "cuda error: out of memory", "outofmemoryerror"),
+    ),
+    (
+        "cuda_unavailable",
+        (
+            "cuda training was requested but cuda is unavailable",
+            "cuda device selection has no available cuda device",
+        ),
+    ),
+    (
+        "cuda_determinism",
+        ("cublas_workspace_config", "does not have a deterministic implementation"),
+    ),
+    (
+        "device_mismatch",
+        (
+            "actual training accelerator differs from the frozen cloud request",
+            "expected all tensors to be on the same device",
+        ),
+    ),
+    (
+        "dataset_contract",
+        (
+            "frozen experiment references a different dataset manifest",
+            "training sample missing columns",
+            "candidate training accepts training rows only",
+            "checkpoint selection accepts validation rows only",
+            "validation frame missing columns",
+            "training and validation query ids overlap",
+        ),
+    ),
+    (
+        "hard_example_sampling",
+        (
+            "hard fraction requested but no hard examples are available",
+            "hard examples missing columns",
+            "missing cross-encoder text column",
+            "mixed sampler accepts training rows only",
+        ),
+    ),
+    (
+        "checkpoint_resume",
+        (
+            "managed-spot checkpoint",
+            "checkpoint commit marker",
+            "checkpoint manifest",
+            "checkpoint file inventory",
+        ),
+    ),
+    (
+        "validation_metric",
+        ("validation set has no query with positive ideal dcg",),
+    ),
+    (
+        "storage_io",
+        (
+            "no space left on device",
+            "disk quota exceeded",
+            "permission denied",
+            "read-only file system",
+        ),
+    ),
+    (
+        "trainer_initialization",
+        (
+            "cross-encoder has no underlying transformer model",
+            "effective batch size must be divisible by gradient accumulation steps",
+            "unsupported training device type",
+        ),
+    ),
+    (
+        "post_training_verification",
+        (
+            "training completed without a valid checkpoint",
+            "candidate training did not change any parameters",
+            "fresh checkpoint load changed the probe prediction",
+        ),
+    ),
+)
 _SECONDARY_STATUSES = {
     "Starting",
     "LaunchingMLInstances",
@@ -54,6 +143,56 @@ _SECONDARY_STATUSES = {
 
 class TrainingFailureDiagnosticError(ValueError):
     """A private description cannot be reduced safely."""
+
+
+def _application_failure_category(failure: str) -> str:
+    normalized = failure.casefold()
+    for category, patterns in _APPLICATION_FAILURE_PATTERNS:
+        if any(pattern in normalized for pattern in patterns):
+            return category
+    return "unknown"
+
+
+def _category_from_model_archive(path: Path) -> str:
+    try:
+        archive_size = path.stat().st_size
+    except OSError as error:
+        raise TrainingFailureDiagnosticError("model-archive") from error
+    if not 0 < archive_size <= _MAX_MODEL_ARCHIVE_BYTES:
+        raise TrainingFailureDiagnosticError("model-archive-size")
+    try:
+        with tarfile.open(path, mode="r:gz") as archive:
+            matches: list[tarfile.TarInfo] = []
+            for index, member in enumerate(archive, start=1):
+                if index > _MAX_ARCHIVE_MEMBERS:
+                    raise TrainingFailureDiagnosticError("model-archive-members")
+                if _FAILURE_SUMMARY_MEMBER_PATTERN.fullmatch(member.name):
+                    matches.append(member)
+            if len(matches) != 1:
+                raise TrainingFailureDiagnosticError("failure-summary-count")
+            member = matches[0]
+            if not member.isfile() or not 0 < member.size <= _MAX_FAILURE_SUMMARY_BYTES:
+                raise TrainingFailureDiagnosticError("failure-summary-member")
+            handle = archive.extractfile(member)
+            if handle is None:
+                raise TrainingFailureDiagnosticError("failure-summary-member")
+            raw_summary = handle.read(_MAX_FAILURE_SUMMARY_BYTES + 1)
+    except (OSError, tarfile.TarError) as error:
+        raise TrainingFailureDiagnosticError("model-archive") from error
+    if len(raw_summary) > _MAX_FAILURE_SUMMARY_BYTES:
+        raise TrainingFailureDiagnosticError("failure-summary-size")
+    try:
+        summary = json.loads(raw_summary)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise TrainingFailureDiagnosticError("failure-summary-json") from error
+    if not isinstance(summary, dict):
+        raise TrainingFailureDiagnosticError("failure-summary-document")
+    if summary.get("command") != "train" or summary.get("status") != "failed":
+        raise TrainingFailureDiagnosticError("failure-summary-identity")
+    failure = summary.get("failure")
+    if not isinstance(failure, str) or not failure or len(failure) > 8192:
+        raise TrainingFailureDiagnosticError("failure-summary-reason")
+    return _application_failure_category(failure)
 
 
 def _optional_nonnegative_int(value: object, field: str) -> int | None:
@@ -167,6 +306,7 @@ def sanitize_training_failure(
     *,
     expected_job_name: str | None = None,
     expected_checkpoint_uri: str | None = None,
+    application_failure_category: str | None = None,
 ) -> dict[str, Any]:
     """Return only allowlisted diagnostic facts; never copy the private reason."""
 
@@ -206,6 +346,14 @@ def sanitize_training_failure(
             description, expected_job_name, expected_checkpoint_uri
         )
     completed_checkpoint_epochs = _checkpoint_epochs(checkpoint_listing, expected_prefix)
+    allowed_application_categories = {
+        category for category, _patterns in _APPLICATION_FAILURE_PATTERNS
+    } | {"unknown"}
+    if (
+        application_failure_category is not None
+        and application_failure_category not in allowed_application_categories
+    ):
+        raise TrainingFailureDiagnosticError("application-failure-category")
 
     phase_match = _PHASE_PATTERN.search(reason)
     phase = phase_match.group(1).casefold() if phase_match else None
@@ -232,6 +380,8 @@ def sanitize_training_failure(
         signals.append("container_exit_code_present")
     if phase is not None:
         signals.append("container_phase_present")
+    if application_failure_category is not None:
+        signals.append("application_failure_summary_present")
 
     return {
         "schema_version": "1.0.0",
@@ -240,6 +390,7 @@ def sanitize_training_failure(
         "failure_class": _failure_class(reason, exit_code, status, secondary_statuses),
         "container_phase": phase,
         "error_type": error_type,
+        "application_failure_category": application_failure_category,
         "exit_code": exit_code,
         "managed_spot": managed_spot,
         "training_seconds": training_seconds,
@@ -262,6 +413,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--checkpoint-listing", type=Path)
     parser.add_argument("--expected-job-name")
     parser.add_argument("--expected-checkpoint-uri")
+    parser.add_argument("--model-archive", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
@@ -279,6 +431,11 @@ def main(argv: list[str] | None = None) -> int:
             checkpoint_listing,
             expected_job_name=args.expected_job_name,
             expected_checkpoint_uri=args.expected_checkpoint_uri,
+            application_failure_category=(
+                _category_from_model_archive(args.model_archive)
+                if args.model_archive is not None
+                else None
+            ),
         )
         args.output.write_text(
             json.dumps(diagnostic, indent=2, sort_keys=True) + "\n",
