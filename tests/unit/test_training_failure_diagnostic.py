@@ -154,7 +154,7 @@ def _write_failure_archive(path: Path, failure: str) -> None:
         (
             "managed-spot checkpoint optimizer state is malformed",
             "checkpoint_resume",
-            ["checkpoint", "training"],
+            ["checkpoint", "training", "optimizer_state"],
         ),
         ("private unrecognized application failure", "unknown", []),
     ),
@@ -179,6 +179,145 @@ def test_private_model_archive_failure_is_reduced_to_allowlisted_category(
     assert failure not in encoded
     assert "private-run-identifier" not in encoded
     assert "/private/path" not in encoded
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_category", "expected_signals"),
+    (
+        (
+            "RuntimeError: save_pretrained safe_serialization safetensors shared tensor "
+            "CUSTOMER_SECRET_17",
+            "checkpoint_model_save",
+            [
+                "tensor",
+                "operation_save_pretrained",
+                "format_safetensors",
+                "shared_tensor",
+                "exception_runtime",
+            ],
+        ),
+        (
+            "PicklingError: torch.save optimizer-state.pt cannot pickle CUSTOMER_SECRET_17",
+            "checkpoint_optimizer_save",
+            [
+                "serialization",
+                "training",
+                "optimizer_state",
+                "operation_torch_save",
+                "format_pickle",
+                "exception_serialization",
+            ],
+        ),
+        (
+            "TypeError: CUSTOMER_SECRET_17 is not JSON serializable while writing "
+            "checkpoint-manifest.json with RNG state",
+            "checkpoint_metadata_write",
+            [
+                "checkpoint",
+                "serialization",
+                "format_json",
+                "checkpoint_manifest",
+                "rng_state",
+                "exception_type",
+            ],
+        ),
+        (
+            "OSError: [Errno 18] Invalid cross-device link for .staging-CUSTOMER_SECRET_17 "
+            "during staging.replace",
+            "checkpoint_commit",
+            ["contract", "operation_staging_rename", "cross_device", "exception_os"],
+        ),
+        (
+            "PermissionError: [Errno 13] Permission denied: /CUSTOMER_SECRET_17",
+            "storage_io",
+            ["filesystem", "permission_denied", "exception_os"],
+        ),
+        (
+            "OSError: [Errno 30] Read-only file system: /CUSTOMER_SECRET_17",
+            "storage_io",
+            ["filesystem", "read_only_filesystem", "exception_os"],
+        ),
+        (
+            "OSError: [Errno 28] No space left on device: /CUSTOMER_SECRET_17",
+            "storage_io",
+            ["disk_full", "exception_os"],
+        ),
+        (
+            "FileNotFoundError: [Errno 2] No such file or directory: /CUSTOMER_SECRET_17",
+            "storage_io",
+            ["filesystem", "missing_path", "exception_os"],
+        ),
+    ),
+)
+def test_checkpoint_write_clues_emit_only_ordered_allowlist_tokens(
+    failure: str, expected_category: str, expected_signals: list[str]
+) -> None:
+    category, signals = sanitizer._application_failure_details(failure)
+    allowed_categories = {
+        candidate for candidate, _patterns in sanitizer._APPLICATION_FAILURE_PATTERNS
+    } | {"unknown"}
+    allowed_signals = [
+        signal for signal, _patterns in sanitizer._APPLICATION_FAILURE_SIGNAL_PATTERNS
+    ]
+    encoded = json.dumps({"category": category, "signals": signals})
+
+    assert category == expected_category
+    assert signals == expected_signals
+    assert category in allowed_categories
+    assert signals == [signal for signal in allowed_signals if signal in signals]
+    assert "CUSTOMER_SECRET_17" not in encoded
+    assert failure not in encoded
+
+
+def test_ambiguous_exception_text_emits_multiple_fixed_families_without_secret() -> None:
+    failure = (
+        "RuntimeError caused by OSError caused by ValueError: "
+        "customer_identifier=PRIVATE_CUSTOMER_9"
+    )
+
+    category, signals = sanitizer._application_failure_details(failure)
+    encoded = json.dumps({"category": category, "signals": signals})
+
+    assert category == "unknown"
+    assert signals == ["exception_os", "exception_runtime", "exception_value"]
+    assert "PRIVATE_CUSTOMER_9" not in encoded
+    assert "customer_identifier" not in encoded
+    assert failure not in encoded
+
+
+def test_rich_private_archive_error_cannot_escape_the_fixed_classifier_fields(
+    tmp_path: Path,
+) -> None:
+    archive = tmp_path / "model.tar.gz"
+    secret = "CUSTOMER_SECRET_7f8ad09e"
+    private_path = f"/private/customers/{secret}/model.safetensors"
+    private_identifier = f"arn:private:training:{secret}"
+    failure = (
+        "RuntimeError: save_pretrained safe_serialization found shared tensors; "
+        f"path={private_path}; customer_identifier={private_identifier}"
+    )
+    _write_failure_archive(archive, failure)
+
+    category, signals = sanitizer._details_from_model_archive(archive)
+    diagnostic = sanitize_training_failure(
+        _description("AlgorithmError: phase=training_subprocess; exit_code=1"),
+        application_failure_category=category,
+        application_failure_signals=signals,
+    )
+    encoded = json.dumps(diagnostic, sort_keys=True)
+
+    assert category == "checkpoint_model_save"
+    assert signals == [
+        "tensor",
+        "model",
+        "filesystem",
+        "operation_save_pretrained",
+        "format_safetensors",
+        "shared_tensor",
+        "exception_runtime",
+    ]
+    for private in (failure, secret, private_path, private_identifier, "customer_identifier"):
+        assert private not in encoded
 
 
 def test_model_archive_rejects_noncanonical_failure_summary_member(tmp_path: Path) -> None:
