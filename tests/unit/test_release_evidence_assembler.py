@@ -736,7 +736,7 @@ def test_assembler_binds_typed_chain_and_derives_serialization(tmp_path: Path) -
     payload = _assemble(root)
 
     assert payload["release_gate"]["passed"] is True
-    assert payload["workflow_run_ids"]["deploy_baseline"] == "2000"
+    assert "workflow_run_ids" not in payload
     assert payload["rollback"]["verified"] is True
     assert payload["redeployment"]["exact_winner_redeployed"] is True
     assert payload["redeployment"]["fresh_runtime_revision_published"] is True
@@ -748,6 +748,12 @@ def test_assembler_binds_typed_chain_and_derives_serialization(tmp_path: Path) -
         "deployment-version",
         "etag-",
         "published_prefix",
+        '"1001"',
+        '"2000"',
+        '"2001"',
+        '"2002"',
+        '"2003"',
+        '"2004"',
     ):
         assert marker not in rendered
     target = assembler.write_immutable(payload, tmp_path / "committed-releases")
@@ -982,6 +988,17 @@ def test_public_filter_rejects_private_text_in_allowlisted_values(tmp_path: Path
     with pytest.raises(assembler.ReleaseEvidenceError, match="private text"):
         assembler.write_immutable(
             {"release_id": "safe-release", "detail": "person@example.com"},
+            tmp_path / "committed-releases",
+        )
+
+
+def test_public_filter_rejects_numeric_github_workflow_ids(tmp_path: Path) -> None:
+    with pytest.raises(assembler.ReleaseEvidenceError, match="private field"):
+        assembler.write_immutable(
+            {
+                "release_id": "safe-release",
+                "workflow_run_ids": {"release": "123456789"},
+            },
             tmp_path / "committed-releases",
         )
 
