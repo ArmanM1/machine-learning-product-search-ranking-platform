@@ -75,6 +75,22 @@ def test_local_stage_preserves_original_exception_and_message(
     assert captured.value is original
 
 
+def test_managed_stage_stays_redacted_when_failure_file_is_unwritable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    blocked_parent = tmp_path / "not-a-directory"
+    blocked_parent.write_text("occupied\n", encoding="utf-8")
+    private_message = "s3://private-bucket/customer-name"
+    monkeypatch.setenv(FAILURE_DIAGNOSTIC_ENV, str(blocked_parent / "failure"))
+
+    with pytest.raises(TrainingStageFailure) as captured, training_stage("artifact_write"):
+        raise OSError(private_message)
+
+    assert str(captured.value) == "phase=artifact_write; error_type=io_failure"
+    assert private_message not in str(captured.value)
+
+
 @pytest.mark.parametrize(
     ("error", "category"),
     (

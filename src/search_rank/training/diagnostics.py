@@ -146,7 +146,9 @@ class TrainingStageTracker:
             error_type=error_type,
         )
         self._active = False
-        if _write_failure(self.stage, error_type):
+        managed_diagnostic = _diagnostic_path() is not None
+        _write_failure(self.stage, error_type)
+        if managed_diagnostic:
             return TrainingStageFailure(self.stage, error_type)
         return None
 
