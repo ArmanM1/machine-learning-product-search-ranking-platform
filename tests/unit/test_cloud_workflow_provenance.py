@@ -547,6 +547,19 @@ def test_manual_rollback_is_prebound_smoked_then_cas_advanced_and_compensated() 
     assert "await page.getByRole('link', { name: 'Failures', exact: true }).click()" in rollback
 
 
+def test_manual_rollback_resolves_live_infrastructure_from_protected_state() -> None:
+    deploy = (WORKFLOWS / "deploy.yml").read_text(encoding="utf-8")
+    rollback_job = deploy.split("\n  rollback:\n", 1)[1]
+
+    assert "Resolve rollback infrastructure from the protected Terraform state" in rollback_job
+    assert "terraform output -raw lambda_function_name" in rollback_job
+    assert "terraform output -raw cloudfront_distribution_id" in rollback_job
+    assert "terraform output -raw cloudfront_url" in rollback_job
+    assert "LAMBDA_FUNCTION_NAME: ${{ vars.AWS_LAMBDA_FUNCTION_NAME }}" not in rollback_job
+    assert "CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.AWS_CLOUDFRONT_DISTRIBUTION_ID }}" not in rollback_job
+    assert "CLOUDFRONT_URL: ${{ vars.AWS_CLOUDFRONT_URL }}" not in rollback_job
+
+
 def test_deploy_static_and_compensation_paths_are_fail_closed() -> None:
     deploy = (WORKFLOWS / "deploy.yml").read_text(encoding="utf-8")
     iam = (ROOT / "infra/terraform/modules/platform/iam.tf").read_text(encoding="utf-8")

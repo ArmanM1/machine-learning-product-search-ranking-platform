@@ -2656,9 +2656,6 @@ jobs:
       ARTIFACT_BUCKET: ${{ vars.AWS_ARTIFACT_BUCKET }}
       SITE_BUCKET: ${{ vars.AWS_SITE_BUCKET }}
       SERVE_REPOSITORY: ${{ vars.AWS_SERVE_ECR_REPOSITORY_URL }}
-      LAMBDA_FUNCTION_NAME: ${{ vars.AWS_LAMBDA_FUNCTION_NAME }}
-      CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.AWS_CLOUDFRONT_DISTRIBUTION_ID }}
-      CLOUDFRONT_URL: ${{ vars.AWS_CLOUDFRONT_URL }}
       CAMPAIGN_SPEND_TO_DATE_USD: ${{ secrets.AWS_CAMPAIGN_SPEND_TO_DATE_USD }}
       REMAINING_APPLICABLE_CREDIT_USD: ${{ secrets.AWS_REMAINING_APPLICABLE_CREDIT_USD }}
       FINANCIAL_SNAPSHOT_OBSERVED_AT: ${{ secrets.AWS_FINANCIAL_SNAPSHOT_OBSERVED_AT }}
@@ -2687,6 +2684,9 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: web/package-lock.json
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: "1.10.5"
       - name: Install the protected AWS mutation gate
         shell: bash
         run: |
@@ -2716,9 +2716,6 @@ jobs:
           : "${ARTIFACT_BUCKET:?Missing AWS_ARTIFACT_BUCKET variable}"
           : "${SITE_BUCKET:?Missing AWS_SITE_BUCKET variable}"
           : "${SERVE_REPOSITORY:?Missing AWS_SERVE_ECR_REPOSITORY_URL variable}"
-          : "${LAMBDA_FUNCTION_NAME:?Missing AWS_LAMBDA_FUNCTION_NAME variable}"
-          : "${CLOUDFRONT_DISTRIBUTION_ID:?Missing AWS_CLOUDFRONT_DISTRIBUTION_ID variable}"
-          : "${CLOUDFRONT_URL:?Missing AWS_CLOUDFRONT_URL variable}"
           python - <<'PY'
           import os
           from decimal import Decimal, InvalidOperation
@@ -2765,6 +2762,28 @@ jobs:
           PYTHONPATH=src python scripts/reserve_financial_capacity.py reserve \
             --bucket "${TF_STATE_BUCKET}" \
             --output financial-capacity-reservation.json
+      - name: Resolve rollback infrastructure from the protected Terraform state
+        working-directory: infra/terraform/environments/prod
+        shell: bash
+        run: |
+          set -euo pipefail
+          terraform init -input=false \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="key=product-search-ranking/prod/terraform.tfstate" \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config="encrypt=true" \
+            -backend-config="use_lockfile=true" >/dev/null
+          lambda_function_name="$(terraform output -raw lambda_function_name)"
+          cloudfront_distribution_id="$(terraform output -raw cloudfront_distribution_id)"
+          cloudfront_url="$(terraform output -raw cloudfront_url)"
+          [[ "${lambda_function_name}" =~ ^[A-Za-z0-9_-]{1,64}$ ]]
+          [[ "${cloudfront_distribution_id}" =~ ^[A-Z0-9]{8,32}$ ]]
+          [[ "${cloudfront_url}" =~ ^https://[a-z0-9.-]+\.cloudfront\.net/?$ ]]
+          {
+            printf 'LAMBDA_FUNCTION_NAME=%s\n' "${lambda_function_name}"
+            printf 'CLOUDFRONT_DISTRIBUTION_ID=%s\n' "${cloudfront_distribution_id}"
+            printf 'CLOUDFRONT_URL=%s\n' "${cloudfront_url}"
+          } >> "${GITHUB_ENV}"
       - name: Restore model pointer, Lambda alias, and static release
         shell: bash
         run: |
