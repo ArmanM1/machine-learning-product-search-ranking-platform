@@ -3,8 +3,6 @@
 FROM python:3.11.16-slim-bookworm@sha256:b1add8a6f2aca6bcfcf0b9c9b522352f7ce0d62a3d556a2f2f32511aa0cca250
 
 ARG UV_VERSION=0.12.9
-ARG APP_UID=10001
-ARG APP_GID=10001
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -22,10 +20,7 @@ WORKDIR /app
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends --only-upgrade libpcre2-8-0 \
     && rm -rf /var/lib/apt/lists/* \
-    && groupadd --gid "${APP_GID}" app \
-    && useradd --uid "${APP_UID}" --gid "${APP_GID}" --create-home --shell /usr/sbin/nologin app \
-    && mkdir -p /opt/ml/model /opt/ml/checkpoints /opt/ml/cache/huggingface \
-    && chown -R app:app /app /opt/ml
+    && mkdir -p /opt/ml/model /opt/ml/output /opt/ml/checkpoints /opt/ml/cache/huggingface
 
 COPY pyproject.toml uv.lock README.md LICENSE NOTICE ./
 COPY src ./src
@@ -38,6 +33,8 @@ RUN system_python="$(command -v python)" \
     && "${system_python}" -m pip uninstall --yes uv setuptools wheel \
     && find /app/.venv -type d -name __pycache__ -prune -exec rm -rf '{}' +
 
-USER ${APP_UID}:${APP_GID}
+# SageMaker owns and mounts the /opt/ml training contract at runtime. The bounded
+# batch job therefore runs as root inside the container so those mounts remain writable.
+USER root
 
 ENTRYPOINT ["python", "/app/scripts/container_train.py"]

@@ -67,6 +67,70 @@ def test_training_entrypoint_rejects_non_sagemaker_program_argument() -> None:
         container_train.build_command(["serve"])
 
 
+def test_training_entrypoint_records_redacted_preflight_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    failure = tmp_path / "output" / "failure"
+    monkeypatch.setattr(container_train, "FAILURE_DIAGNOSTIC_PATH", failure)
+    monkeypatch.setenv("SM_CHANNEL_CONFIG", str(tmp_path / "missing-config"))
+    monkeypatch.setenv("SM_CHANNEL_TRAINING", str(tmp_path / "missing-training"))
+
+    assert container_train.main(["train", "--model-dir", str(tmp_path / "model")]) == 2
+    assert failure.read_text(encoding="utf-8") == (
+        "phase=preflight; error_type=FileNotFoundError\n"
+    )
+
+
+def test_training_entrypoint_records_subprocess_exit_without_input_details(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = tmp_path / "candidate.yaml"
+    manifest = tmp_path / "manifest.json"
+    model_dir = tmp_path / "model"
+    failure = tmp_path / "output" / "failure"
+    config.write_text("schema_version: 1.0.0\n", encoding="utf-8")
+    manifest.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(container_train, "FAILURE_DIAGNOSTIC_PATH", failure)
+    monkeypatch.setattr(
+        container_train.subprocess,
+        "run",
+        lambda *_args, **_kwargs: container_train.subprocess.CompletedProcess([], 17),
+    )
+
+    assert (
+        container_train.main(
+            [
+                "train",
+                "--config",
+                str(config),
+                "--dataset-manifest",
+                str(manifest),
+                "--model-dir",
+                str(model_dir),
+            ]
+        )
+        == 17
+    )
+    assert failure.read_text(encoding="utf-8") == ("phase=training_subprocess; exit_code=17\n")
+    assert str(config) not in failure.read_text(encoding="utf-8")
+
+
+def test_training_failure_diagnostic_is_best_effort(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    blocked_parent = tmp_path / "not-a-directory"
+    blocked_parent.write_text("occupied\n", encoding="utf-8")
+    monkeypatch.setattr(
+        container_train,
+        "FAILURE_DIAGNOSTIC_PATH",
+        blocked_parent / "failure",
+    )
+    monkeypatch.setenv("SM_CHANNEL_CONFIG", str(tmp_path / "missing-config"))
+    monkeypatch.setenv("SM_CHANNEL_TRAINING", str(tmp_path / "missing-training"))
+
+    assert container_train.main(["train", "--model-dir", str(tmp_path / "model")]) == 2
+
+
 def test_training_dispatch_requires_the_frozen_requested_hardware() -> None:
     config = ROOT / "configs" / "experiments" / "candidate-v1.yaml"
     validated = validate_training_contracts.validate_config(
