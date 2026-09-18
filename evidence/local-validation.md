@@ -14,6 +14,10 @@ Date: 2026-09-02
 | Embedded workflow Bash parse | Git for Windows Bash `-n` | Pass (51 blocks) |
 | Evidence JSON parse | Python standard library | Pass |
 
-Terraform initialization used `-backend=false`. No AWS credentials were configured for these checks, no plan or apply ran, and no cloud-resource or workload-execution claim is unlocked.
+Historical scope at the recorded date: Terraform initialization used `-backend=false`. No AWS credentials were
+configured for these checks, no plan or apply ran, and this local-only record unlocked no cloud-resource or
+workload-execution claim. The later applied/no-drift foundation is tracked separately in
+[`evidence/status.json`](status.json); it is not inferred from this file.
 
-These checks cover the current working tree before its initial commit is published. They are not commit-bound CI evidence; rerun the protected checks on the final commit before using its Git SHA in any artifact or release claim.
+These checks covered the then-current working tree before its initial commit was published. They are not
+commit-bound CI evidence and must not be reused as proof for a later Git SHA, artifact, or release claim.

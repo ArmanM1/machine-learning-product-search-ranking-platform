@@ -141,7 +141,9 @@ The first deployed revision is the reproducible baseline release. It establishes
 - CloudWatch operational log retention: 7 days.
 - S3 public access: blocked for both buckets; CloudFront uses origin access control.
 - CloudFront: generated domain, TLS redirect, managed caching policies, API caching disabled.
-- Public-serving expiry: first automatic shutdown invocation within 24 hours; recovery is manual and Terraform does not silently restore a tripped surface.
+- Public-serving expiry when serving is enabled: first automatic shutdown invocation within 24 hours;
+  recovery is manual and Terraform does not silently restore a tripped surface.
 - Financial envelope: signed operation-specific snapshot plus conditional cumulative ledger reservation. Billing lag, trigger delivery, and already-incurred requests mean this is not a hard USD 0 guarantee.
 
-Measured quality, latency, runtime, cost, and cloud-execution claims remain unavailable until their evidence gates pass.
+Measured candidate quality and runtime, held-out evaluation, promotion, public-serving latency and cost, and
+deployment/rollback claims remain unavailable until their respective evidence gates pass.

@@ -1,7 +1,8 @@
 # Cost controls
 
-Status: controls are implemented in configuration and manual workflows; the private ledger, AWS resources,
-spend, and credit balance are not claimed as applied or current until live evidence is retained.
+Status: the controls, protected OIDC roles, private campaign ledger, and AWS foundation are applied, and the
+post-apply Terraform plan is clean. Exact spend and applicable-credit values remain protected,
+operation-bound observations; this public document does not claim that any particular balance is current.
 
 ## Binding limits
 
@@ -87,8 +88,10 @@ quota `L-0307F515` (`ml.m5.xlarge for processing job usage`) and refuses access 
 value is at least one. The sanitized result is validated against the strict
 `SageMakerProcessingQuotaPreflight` contract, retained with the workflow artifact, and conditionally
 published under the completed report's immutable public prefix. The initial live inspection found an
-applied value of zero. AWS would not accept a third pending quota request while both Spot Training quota
-requests remained open, so no Processing job may launch until this separate quota reaches at least one.
+applied value of zero, and AWS initially would not accept a third pending quota request while both Spot
+Training requests were open. Subsequent protected live probes confirmed usable capacity for the selected
+GPU Training and Processing classes. That later observation does not weaken the per-run guard: no Processing
+job may launch unless the workflow's fresh probe still reports at least one.
 
 `prepare-data.yml` reserves the planning envelope's USD 1 S3 allowance before publishing the exact content-addressed data inventory. `baseline.yml` reserves a conservative USD 0.50 allowance for validation-only data transfer and runner evidence. Both remain manual, require current protected spend/credit values, keep `ALLOW_HELDOUT_EVAL=0`, and make no claim that an allowance is an actual charge.
 
@@ -104,10 +107,11 @@ The optional manual serving benchmark reserves an additional conservative USD 0.
 
 ## Passive controls
 
-- The owner waived AWS Budget creation and email confirmation. `enable_budgets` therefore remains false and
-  no budget email secret is required. The Terraform definitions remain dormant for a future explicit owner
-  decision; if enabled later, actual and forecast budgets notify at USD 1, 10, 25, and 40, and the USD 10
-  notification also invokes the dedicated shutdown path.
+- Thresholds and direct email confirmation were reported as approved early in setup, but no AWS Budget object
+  was created. The owner later explicitly waived AWS Budget creation and email confirmation;
+  `enable_budgets` therefore remains false and no budget email secret is required. The Terraform definitions
+  remain dormant for a future explicit owner decision; if enabled later, actual and forecast budgets notify
+  at USD 1, 10, 25, and 40, and the USD 10 notification also invokes the dedicated shutdown path.
 - Production public serving always creates a budget-independent EventBridge expiry. Its first invocation is
   within 24 hours and repeated invocations keep Lambda reserved concurrency at zero and disable the exact
   CloudFront distribution until explicit operator recovery. This is containment, not a real-time billing
@@ -117,11 +121,14 @@ The optional manual serving benchmark reserves an additional conservative USD 0.
 - Seven-day retention on the exact project Lambda/API log groups. Account-shared SageMaker service groups are
   not mutated by the project identity; durable job evidence is exported to versioned S3.
 - One SageMaker instance per manual job and a hard stopping condition.
-- A quota increase never expands a job beyond that one-instance workflow cap. The initial account reported applied `ml.m5.xlarge` and `ml.g4dn.xlarge` Spot Training quotas of zero; AWS accepted only requests for `5` (its API minimum above the service default of `4`), and those requests themselves launch no compute and incur no usage charge.
+- A quota increase never expands a job beyond that one-instance workflow cap. The initial account inspection
+  reported zero applied capacity for both approved Spot Training classes; later protected probes confirmed
+  usable capacity for the selected GPU class. Quota requests themselves launch no compute and incur no usage
+  charge.
 - Held-out evaluation separately requires applied SageMaker Processing quota `L-0307F515` of at least one;
-  the workflow checks it live and cannot reserve either access counter when capacity is absent. Each
-  reservation is deterministic for its GitHub run and clean-job ordinal, so a rerun cannot consume a
-  second counter value for the same intended access.
+  later protected probes confirmed usable capacity, but the workflow still checks it live and cannot reserve
+  either access counter when capacity is absent. Each reservation is deterministic for its GitHub run and
+  clean-job ordinal, so a rerun cannot consume a second counter value for the same intended access.
 - Managed Spot Training with S3 checkpoints.
 - No scheduled jobs or always-on model endpoint.
 

@@ -73,7 +73,7 @@ Populate from `DatasetManifest`, never by hand:
 | Canonical split-manifest identity | `sha256:fa7dba0f7e4676e0c386efff0f6e4e184880de10abed683126dddc32c662f528` (`query-split-manifest-v1`) |
 | Current semantic processed-dataset identity | `sha256:814e06ceba032871d1cac66cd4dd59177f4348c9928fdf417f2a2f3218a29525` |
 | Current immutable key prefix | `data/processed/814e06ceba032871d1cac66cd4dd59177f4348c9928fdf417f2a2f3218a29525` |
-| Cloud preparation evidence | [Sanitized receipt](../evidence/cloud/live-data-preparation.json) · [workflow run](https://github.com/ArmanM1/machine-learning-product-search-ranking-platform/actions/runs/33719826237) |
+| Cloud preparation evidence | [Sanitized receipt](../evidence/cloud/live-data-preparation.json) · [workflow definition](../.github/workflows/prepare-data.yml) |
 | Historical pre-split-contract identity | `sha256:420735e9…e24f6` (`DatasetManifest.processed_checksum` from the earlier local evidence run) |
 | Historical serialized `manifest.json` transport SHA-256 | `sha256:3f6902e7…4cf09d`; this is not either semantic identity |
 | Train queries/rows/products | 18,831 / 378,153 / 320,610 |
