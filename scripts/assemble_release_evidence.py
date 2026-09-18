@@ -3,7 +3,8 @@
 
 Local handoffs retain private routing values needed by downstream workflows. This
 module validates their exact shapes but selects every public field explicitly;
-handoffs are never copied into the committed record.
+handoffs and their numeric GitHub workflow identities are never copied into the
+committed record.
 """
 
 from __future__ import annotations
@@ -133,6 +134,7 @@ FORBIDDEN_KEY_PARTS = (
     "email",
     "etag",
     "function_name",
+    "github_run",
     "job_name",
     "lambda_version",
     "path",
@@ -144,6 +146,7 @@ FORBIDDEN_KEY_PARTS = (
     "signature",
     "signed",
     "token",
+    "workflow_run",
 )
 PRIVATE_TEXT_PATTERNS = (
     re.compile(r"arn:aws", re.IGNORECASE),
@@ -685,7 +688,7 @@ def _benchmark_files(
     )
 
 
-def _public_only(value: Any, path: tuple[str, ...] = ()) -> None:
+def _public_only(value: Any) -> None:
     if type(value) is dict:
         for key, child in value.items():
             _require(type(key) is str, "public evidence contains a non-string key")
@@ -693,24 +696,20 @@ def _public_only(value: Any, path: tuple[str, ...] = ()) -> None:
                 not any(part in key.casefold() for part in FORBIDDEN_KEY_PARTS),
                 "public evidence contains a private field",
             )
-            _public_only(child, (*path, key))
+            _public_only(child)
         return
     if type(value) is list:
-        for index, child in enumerate(value):
-            _public_only(child, (*path, str(index)))
+        for child in value:
+            _public_only(child)
         return
     if type(value) is str:
         if value.startswith(("http://", "https://")):
             _require(
                 CLOUDFRONT.fullmatch(value) is not None, "public evidence contains an unsafe URL"
             )
-        account_exempt = (
-            "workflow_run_ids" in path
-            or SHA256.fullmatch(value) is not None
-            or FULL_SHA.fullmatch(value) is not None
-        )
+        digest_exempt = SHA256.fullmatch(value) is not None or FULL_SHA.fullmatch(value) is not None
         for pattern in PRIVATE_TEXT_PATTERNS:
-            if account_exempt and pattern.pattern.startswith("(?:^|[^0-9])"):
+            if digest_exempt and pattern.pattern.startswith("(?:^|[^0-9])"):
                 continue
             _require(pattern.search(value) is None, "public evidence contains private text")
         _require(
@@ -739,7 +738,7 @@ def assemble(
         generated < expires <= generated + timedelta(hours=24), "public demo expiry is invalid"
     )
     (
-        release,
+        _release,
         evaluation,
         evaluation_provenance,
         release_summary,
@@ -755,21 +754,21 @@ def assemble(
             previous_pointer.model_id == evaluation.primary_metric.strongest_baseline_id,
             "positive release gate rollback target is not the evaluated strongest baseline",
         )
-    baseline, baseline_deployment, baseline_pointer, baseline_previous, baseline_root = (
+    _baseline, baseline_deployment, baseline_pointer, baseline_previous, baseline_root = (
         _deployment_files(
             evidence_root,
             deployment_sha,
             "deploy-baseline",
         )
     )
-    deploy, deployment, deploy_pointer, deploy_previous, deploy_root = _deployment_files(
+    _deploy, deployment, deploy_pointer, deploy_previous, deploy_root = _deployment_files(
         evidence_root,
         deployment_sha,
         "deploy-winner",
     )
     benchmark = _handoff(evidence_root, deployment_sha, "benchmark")
-    rollback, rollback_evidence, rollback_root = _rollback_files(evidence_root, deployment_sha)
-    redeploy, redeployment, redeploy_pointer, redeploy_previous, redeploy_root = _deployment_files(
+    _rollback, rollback_evidence, rollback_root = _rollback_files(evidence_root, deployment_sha)
+    _redeploy, redeployment, redeploy_pointer, redeploy_previous, redeploy_root = _deployment_files(
         evidence_root,
         deployment_sha,
         "redeploy-winner",
@@ -900,17 +899,6 @@ def assemble(
         "public_demo_expires_at": public_demo_expires_at,
         "evidence_mode": "verified",
         "release_id": _identifier(release_pointer.release_id, "release ID"),
-        "workflow_run_ids": {
-            stage.replace("-", "_"): handoff["github_run_id"]
-            for stage, handoff in (
-                ("release", release),
-                ("deploy-baseline", baseline),
-                ("deploy-winner", deploy),
-                ("benchmark", benchmark),
-                ("rollback", rollback),
-                ("redeploy-winner", redeploy),
-            )
-        },
         "identities": {
             "release_git_sha": source_sha,
             "deployment_git_sha": deployment_sha,
