@@ -105,6 +105,30 @@ def test_rank_is_bounded_to_curated_query() -> None:
         )
 
 
+def test_rank_distinguishes_malformed_json_from_valid_request_validation() -> None:
+    with client() as api:
+        malformed = api.post(
+            "/api/v1/rank",
+            content='{"query_id":',
+            headers={"content-type": "application/json"},
+        )
+        assert malformed.status_code == 400
+        assert malformed.json() == {
+            "status": 400,
+            "code": "malformed_json",
+            "message": "Request body contains malformed JSON.",
+            "request_id": malformed.headers["x-request-id"],
+            "details": None,
+        }
+
+        valid_but_invalid = api.post(
+            "/api/v1/rank",
+            json={"query_id": "q1", "model_id": "candidate-v1", "top_k": 41},
+        )
+        assert valid_but_invalid.status_code == 422
+        assert valid_but_invalid.json()["code"] == "validation_error"
+
+
 def test_comparison_distinguishes_judgments() -> None:
     with client() as api:
         response = api.get(
