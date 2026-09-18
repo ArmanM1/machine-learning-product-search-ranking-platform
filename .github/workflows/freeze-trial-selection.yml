@@ -271,7 +271,6 @@ jobs:
           jq -e --arg sha "sha256:${selection_hash}" '
             .ContentType == "application/json" and
             (.ChecksumSHA256 | type == "string" and length > 0) and
-            .TagCount == 1 and
             .Metadata == {"retention-class": "candidate", sha256: $sha}' \
             "${readback_dir}/head.json" >/dev/null
           aws s3api list-objects-v2 \

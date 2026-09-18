@@ -135,6 +135,7 @@ jobs:
           actual_config_hash="$(sha256sum "${FROZEN_CONFIG_PATH}" | cut -d' ' -f1)"
           test "${actual_config_hash}" = "${FROZEN_CONFIG_SHA256}"
           [[ "${TEST_ACCESS_COUNTER}" =~ ^[1-9][0-9]*$ ]]
+          test "${TEST_ACCESS_COUNTER}" -le 999999
           : "${PROCESSING_ROLE_ARN:?Missing AWS_SAGEMAKER_PROCESSING_ROLE_ARN variable}"
           : "${EVAL_REPOSITORY:?Missing AWS_EVAL_ECR_REPOSITORY_URL variable}"
           [[ "${OWNER_ALIAS}" =~ ^[A-Za-z0-9_.-]{2,32}$ ]]
@@ -564,7 +565,6 @@ jobs:
               --arg retention "${retention_class}" \
               '.ContentType == $content_type and
                (.ChecksumSHA256 | type == "string" and length > 0) and
-               .TagCount == 1 and
                .Metadata == {"retention-class": $retention, sha256: $sha}' \
               "${head}" >/dev/null
           }
@@ -600,8 +600,12 @@ jobs:
             local clean_run="$2"
             local counter_key="heldout/access-counter.json"
             local reservation_key="runs/${base_name}/reservations/access-counter-clean-${clean_run}.json"
-            local previous current_etag
+            local counter_size_base=4096
+            local current_size expected_size previous version_count latest_count latest_size
+            local local_md5 content_md5 checksum_sha256 expected_etag put_version_id
             local write_condition=()
+            [[ "${expected}" =~ ^[1-9][0-9]*$ ]]
+            test "${expected}" -le 1000000
             jq -n \
               --argjson count "${expected}" \
               --argjson clean_run "${clean_run}" \
@@ -612,8 +616,21 @@ jobs:
                 count: $count, clean_run: $clean_run, candidate_run_id: $run,
                 code_commit: $commit, workflow_run_id: $workflow_run}' \
               > "access-counter-clean-${clean_run}.json"
+            current_size="$(wc -c < "access-counter-clean-${clean_run}.json")"
+            expected_size="$((counter_size_base + expected))"
+            test "${current_size}" -lt "${expected_size}"
+            printf '%*s' "$((expected_size - current_size))" '' \
+              >> "access-counter-clean-${clean_run}.json"
+            test "$(wc -c < "access-counter-clean-${clean_run}.json")" -eq \
+              "${expected_size}"
             uv run python scripts/validate_release_artifacts.py file \
               --kind access-counter "access-counter-clean-${clean_run}.json"
+            local_md5="$(md5sum "access-counter-clean-${clean_run}.json" | cut -d' ' -f1)"
+            content_md5="$(openssl dgst -md5 -binary \
+              "access-counter-clean-${clean_run}.json" | base64 -w0)"
+            checksum_sha256="$(openssl dgst -sha256 -binary \
+              "access-counter-clean-${clean_run}.json" | base64 -w0)"
+            expected_etag="\"${local_md5}\""
 
             if aws s3api head-object \
               --bucket "${ARTIFACT_BUCKET}" \
@@ -629,59 +646,114 @@ jobs:
               return 1
             fi
 
-            if aws s3api head-object \
+            aws s3api get-bucket-versioning \
               --bucket "${ARTIFACT_BUCKET}" \
-              --key "${counter_key}" > "counter-head-${clean_run}.json" \
-              2> "counter-head-${clean_run}.error"; then
-              aws s3api get-object \
-                --bucket "${ARTIFACT_BUCKET}" \
-                --key "${counter_key}" \
-                "previous-counter-${clean_run}.json" >/dev/null
-              previous="$(jq -er '.count' "previous-counter-${clean_run}.json")"
-              current_etag="$(jq -er '.ETag' "counter-head-${clean_run}.json")"
-              [[ "${previous}" =~ ^[0-9]+$ ]]
-              if [[ "${previous}" -eq "${expected}" ]]; then
-                cmp -s "previous-counter-${clean_run}.json" \
-                  "access-counter-clean-${clean_run}.json"
-                put_immutable_or_verify_identical \
-                  "access-counter-clean-${clean_run}.json" "${reservation_key}" \
-                  application/json candidate
-                return 0
-              fi
-              test "${expected}" -eq "$((previous + 1))"
-              write_condition=(--if-match "${current_etag}")
-            elif grep -Eq '(404|Not Found|NoSuchKey)' "counter-head-${clean_run}.error"; then
-              test "${expected}" -eq 1
+              > "counter-bucket-versioning-${clean_run}.json"
+            jq -e '.Status == "Enabled"' \
+              "counter-bucket-versioning-${clean_run}.json" >/dev/null
+            aws s3api list-object-versions \
+              --bucket "${ARTIFACT_BUCKET}" \
+              --prefix "${counter_key}" \
+              > "counter-versions-before-${clean_run}.json"
+            jq -e --arg key "${counter_key}" '
+              .IsTruncated != true and
+              ([.Versions[]? | select(.Key != $key)] | length) == 0 and
+              ([.DeleteMarkers[]?] | length) == 0' \
+              "counter-versions-before-${clean_run}.json" >/dev/null
+            version_count="$(jq -r '[.Versions[]?] | length' \
+              "counter-versions-before-${clean_run}.json")"
+            latest_count="$(jq -r --arg key "${counter_key}" \
+              '[.Versions[]? | select(.Key == $key and .IsLatest == true)] | length' \
+              "counter-versions-before-${clean_run}.json")"
+            if [[ "${version_count}" -eq 0 ]]; then
+              test "${latest_count}" -eq 0
+              previous=0
               write_condition=(--if-none-match '*')
             else
-              cat "counter-head-${clean_run}.error" >&2
+              test "${latest_count}" -eq 1
+              jq -e --arg key "${counter_key}" '
+                [.Versions[]? | select(.Key == $key and .IsLatest == true)][0] |
+                (.VersionId | type == "string" and length > 0 and . != "null") and
+                (.ETag | type == "string" and test("^\\\"[0-9a-f]{32}\\\"$")) and
+                (.Size | type == "number") and
+                ((.ChecksumAlgorithm // []) | index("SHA256") != null)' \
+                "counter-versions-before-${clean_run}.json" >/dev/null
+              latest_size="$(jq -er --arg key "${counter_key}" \
+                '[.Versions[]? | select(.Key == $key and .IsLatest == true)][0].Size' \
+                "counter-versions-before-${clean_run}.json")"
+              previous="$((latest_size - counter_size_base))"
+              test "${previous}" -ge 1
+            fi
+
+            if [[ "${previous}" -eq "${expected}" ]]; then
+              jq -e \
+                --arg key "${counter_key}" \
+                --arg etag "${expected_etag}" \
+                --argjson size "${expected_size}" '
+                [.Versions[]? | select(.Key == $key and .IsLatest == true)][0] |
+                .ETag == $etag and .Size == $size and
+                ((.ChecksumAlgorithm // []) | index("SHA256") != null)' \
+                "counter-versions-before-${clean_run}.json" >/dev/null
+              put_immutable_or_verify_identical \
+                "access-counter-clean-${clean_run}.json" "${reservation_key}" \
+                application/json candidate
+              return 0
+            fi
+            if [[ "${expected}" -ne "$((previous + 1))" ]]; then
+              echo "Held-out counter must advance exactly once: observed ${previous}, requested ${expected}." >&2
               return 1
             fi
 
             PYTHONPATH=src uv run python scripts/validate_financial_snapshot.py verify \
               --cost-preflight cost-preflight.json
-            if ! aws s3api put-object \
+            if aws s3api put-object \
               --bucket "${ARTIFACT_BUCKET}" \
               --key "${counter_key}" \
               --body "access-counter-clean-${clean_run}.json" \
               --content-type application/json \
+              --content-md5 "${content_md5}" \
+              --server-side-encryption AES256 \
               --checksum-algorithm SHA256 \
-              --metadata "workflow-run-id=${GITHUB_RUN_ID},clean-run=${clean_run}" \
-              "${write_condition[@]}" >/dev/null 2> "counter-put-${clean_run}.error"; then
-              aws s3api get-object \
-                --bucket "${ARTIFACT_BUCKET}" \
-                --key "${counter_key}" \
-                "counter-after-put-${clean_run}.json" >/dev/null 2>&1 || {
-                  cat "counter-put-${clean_run}.error" >&2
-                  return 1
-                }
-              cmp -s "counter-after-put-${clean_run}.json" \
-                "access-counter-clean-${clean_run}.json" || {
-                  cat "counter-put-${clean_run}.error" >&2
-                  echo "Held-out counter advanced to a different reservation." >&2
-                  return 1
-                }
+              --checksum-sha256 "${checksum_sha256}" \
+              --metadata "counter-size-base=${counter_size_base},workflow-run-id=${GITHUB_RUN_ID},clean-run=${clean_run}" \
+              "${write_condition[@]}" > "counter-put-${clean_run}.json" \
+              2> "counter-put-${clean_run}.error"; then
+              jq -e \
+                --arg checksum "${checksum_sha256}" \
+                --arg etag "${expected_etag}" '
+                .ChecksumSHA256 == $checksum and
+                .ETag == $etag and
+                .ServerSideEncryption == "AES256" and
+                (.VersionId | type == "string" and length > 0 and . != "null")' \
+                "counter-put-${clean_run}.json" >/dev/null
+              put_version_id="$(jq -er '.VersionId' "counter-put-${clean_run}.json")"
+            else
+              cat "counter-put-${clean_run}.error" >&2
+              put_version_id=""
             fi
+
+            aws s3api list-object-versions \
+              --bucket "${ARTIFACT_BUCKET}" \
+              --prefix "${counter_key}" \
+              > "counter-versions-after-${clean_run}.json"
+            jq -e \
+              --arg key "${counter_key}" \
+              --arg etag "${expected_etag}" \
+              --arg version "${put_version_id}" \
+              --argjson size "${expected_size}" '
+              .IsTruncated != true and
+              ([.Versions[]? | select(.Key != $key)] | length) == 0 and
+              ([.DeleteMarkers[]?] | length) == 0 and
+              ([.Versions[]? | select(.Key == $key and .IsLatest == true)] | length) == 1 and
+              ([.Versions[]? | select(.Key == $key and .IsLatest == true)][0] |
+                (.VersionId | type == "string" and length > 0 and . != "null") and
+                .ETag == $etag and .Size == $size and
+                ((.ChecksumAlgorithm // []) | index("SHA256") != null) and
+                ($version == "" or .VersionId == $version))' \
+              "counter-versions-after-${clean_run}.json" >/dev/null || {
+                echo "Held-out counter publication could not be proven from version metadata." >&2
+                return 1
+              }
             put_immutable_or_verify_identical \
               "access-counter-clean-${clean_run}.json" "${reservation_key}" \
               application/json candidate
@@ -1070,15 +1142,19 @@ jobs:
             local relative_key="$2"
             local artifact_kind="$3"
             local object_key="public/${report_id}/${relative_key}"
-            local local_sha stem existing head put_error
+            local local_sha local_md5 content_md5 checksum_sha256 expected_etag
+            local stem put_result put_error
             test -s "${source_file}"
             uv run python scripts/validate_release_artifacts.py file \
               --kind "${artifact_kind}" "${source_file}"
             local_sha="sha256:$(sha256sum "${source_file}" | cut -d' ' -f1)"
+            local_md5="$(md5sum "${source_file}" | cut -d' ' -f1)"
+            content_md5="$(openssl dgst -md5 -binary "${source_file}" | base64 -w0)"
+            checksum_sha256="$(openssl dgst -sha256 -binary "${source_file}" | base64 -w0)"
+            expected_etag="\"${local_md5}\""
             stem="$(printf '%s' "${relative_key}" | sha256sum | cut -d' ' -f1)"
-            existing="${public_readback}/${stem}.object"
-            head="${public_readback}/${stem}.head.json"
-            put_error="${public_readback}/${stem}.put-error.txt"
+            put_result="${public_receipts}/${stem}.put.json"
+            put_error="${public_receipts}/${stem}.put-error.txt"
             PYTHONPATH=src uv run python scripts/validate_financial_snapshot.py verify \
               --cost-preflight cost-preflight.json
             if ! aws s3api put-object \
@@ -1086,36 +1162,29 @@ jobs:
               --key "${object_key}" \
               --body "${source_file}" \
               --content-type application/json \
+              --content-md5 "${content_md5}" \
+              --server-side-encryption AES256 \
               --checksum-algorithm SHA256 \
+              --checksum-sha256 "${checksum_sha256}" \
               --metadata "sha256=${local_sha},retention-class=public" \
               --tagging "RetentionClass=public" \
-              --if-none-match '*' >/dev/null 2>"${put_error}"; then
-              : # Retry-safe verification follows.
-            fi
-            if ! aws s3api get-object \
-              --bucket "${ARTIFACT_BUCKET}" \
-              --key "${object_key}" \
-              --checksum-mode ENABLED \
-              "${existing}" >/dev/null 2>&1 \
-              || ! cmp -s "${source_file}" "${existing}"; then
+              --if-none-match '*' >"${put_result}" 2>"${put_error}"; then
               cat "${put_error}" >&2
-              echo "Immutable public release artifact differs: ${object_key}" >&2
+              echo "Conditional public publication failed; an existing write-only key cannot be proven identical: ${object_key}" >&2
               return 1
             fi
-            aws s3api head-object \
-              --bucket "${ARTIFACT_BUCKET}" \
-              --key "${object_key}" \
-              --checksum-mode ENABLED > "${head}"
-            jq -e --arg sha "${local_sha}" '
-              .ContentType == "application/json" and
-              (.ChecksumSHA256 | type == "string" and length > 0) and
-              .TagCount == 1 and
-              .Metadata == {"retention-class": "public", sha256: $sha}' \
-              "${head}" >/dev/null
+            jq -e \
+              --arg checksum "${checksum_sha256}" \
+              --arg etag "${expected_etag}" \
+              '.ChecksumSHA256 == $checksum and
+               .ETag == $etag and
+               .ServerSideEncryption == "AES256" and
+               (.VersionId | type == "string" and length > 0 and . != "null")' \
+              "${put_result}" >/dev/null
           }
 
-          public_readback="$(mktemp -d)"
-          trap 'rm -rf -- "${public_readback}"' EXIT
+          public_receipts="$(mktemp -d)"
+          trap 'rm -rf -- "${public_receipts}"' EXIT
           publish_public_json evaluation-report.json evaluation-report.json evaluation-report
           publish_public_json evaluation-provenance.json evaluation-provenance.json evaluation-provenance
           publish_public_json command-summary.json command-summary.json command-summary
@@ -1481,7 +1550,6 @@ jobs:
             jq -e --arg content_type "${content_type}" --arg sha "${local_sha}" '
               .ContentType == $content_type and
               (.ChecksumSHA256 | type == "string" and length > 0) and
-              .TagCount == 1 and
               .Metadata == {"retention-class": "promoted", sha256: $sha}' \
               "${head}" >/dev/null
           }

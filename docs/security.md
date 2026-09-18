@@ -18,7 +18,7 @@ Status: the repository/environment/workflow-bound GitHub OIDC roles, external pe
 | Stolen long-lived cloud key | No CI access keys; GitHub exchanges OIDC tokens for short-lived role sessions |
 | OIDC use from a fork, rename-confusion repository, wrong workflow, or unreviewed branch | Trust requires the immutable owner/repository-ID subject, exact repository name and IDs, `refs/heads/main`, one named protected environment, one exact `workflow_ref`, and audience `sts.amazonaws.com` |
 | Root-account misuse | The owner declined MFA as an accepted exception, so the PRD control is not satisfied. Zero root keys, no routine root use, short-lived console/CLI authentication, and repository-scoped OIDC are compensating controls. Root was used only to establish identity bootstrap; the temporary role's administrator policy was removed and replaced with a state-bucket-only inline policy before use. |
-| Train/test leakage | Query-level split assertions, train-only miner, a training role with no `test.parquet` permission, manual held-out flag, and versioned access counter |
+| Train/test leakage | Query-level split assertions, train-only miner, a training role with no `test.parquet` permission, manual held-out flag, and a versioned write-only access counter whose current sequence is recoverable from exact-key object metadata |
 | Artifact substitution | Immutable paths/tags, SHA-256 manifests, S3 checksum verification, serving-image digest |
 | Public bucket exposure | Account/bucket public-access blocks and CloudFront origin access control |
 | Model reads raw data at runtime | Lambda role can read only `public/*`; model is embedded in the image |

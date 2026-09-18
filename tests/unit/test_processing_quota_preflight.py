@@ -86,13 +86,17 @@ def test_release_publishes_only_validated_sanitized_quota_evidence_after_report(
 
     assert report_binding < evidence_validation < evidence_publication
     publication_helper = workflow.split("publish_public_json()", 1)[1].split(
-        'public_readback="$(mktemp -d)"', 1
+        'public_receipts="$(mktemp -d)"', 1
     )[0]
     assert 'local object_key="public/${report_id}/${relative_key}"' in publication_helper
     assert "--checksum-algorithm SHA256" in publication_helper
+    assert "--checksum-sha256" in publication_helper
+    assert "--content-md5" in publication_helper
+    assert "--server-side-encryption AES256" in publication_helper
     assert '--tagging "RetentionClass=public"' in publication_helper
     assert "--if-none-match '*'" in publication_helper
-    assert 'cmp -s "${source_file}" "${existing}"' in publication_helper
+    assert ".ChecksumSHA256 == $checksum" in publication_helper
+    assert 'cmp -s "${source_file}" "${existing}"' not in publication_helper
     upload_artifact = workflow.split("name: heldout-release-evidence-", 1)[1]
     assert "            processing-quota-preflight.json" in upload_artifact
     assert "processing-quota-response.private.json" not in upload_artifact

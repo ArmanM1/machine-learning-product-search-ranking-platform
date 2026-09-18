@@ -91,9 +91,9 @@ The test command requires all of the following:
 - matching frozen configuration and candidate checkpoint SHA-256 values;
 - processed-dataset identity (`DatasetManifest.processed_checksum`), the manifest-derived `DatasetManifest.split_manifest_hash`, and declared baseline IDs;
 - an S3 object checksum match;
-- a first test-access counter exactly one above the versioned prior value; the second clean job receives the immediately following value.
+- a first test-access counter exactly one above the durable prior value encoded in the current object's byte size; the second clean job receives the immediately following value.
 
-The counter increments separately before each Processing job accesses test data, so failed attempts remain counted. If the first clean job fails, the second is not opened. The binder accepts only two successful reports with consecutive counters and identical config, checkpoint, semantic dataset, split manifest, baseline, image, Git, and hardware identity. Pull-request and training workflows explicitly set the flag to zero.
+The counter increments separately before each Processing job accesses test data, so failed attempts remain counted. Its JSON remains schema-valid but is padded with trailing spaces to `4096 + count` bytes. This lets the least-privileged release role derive the current value from version-list metadata while retaining write-only access to the dedicated counter object; exact ETag and size matching recover a write that completed before its immutable run reservation. If the first clean job fails, the second is not opened. The binder accepts only two successful reports with consecutive counters and identical config, checkpoint, semantic dataset, split manifest, baseline, image, Git, and hardware identity. Pull-request and training workflows explicitly set the flag to zero.
 
 Training is also separated at the cloud authorization layer: its workflow role may copy only `manifest.json`, `artifact-checksums.json`, `train.parquet`, and `validation.parquet` from the content-addressed dataset prefix. The SageMaker training role can read only that run-scoped four-file staging prefix and has no permission on `data/processed/*`. Consequently SageMaker input download cannot silently stage `test.parquet` before a counted release.
 
