@@ -2,6 +2,7 @@
   "baseline_ids": "bm25-enriched_v1,pretrained-cross-encoder@233902d25c440f23af6f7d6e94d2946bac0bee0a-enriched_v1",
   "baseline_config_file_sha256": "7777777777777777777777777777777777777777777777777777777777777777",
   "baseline_config_path": "configs/experiments/baselines-v1.yaml",
+  "baseline_evidence_git_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "baseline_run_summary_s3_key": "runs/baseline-run-001/reports/summary.json",
   "baseline_run_summary_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
   "baseline_selection_s3_key": "runs/baseline-run-001/reports/baseline-summary.json",

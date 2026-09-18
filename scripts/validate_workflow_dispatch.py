@@ -44,6 +44,7 @@ TRAIN_ENV = {
 }
 
 RELEASE_ENV = {
+    "baseline_evidence_git_sha": "BASELINE_EVIDENCE_GIT_SHA",
     "candidate_run_id": "CANDIDATE_RUN_ID",
     "candidate_model_id": "CANDIDATE_MODEL_ID",
     "candidate_artifact_s3_key": "CANDIDATE_ARTIFACT_S3_KEY",
@@ -206,6 +207,7 @@ def _validate_train(values: dict[str, str], environment: Mapping[str, str]) -> d
 
 
 def _validate_release(values: dict[str, str], environment: Mapping[str, str]) -> dict[str, str]:
+    _require_pattern(values, "baseline_evidence_git_sha", re.compile(r"^[0-9a-f]{40}$"))
     _require_pattern(values, "candidate_run_id", SAFE_RUN_ID)
     _require_pattern(values, "candidate_model_id", SAFE_ID)
     _require_safe_path(

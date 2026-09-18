@@ -55,6 +55,7 @@ def test_documented_dispatch_examples_pass_exact_validation(workflow: str) -> No
         )
     elif workflow == "release":
         assert values["EVALUATION_IMAGE_URI"].endswith("@sha256:" + "3" * 64)
+        assert values["BASELINE_EVIDENCE_GIT_SHA"] == "a" * 40
         assert values["BASELINE_CONFIG_PATH"] == "configs/experiments/baselines-v1.yaml"
         assert values["BASELINE_CONFIG_FILE_SHA256"] == "7" * 64
         assert values["CANDIDATE_ARTIFACT_S3_URI"] == (
@@ -152,6 +153,14 @@ def test_release_dispatch_rejects_unbound_baseline_and_excess_runtime() -> None:
     values["baseline_config_file_sha256"] = "unbound"
     with pytest.raises(ValueError, match="invalid format"):
         validate_dispatch_config("release", json.dumps(values), EXTERNAL_ENVIRONMENTS["release"])
+
+    for invalid_sha in ("a" * 39, "A" * 40):
+        values = json.loads(_example("release"))
+        values["baseline_evidence_git_sha"] = invalid_sha
+        with pytest.raises(ValueError, match="invalid format"):
+            validate_dispatch_config(
+                "release", json.dumps(values), EXTERNAL_ENVIRONMENTS["release"]
+            )
 
 
 def test_release_stages_an_immutable_decision_without_mutating_the_live_pointer() -> None:

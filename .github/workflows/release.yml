@@ -106,6 +106,7 @@ jobs:
           [[ "${DATASET_MANIFEST_HASH}" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ "${BASELINE_RUN_SUMMARY_SHA256}" =~ ^[0-9a-f]{64}$ ]]
           [[ "${BASELINE_SELECTION_SHA256}" =~ ^[0-9a-f]{64}$ ]]
+          [[ "${BASELINE_EVIDENCE_GIT_SHA}" =~ ^[0-9a-f]{40}$ ]]
           test "${BASELINE_CONFIG_PATH}" = "configs/experiments/baselines-v1.yaml"
           [[ "${BASELINE_CONFIG_FILE_SHA256}" =~ ^[0-9a-f]{64}$ ]]
           test -f "${BASELINE_CONFIG_PATH}"
@@ -400,7 +401,7 @@ jobs:
             --baseline-config "${BASELINE_CONFIG_PATH}" \
             --baseline-config-file-sha256 "${BASELINE_CONFIG_FILE_SHA256}" \
             --baseline-summary-sha256 "${BASELINE_SELECTION_SHA256}" \
-            --expected-git-sha "${GITHUB_SHA}" \
+            --expected-git-sha "${BASELINE_EVIDENCE_GIT_SHA}" \
             --dataset-manifest-hash "${DATASET_MANIFEST_HASH}" \
             --strongest-baseline-id "${STRONGEST_BASELINE_ID}" \
             --baseline-ids "${BASELINE_IDS}")"
