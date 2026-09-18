@@ -173,12 +173,16 @@ jobs:
         run: |
           set -euo pipefail
           mkdir baseline-input
+          [[ "${DATASET_MANIFEST_S3_KEY}" == */manifest.json ]]
+          dataset_checksums_s3_key="${DATASET_MANIFEST_S3_KEY%/manifest.json}/artifact-checksums.json"
           aws s3 cp "s3://${ARTIFACT_BUCKET}/${BASELINE_COMMAND_SUMMARY_S3_KEY}" \
             baseline-input/summary.json --no-progress
           aws s3 cp "s3://${ARTIFACT_BUCKET}/${BASELINE_SUMMARY_S3_KEY}" \
             baseline-input/baseline-summary.json --no-progress
           aws s3 cp "s3://${ARTIFACT_BUCKET}/${DATASET_MANIFEST_S3_KEY}" \
             baseline-input/manifest.json --no-progress
+          aws s3 cp "s3://${ARTIFACT_BUCKET}/${dataset_checksums_s3_key}" \
+            baseline-input/artifact-checksums.json --no-progress
           aws s3 cp "s3://${ARTIFACT_BUCKET}/${CURATED_QUERIES_S3_KEY}" \
             baseline-input/curated-queries.json --no-progress
           test "$(sha256sum baseline-input/summary.json | cut -d' ' -f1)" = \
@@ -191,6 +195,7 @@ jobs:
             "${CURATED_QUERIES_SHA256}"
           jq -e \
             --arg strongest "${STRONGEST_BASELINE_ID}" \
+            --arg dataset "${DATASET_PROCESSED_SHA256}" \
             --arg summary_hash "sha256:${BASELINE_SUMMARY_SHA256}" \
             --arg curated_hash "sha256:${CURATED_QUERIES_SHA256}" \
             --arg git "${GITHUB_SHA}" \
@@ -198,6 +203,7 @@ jobs:
              (.run_id | type == "string" and length > 0) and
              .git_sha == $git and .repository_dirty == false and
              (.runtime.platform | startswith("Linux")) and
+             .result.dataset_checksum == $dataset and
              .result.strongest_baseline_id == $strongest and
              .artifact_hashes.baseline_summary == $summary_hash and
              .artifact_hashes.curated_queries == $curated_hash' \

@@ -1009,6 +1009,7 @@ data "aws_iam_policy_document" "github_baseline_release" {
       "s3:GetObjectVersion",
     ]
     resources = [
+      "${aws_s3_bucket.artifacts.arn}/runs/*/artifact-checksums.json",
       "${aws_s3_bucket.artifacts.arn}/runs/*/baseline-summary.json",
       "${aws_s3_bucket.artifacts.arn}/runs/*/curated-queries.json",
       "${aws_s3_bucket.artifacts.arn}/runs/*/manifest.json",

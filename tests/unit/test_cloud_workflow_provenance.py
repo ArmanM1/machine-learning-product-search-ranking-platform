@@ -257,6 +257,71 @@ def test_release_binds_baseline_evidence_to_current_clean_commit_and_config() ->
     assert ".validation_baseline_summary_checksum == $baseline_summary" in release
 
 
+def test_baseline_bootstrap_receives_run_scoped_checksum_index_fail_closed() -> None:
+    baseline = (WORKFLOWS / "baseline.yml").read_text(encoding="utf-8")
+    bootstrap = (WORKFLOWS / "bootstrap-baseline.yml").read_text(encoding="utf-8")
+    iam = (ROOT / "infra/terraform/modules/platform/iam.tf").read_text(encoding="utf-8")
+    cli = (ROOT / "src/search_rank/cli.py").read_text(encoding="utf-8")
+    data_io = (ROOT / "src/search_rank/data/io.py").read_text(encoding="utf-8")
+
+    publication = baseline.split(
+        "name: Publish immutable validation evidence and bootstrap handoff", 1
+    )[1].split("- uses: actions/upload-artifact@", 1)[0]
+    checksums_path = (
+        'checksums_path="data/processed/esci-us-v1/'
+        '${DATASET_PROCESSED_SHA256#sha256:}/artifact-checksums.json"'
+    )
+    assert checksums_path in publication
+    assert '"${checksums_path}:artifact-checksums.json"' in publication
+    assert publication.index(checksums_path) < publication.index(
+        '"${checksums_path}:artifact-checksums.json"'
+    )
+
+    download = bootstrap.split("name: Download and checksum-verify validation evidence only", 1)[
+        1
+    ].split("name: Build and verify the typed validation-only bundle", 1)[0]
+    strict_manifest_suffix = '[[ "${DATASET_MANIFEST_S3_KEY}" == */manifest.json ]]'
+    sibling_derivation = (
+        'dataset_checksums_s3_key="${DATASET_MANIFEST_S3_KEY%/manifest.json}'
+        '/artifact-checksums.json"'
+    )
+    checksum_download = (
+        'aws s3 cp "s3://${ARTIFACT_BUCKET}/${dataset_checksums_s3_key}" \\\n'
+        "            baseline-input/artifact-checksums.json --no-progress"
+    )
+    assert strict_manifest_suffix in download
+    assert sibling_derivation in download
+    assert checksum_download in download
+    assert (
+        download.index(strict_manifest_suffix)
+        < download.index(sibling_derivation)
+        < download.index(checksum_download)
+    )
+    assert bootstrap.index(checksum_download) < bootstrap.index(
+        "uv run python -m search_rank.cli bootstrap-baseline-release"
+    )
+
+    baseline_release_iam = iam.split(
+        'data "aws_iam_policy_document" "github_baseline_release" {', 1
+    )[1].split('resource "aws_iam_role_policy" "github_baseline_release"', 1)[0]
+    checksum_resources = [
+        line.strip()
+        for line in baseline_release_iam.splitlines()
+        if "artifact-checksums.json" in line
+    ]
+    assert checksum_resources == [
+        '"${aws_s3_bucket.artifacts.arn}/runs/*/artifact-checksums.json",'
+    ]
+    assert "/data/processed/" not in baseline_release_iam
+
+    bootstrap_command = cli.split('@app.command("bootstrap-baseline-release")', 1)[1].split(
+        '@app.command("freeze-config")', 1
+    )[0]
+    assert "manifest, _ = load_dataset_manifest(dataset_manifest)" in bootstrap_command
+    assert "_checksum_index(manifest_path)" in data_io
+    assert "_verify_dataset_identity(manifest, path)" in data_io
+
+
 def test_release_deploy_and_benchmark_inline_python_is_syntactically_valid() -> None:
     for workflow_name in ("release.yml", "deploy.yml", "benchmark-serving.yml"):
         workflow = yaml.safe_load((WORKFLOWS / workflow_name).read_text(encoding="utf-8"))
