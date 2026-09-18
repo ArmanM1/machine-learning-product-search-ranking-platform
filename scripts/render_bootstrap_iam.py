@@ -869,6 +869,7 @@ def build_dev_lifecycle_policy(account_id: str) -> dict[str, Any]:
                 "DestroyOnlyTerraformManagedDevRoles",
                 [
                     "iam:DeleteRole",
+                    "iam:DeleteRolePermissionsBoundary",
                     "iam:DeleteRolePolicy",
                     "iam:GetRole",
                     "iam:GetRolePolicy",
@@ -1132,11 +1133,19 @@ def validate_dev_lifecycle_policy(document: dict[str, Any], account_id: str) -> 
     """Fail closed if the external dev lifecycle policy can mutate outside dev."""
 
     arn = _arns(account_id, "dev")
+    base_log_groups = {
+        f"arn:aws:logs:{REGION}:{account_id}:log-group:/aws/apigateway/{arn['name']}-candidate",
+        f"arn:aws:logs:{REGION}:{account_id}:log-group:/aws/apigateway/{arn['name']}-production",
+        f"arn:aws:logs:{REGION}:{account_id}:log-group:/aws/lambda/{arn['name']}-api",
+    }
     statements = document.get("Statement")
     if not isinstance(statements, list):
         raise ValueError("dev lifecycle policy statements must be a list")
     allows = [statement for statement in statements if statement.get("Effect") == "Allow"]
     denies = [statement for statement in statements if statement.get("Effect") == "Deny"]
+    allow_by_sid = {statement.get("Sid"): statement for statement in allows}
+    if len(allow_by_sid) != len(allows):
+        raise ValueError("dev lifecycle allow statements require unique Sids")
     if {statement.get("Sid") for statement in denies} != {
         "DenyNamedProductionResources",
         "DenyProductionTaggedResources",
@@ -1205,6 +1214,24 @@ def validate_dev_lifecycle_policy(document: dict[str, Any], account_id: str) -> 
     )
     if set(destructive["Resource"]) != set(arn["roles"]):
         raise ValueError("dev lifecycle role deletion must target the exact Terraform role set")
+    exact_resource_contracts = {
+        "DevTerraformStateBucketMetadata": {arn["state_bucket"]},
+        "ListOnlyDevTerraformState": {arn["state_bucket"]},
+        "DevTerraformStateOnly": {arn["state_object"]},
+        "DevTerraformLockOnly": {arn["state_lock"]},
+        "DestroyOnlyDevBuckets": {
+            arn["artifact_bucket"],
+            f"{arn['artifact_bucket']}/*",
+            arn["site_bucket"],
+            f"{arn['site_bucket']}/*",
+        },
+        "DestroyOnlyDevRepositories": set(arn["repositories"]),
+        "DestroyOnlyBaseDevLogGroups": base_log_groups,
+    }
+    for sid, expected_resources in exact_resource_contracts.items():
+        statement = allow_by_sid.get(sid)
+        if statement is None or set(statement["Resource"]) != expected_resources:
+            raise ValueError(f"{sid} does not retain its exact dev resource scope")
     for statement in allows:
         serialized = json.dumps(statement, sort_keys=True)
         if f"{PROJECT}-prod-" in serialized or f"/{PROJECT}/prod/" in serialized:

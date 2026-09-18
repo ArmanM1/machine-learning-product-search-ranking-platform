@@ -273,6 +273,8 @@ def test_dev_lifecycle_trust_and_policy_are_external_exact_and_nonproduction() -
     }
 
     assert len(compact) <= 10240
+    assert "s3:*" not in allow_actions
+    assert "ecr:*" not in allow_actions
     assert {statement["Sid"] for statement in denies} == {
         "DenyNamedProductionResources",
         "DenyProductionTaggedResources",
@@ -293,6 +295,7 @@ def test_dev_lifecycle_trust_and_policy_are_external_exact_and_nonproduction() -
         "sagemaker:StopProcessingJob",
         "sagemaker:StopTrainingJob",
     }
+    assert "iam:DeleteRolePermissionsBoundary" in allow_actions
     lifecycle_role = f"arn:aws:iam::{ACCOUNT_ID}:role/{DEV_LIFECYCLE_ROLE_NAME}"
     self_reference = [
         statement
