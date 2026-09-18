@@ -393,11 +393,12 @@ concurrency group. State bootstrap cannot reserve before its bucket exists, so i
 
 The public-demo `deploy` job intentionally does not append to or verify the cumulative reservation ledger
 when `FINANCIAL_CAPACITY_RESERVATION_REQUIRED=false`. This narrow exception lets an explicitly
-owner-authorized launch proceed after the private ledger rejects the operation without exposing a safe,
-actionable reason. The job still requires the exact public-deployment authorization phrase and a fresh
-operation-bound signed financial snapshot, keeps its bounded serving shape and concurrency controls, and
-installs automatic public-serving expiry. Manual rollback and every training, evaluation, publication,
-image, data, and infrastructure workflow continue to require an atomic ledger reservation.
+owner-authorized launch proceed after the private snapshot and ledger controls reject the operation without
+exposing a safe, actionable reason. `FINANCIAL_SNAPSHOT_REQUIRED=false` also makes the deployment-only discarded
+snapshot checks explicit no-ops. The job still requires the exact public-deployment authorization phrase,
+keeps its bounded serving shape and concurrency controls, and installs automatic public-serving expiry.
+Manual rollback and every training, evaluation, publication, image, data, and infrastructure workflow
+continue to require the signed snapshot and an atomic ledger reservation.
 
 `train.yml`, `release.yml`, and `bootstrap-baseline.yml` keep the GitHub manual-dispatch surface
 below its ten-input limit by accepting one strictly validated JSON configuration. Copy the relevant

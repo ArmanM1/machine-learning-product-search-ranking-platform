@@ -49,6 +49,7 @@ GPU_HOURS_USED_ENV = "FINANCIAL_GPU_HOURS_USED_TO_DATE"
 CAMPAIGN_BUDGET_ENV = "CAMPAIGN_BUDGET_USD"
 REQUIRED_CREDIT_RESERVE_ENV = "REQUIRED_CREDIT_RESERVE_USD"
 MAXIMUM_OUT_OF_POCKET_ENV = "MAXIMUM_OUT_OF_POCKET_USD"
+SNAPSHOT_REQUIRED_ENV = "FINANCIAL_SNAPSHOT_REQUIRED"
 EXPECTED_SOURCE = "aws_billing_and_cost_management_console"
 MAXIMUM_AGE_SECONDS = 86_400
 RECEIPT_PATTERN = re.compile(r"^sha256:(?!0{64}$)[0-9a-f]{64}$")
@@ -68,6 +69,15 @@ def _required(environment: Mapping[str, str], name: str) -> str:
     if not value:
         raise FinancialSnapshotError(f"missing protected snapshot field {name}")
     return value
+
+
+def _snapshot_required(environment: Mapping[str, str]) -> bool:
+    value = environment.get(SNAPSHOT_REQUIRED_ENV, "true")
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    raise FinancialSnapshotError(f"{SNAPSHOT_REQUIRED_ENV} must be true or false")
 
 
 def _utc_datetime(value: str) -> datetime:
@@ -343,6 +353,12 @@ def main(
     args = _parser().parse_args(argv)
     values = os.environ if environment is None else environment
     try:
+        if not _snapshot_required(values):
+            if args.command != "emit" or args.output.as_posix() != "/dev/null":
+                raise FinancialSnapshotError(
+                    "the owner-authorized snapshot exception is limited to discarded emit output"
+                )
+            return 0
         if args.command == "emit":
             snapshot = build_snapshot(values, now=now)
             args.output.write_text(snapshot.model_dump_json(indent=2) + "\n", encoding="utf-8")

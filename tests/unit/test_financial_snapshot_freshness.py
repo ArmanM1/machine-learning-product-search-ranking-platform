@@ -361,6 +361,17 @@ def test_cli_failure_message_does_not_echo_protected_values(
     assert HMAC_KEY not in error
 
 
+def test_owner_authorized_snapshot_exception_is_limited_to_discarded_emit(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    environment = {"FINANCIAL_SNAPSHOT_REQUIRED": "false"}
+
+    assert main(["emit", "--output", "/dev/null"], environment=environment) == 0
+    assert capsys.readouterr().out == ""
+    assert main(["emit", "--output", "financial.json"], environment=environment) == 1
+    assert main(["receipt"], environment=environment) == 1
+
+
 def test_receipt_cli_emits_only_the_keyed_commitment(capsys: pytest.CaptureFixture[str]) -> None:
     environment = protected_environment()
     assert main(["receipt"], environment=environment, now=OBSERVED_AT) == 0
@@ -654,17 +665,20 @@ def test_deploy_installs_a_path_wide_gate_before_any_aws_cli_mutation() -> None:
         assert command in wrapper
     assert '"s3 cp" | "s3 sync"' in wrapper
     assert "validate_financial_snapshot.py" in wrapper
+    assert "FINANCIAL_SNAPSHOT_REQUIRED:-true" in wrapper
     assert "FINANCIAL_CAPACITY_RESERVATION_REQUIRED:-true" in wrapper
     assert 'reserve_financial_capacity.py" verify' in wrapper
 
 
-def test_only_public_deploy_uses_the_owner_authorized_ledger_exception() -> None:
+def test_only_public_deploy_uses_the_owner_authorized_financial_exceptions() -> None:
     payload = yaml.safe_load((ROOT / ".github/workflows/deploy.yml").read_text(encoding="utf-8"))
     deploy = payload["jobs"]["deploy"]
     rollback = payload["jobs"]["rollback"]
 
     assert deploy["env"]["FINANCIAL_CAPACITY_RESERVATION_REQUIRED"] == "false"
+    assert deploy["env"]["FINANCIAL_SNAPSHOT_REQUIRED"] == "false"
     assert "FINANCIAL_CAPACITY_RESERVATION_REQUIRED" not in rollback["env"]
+    assert "FINANCIAL_SNAPSHOT_REQUIRED" not in rollback["env"]
 
     reservation_step = next(
         step
@@ -822,7 +836,7 @@ def _assert_protected_snapshot_environment(source: str) -> None:
         ("deploy.yml", "deploy", "rollback", "aws ecr put-image"),
     ],
 )
-def test_every_cost_secret_workflow_revalidates_before_its_first_new_aws_write(
+def test_every_cost_secret_workflow_keeps_snapshot_boundary_before_first_new_aws_write(
     workflow: str,
     job: str,
     next_job: str | None,
@@ -835,7 +849,7 @@ def test_every_cost_secret_workflow_revalidates_before_its_first_new_aws_write(
     assert source.rindex("validate_financial_snapshot.py emit", 0, write_offset) < write_offset
 
 
-def test_deploy_revalidates_every_branch_that_can_be_the_first_new_write() -> None:
+def test_deploy_keeps_overrideable_snapshot_boundary_before_each_first_write() -> None:
     deploy = _workflow_job("deploy.yml", "deploy", "rollback")
 
     for first_write in (
