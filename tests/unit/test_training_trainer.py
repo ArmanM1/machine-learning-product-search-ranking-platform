@@ -13,6 +13,7 @@ import torch
 
 import search_rank.training.trainer as trainer
 from search_rank.schemas.experiment import ExperimentConfig
+from search_rank.training.diagnostics import TrainingStageFailure
 
 
 class _TinyBatch(dict[str, torch.Tensor]):
@@ -403,3 +404,67 @@ def test_cuda_request_fails_closed_when_cuda_is_unavailable(
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 0)
     with pytest.raises(RuntimeError, match="requested but CUDA is unavailable"):
         trainer._resolve_training_device("cuda")
+
+
+def test_device_preflight_runs_deterministic_forward_and_backward_then_releases(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created: list[_TinyCrossEncoder] = []
+    requested_devices: list[str] = []
+    gradients: list[torch.Tensor] = []
+
+    def tiny_model(_: ExperimentConfig, device: str) -> _TinyCrossEncoder:
+        model = _TinyCrossEncoder()
+        model.model.linear.weight.register_hook(lambda gradient: gradients.append(gradient.clone()))
+        created.append(model)
+        requested_devices.append(device)
+        return model
+
+    monkeypatch.setattr(trainer, "_model", tiny_model)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 0)
+
+    runtime = trainer.preflight_training_runtime(_config(), device="cpu")
+
+    assert runtime == trainer.TrainingRuntime(
+        device="cpu",
+        device_type="cpu",
+        cuda_available=False,
+        cuda_device_count=0,
+        accelerator_type="cpu",
+    )
+    assert requested_devices == ["cpu"]
+    assert len(gradients) == 1
+    assert bool(torch.isfinite(gradients[0]).all())
+    assert next(created[0].model.parameters()).device.type == "cpu"
+    assert all(parameter.grad is None for parameter in created[0].model.parameters())
+
+
+def test_managed_trainer_failure_identifies_active_epoch_without_raw_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    diagnostic = tmp_path / "output" / "failure"
+    private_detail = "s3://private-bucket/checkpoint/customer-name"
+    monkeypatch.setenv("SEARCH_RANK_TRAINING_FAILURE_PATH", str(diagnostic))
+
+    def fail_in_epoch(*_: Any, stage_tracker: Any, **__: Any) -> Any:
+        stage_tracker.transition("epoch")
+        raise RuntimeError(private_detail)
+
+    monkeypatch.setattr(trainer, "_train_candidate", fail_in_epoch)
+
+    with pytest.raises(TrainingStageFailure) as captured:
+        trainer.train_candidate(
+            _training_rows(),
+            _validation_rows(),
+            _config(),
+            output_dir=tmp_path / "run",
+            device="cpu",
+        )
+
+    assert str(captured.value) == "phase=epoch; error_type=runtime_failure"
+    assert private_detail not in str(captured.value)
+    assert diagnostic.read_text(encoding="utf-8") == (
+        "phase=epoch; error_type=runtime_failure; exit_code=1\n"
+    )

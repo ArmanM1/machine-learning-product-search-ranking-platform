@@ -115,6 +115,86 @@ def test_training_entrypoint_records_subprocess_exit_without_input_details(
     assert str(config) not in failure.read_text(encoding="utf-8")
 
 
+def test_training_entrypoint_preserves_allowlisted_child_stage_diagnostic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = tmp_path / "candidate.yaml"
+    manifest = tmp_path / "manifest.json"
+    model_dir = tmp_path / "model"
+    failure = tmp_path / "output" / "failure"
+    config.write_text("schema_version: 1.0.0\n", encoding="utf-8")
+    manifest.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(container_train, "FAILURE_DIAGNOSTIC_PATH", failure)
+
+    def failed_child(*_args: Any, **kwargs: Any) -> Any:
+        diagnostic = Path(kwargs["env"][container_train.FAILURE_DIAGNOSTIC_ENV])
+        diagnostic.parent.mkdir(parents=True, exist_ok=True)
+        diagnostic.write_text(
+            "phase=mining; error_type=resource_exhausted; exit_code=1\n",
+            encoding="utf-8",
+        )
+        return container_train.subprocess.CompletedProcess([], 1)
+
+    monkeypatch.setattr(container_train.subprocess, "run", failed_child)
+
+    assert (
+        container_train.main(
+            [
+                "train",
+                "--config",
+                str(config),
+                "--dataset-manifest",
+                str(manifest),
+                "--model-dir",
+                str(model_dir),
+            ]
+        )
+        == 1
+    )
+    assert failure.read_text(encoding="utf-8") == (
+        "phase=mining; error_type=resource_exhausted; exit_code=1\n"
+    )
+
+
+def test_training_entrypoint_replaces_untrusted_child_diagnostic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = tmp_path / "candidate.yaml"
+    manifest = tmp_path / "manifest.json"
+    model_dir = tmp_path / "model"
+    failure = tmp_path / "output" / "failure"
+    config.write_text("schema_version: 1.0.0\n", encoding="utf-8")
+    manifest.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(container_train, "FAILURE_DIAGNOSTIC_PATH", failure)
+
+    def failed_child(*_args: Any, **kwargs: Any) -> Any:
+        diagnostic = Path(kwargs["env"][container_train.FAILURE_DIAGNOSTIC_ENV])
+        diagnostic.parent.mkdir(parents=True, exist_ok=True)
+        diagnostic.write_text(
+            "phase=mining; error_type=s3_private_bucket; exit_code=1\n",
+            encoding="utf-8",
+        )
+        return container_train.subprocess.CompletedProcess([], 9)
+
+    monkeypatch.setattr(container_train.subprocess, "run", failed_child)
+
+    assert (
+        container_train.main(
+            [
+                "train",
+                "--config",
+                str(config),
+                "--dataset-manifest",
+                str(manifest),
+                "--model-dir",
+                str(model_dir),
+            ]
+        )
+        == 9
+    )
+    assert failure.read_text(encoding="utf-8") == ("phase=training_subprocess; exit_code=9\n")
+
+
 def test_training_failure_diagnostic_is_best_effort(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

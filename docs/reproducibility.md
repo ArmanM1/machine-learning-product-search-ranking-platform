@@ -62,6 +62,14 @@ field shape with explicit `unavailable` identities. Account IDs, ARNs, bucket/ob
 and training text are not part of the logging context; the immutable training `RunManifest`
 remains the durable source for full job lifecycle and artifact checksums.
 
+The training command emits separate identifier-free stage breadcrumbs for device preflight, data load,
+mining, sampling, artifact writes, trainer initialization, epochs, and post-training verification. The
+device preflight occurs before loading the full dataset and exercises the pinned cross-encoder with a
+deterministic two-example forward/backward pass on the resolved CPU or CUDA device. Mining receives that
+resolved device explicitly, and its unchanged model is released before the candidate trainer initializes.
+Local execution retains original exception messages for debugging; only the managed-container failure
+channel substitutes the allowlisted stage and category.
+
 ## Local validation baseline evidence
 
 The original scoring process and the later full reproduction used the same canonical `baselines-v1` config hash, dataset-manifest hash, 2,057-query validation set, and zero held-out test accesses. Across 249,000 rows, all parsed non-latency fields were exactly equal. The deterministic semantic comparison reproduced both `(query_id, product_id, rank)` and `(query_id, product_id, rank, score)` hashes for every system. All six complete quality vectors were also exactly equal. The unchanged strongest system was `pretrained-cross-encoder@233902d25c440f23af6f7d6e94d2946bac0bee0a-enriched_v1` at graded nDCG@10 `0.8490371644459062` in both runs.

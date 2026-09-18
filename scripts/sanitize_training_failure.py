@@ -13,18 +13,33 @@ from urllib.parse import urlsplit
 
 _PHASES = {
     "argument_validation",
+    "artifact_write",
+    "data_load",
+    "device_preflight",
+    "epoch",
+    "mining",
+    "post_train",
     "preflight",
+    "sampling",
     "subprocess_start",
+    "trainer_init",
     "training_subprocess",
 }
 _PHASE_PATTERN = re.compile(r"\bphase[=:]\s*([a-z_]+)\b", re.IGNORECASE)
 _ERROR_TYPE_PATTERN = re.compile(r"\berror_type[=:]\s*([A-Za-z][A-Za-z0-9_]{0,63})\b")
 _ERROR_TYPES = {
+    "contract_violation",
+    "dependency_failure",
     "FileNotFoundError",
     "IsADirectoryError",
+    "io_failure",
     "NotADirectoryError",
     "OSError",
     "PermissionError",
+    "permission_denied",
+    "resource_exhausted",
+    "runtime_failure",
+    "unexpected_failure",
     "ValueError",
 }
 _EXIT_CODE_PATTERN = re.compile(

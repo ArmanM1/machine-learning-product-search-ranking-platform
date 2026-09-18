@@ -36,8 +36,12 @@ All repository workflows and Terraform backends use HTTPS/TLS for S3, and every 
 Reads a run-scoped staging prefix containing only `manifest.json`, `artifact-checksums.json`, `train.parquet`, and `validation.parquet`, plus base-model inputs and its versioned configuration. It has no `data/processed/*` or `test.parquet` permission. Writes only run checkpoint and metric prefixes. Pulls only the training repository.
 The short-lived training container runs as root because SageMaker owns and mounts its `/opt/ml`
 input, model, output, and checkpoint paths at runtime. Its effective cloud authority remains limited by
-the training execution role, and a failed entry point writes only a bounded phase, exception class, or
-exit code to SageMaker's `/opt/ml/output/failure` diagnostic file.
+the training execution role, and a failed entry point writes only a bounded phase, categorized error
+type, and exit code to SageMaker's `/opt/ml/output/failure` diagnostic file. The accepted phases are
+device preflight, data load, mining, sampling, artifact write, trainer initialization, epoch execution,
+and post-training verification. The container validates that exact grammar before preserving a child
+diagnostic; free-form exception text, paths, cloud identifiers, and unrecognized categories are replaced
+with the generic subprocess failure record.
 
 The serving process verifies every file declared by the immutable release manifest before readiness can become true. Missing files, symbolic links, path escapes, or byte-checksum differences—including changes to curated queries or public evidence—keep `/readyz` unavailable. Its embedded web build is separately attested as API mode so the public API origin cannot expose fixture results.
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import json
 import logging
 import math
@@ -65,6 +66,7 @@ from search_rank.schemas.api import (
 )
 from search_rank.schemas.evaluation import EvaluationReport, PairedDifference, ReleaseGateResult
 from search_rank.schemas.evidence import BundleChecksums, EvaluationProvenance, ReleaseManifest
+from search_rank.schemas.experiment import ExperimentConfig
 from search_rank.schemas.model import ModelArtifact
 from search_rank.schemas.publication import BaselineSummary, CommandSummary
 from search_rank.schemas.run import RunManifest
@@ -91,7 +93,10 @@ from search_rank.training import (
     freeze_experiment_config,
     load_frozen_experiment,
     mine_hard_examples,
+    preflight_training_runtime,
+    release_cross_encoder_resources,
     train_candidate,
+    training_stage,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -847,6 +852,47 @@ def freeze_config(
         _abort(run, error)
 
 
+def _training_mining_records(
+    training_frame: pd.DataFrame,
+    experiment: ExperimentConfig,
+    *,
+    text_column: str,
+    device: str,
+    device_type: str,
+) -> list[ScoredProduct]:
+    """Mine with an explicit device and release the unchanged model before training."""
+
+    records: list[ScoredProduct] = []
+    if "bm25" in experiment.hard_example_sources:
+        records.extend(rank_bm25(training_frame, text_column=text_column))
+    if "pretrained_cross_encoder" in experiment.hard_example_sources:
+        unchanged = CrossEncoder(
+            experiment.base_model_id,
+            revision=experiment.base_model_revision,
+            trust_remote_code=False,
+            max_length=experiment.max_sequence_length,
+            num_labels=1,
+            device=device,
+        )
+        try:
+            records.extend(
+                rank_cross_encoder(
+                    training_frame,
+                    model=unchanged,
+                    model_id=(
+                        f"pretrained-cross-encoder@{experiment.base_model_revision}-"
+                        f"{experiment.input_template_version}"
+                    ),
+                    text_column=text_column,
+                )
+            )
+        finally:
+            release_cross_encoder_resources(unchanged, device_type=device_type)
+            del unchanged
+            gc.collect()
+    return records
+
+
 @app.command("train")
 def train(
     config: Annotated[Path, typer.Option(exists=True, dir_okay=False, readable=True)],
@@ -859,201 +905,199 @@ def train(
     configure_logging()
     run = CommandRun("train", str(config))
     try:
-        experiment = load_frozen_experiment(config)
-        cloud_hardware = os.environ.get("SEARCH_RANK_HARDWARE_CLASS")
-        declared_accelerator = os.environ.get("SEARCH_RANK_ACCELERATOR")
-        training_device = "auto"
-        if cloud_hardware is not None or declared_accelerator is not None:
-            if cloud_hardware is None or declared_accelerator is None:
-                raise ValueError(
-                    "cloud hardware and accelerator declarations must be provided together"
-                )
-            if experiment.requested_hardware != cloud_hardware:
-                raise ValueError(
-                    "frozen experiment requested_hardware differs from the runtime instance"
-                )
-            expected_accelerator = {
-                "ml.m5.xlarge": "cpu",
-                "ml.g4dn.xlarge": "gpu",
-            }.get(cloud_hardware)
-            if expected_accelerator is None or declared_accelerator != expected_accelerator:
-                raise ValueError("runtime instance and accelerator declarations are inconsistent")
-            training_device = "cuda" if declared_accelerator == "gpu" else "cpu"
-        cloud_job_id = os.environ.get("SEARCH_RANK_CLOUD_RUN_ID", "unavailable")
-        training_log_context = TrainingLogContext(
-            run_id=cloud_job_id if cloud_job_id != "unavailable" else run.run_id,
-            job_id=cloud_job_id,
-            git_sha=os.environ.get("SEARCH_RANK_GIT_SHA", "unavailable"),
-            image_digest=os.environ.get("SEARCH_RANK_TRAINING_IMAGE_DIGEST", "unavailable"),
-            hardware_class=cloud_hardware or "local-runtime",
-        )
-        manifest, _ = load_dataset_manifest(dataset_manifest)
-        manifest_hash = manifest.processed_checksum
-        if manifest_hash != experiment.dataset_manifest_hash:
-            raise ValueError("frozen experiment references a different dataset manifest")
-        training_frame, _ = load_prepared_split(dataset_manifest, "train")
-        validation_frame, _ = load_prepared_split(dataset_manifest, "validation")
-        text_column = (
-            "text_title_v1"
-            if experiment.input_template_version == "title_v1"
-            else "text_enriched_v1"
-        )
-        mining_records: list[ScoredProduct] = []
-        if "bm25" in experiment.hard_example_sources:
-            mining_records.extend(rank_bm25(training_frame, text_column=text_column))
-        if "pretrained_cross_encoder" in experiment.hard_example_sources:
-            unchanged = CrossEncoder(
-                experiment.base_model_id,
-                revision=experiment.base_model_revision,
-                trust_remote_code=False,
-                max_length=experiment.max_sequence_length,
-                num_labels=1,
+        with training_stage("device_preflight"):
+            experiment = load_frozen_experiment(config)
+            cloud_hardware = os.environ.get("SEARCH_RANK_HARDWARE_CLASS")
+            declared_accelerator = os.environ.get("SEARCH_RANK_ACCELERATOR")
+            training_device = "auto"
+            if cloud_hardware is not None or declared_accelerator is not None:
+                if cloud_hardware is None or declared_accelerator is None:
+                    raise ValueError(
+                        "cloud hardware and accelerator declarations must be provided together"
+                    )
+                if experiment.requested_hardware != cloud_hardware:
+                    raise ValueError(
+                        "frozen experiment requested_hardware differs from the runtime instance"
+                    )
+                expected_accelerator = {
+                    "ml.m5.xlarge": "cpu",
+                    "ml.g4dn.xlarge": "gpu",
+                }.get(cloud_hardware)
+                if expected_accelerator is None or declared_accelerator != expected_accelerator:
+                    raise ValueError(
+                        "runtime instance and accelerator declarations are inconsistent"
+                    )
+                training_device = "cuda" if declared_accelerator == "gpu" else "cpu"
+            training_runtime = preflight_training_runtime(experiment, device=training_device)
+            cloud_job_id = os.environ.get("SEARCH_RANK_CLOUD_RUN_ID", "unavailable")
+            training_log_context = TrainingLogContext(
+                run_id=cloud_job_id if cloud_job_id != "unavailable" else run.run_id,
+                job_id=cloud_job_id,
+                git_sha=os.environ.get("SEARCH_RANK_GIT_SHA", "unavailable"),
+                image_digest=os.environ.get("SEARCH_RANK_TRAINING_IMAGE_DIGEST", "unavailable"),
+                hardware_class=cloud_hardware or "local-runtime",
             )
-            mining_records.extend(
-                rank_cross_encoder(
-                    training_frame,
-                    model=unchanged,
-                    model_id=(
-                        f"pretrained-cross-encoder@{experiment.base_model_revision}-"
-                        f"{experiment.input_template_version}"
-                    ),
-                    text_column=text_column,
+        with training_stage("data_load"):
+            manifest, _ = load_dataset_manifest(dataset_manifest)
+            manifest_hash = manifest.processed_checksum
+            if manifest_hash != experiment.dataset_manifest_hash:
+                raise ValueError("frozen experiment references a different dataset manifest")
+            training_frame, _ = load_prepared_split(dataset_manifest, "train")
+            validation_frame, _ = load_prepared_split(dataset_manifest, "validation")
+            text_column = (
+                "text_title_v1"
+                if experiment.input_template_version == "title_v1"
+                else "text_enriched_v1"
+            )
+        with training_stage("mining"):
+            mining_records = _training_mining_records(
+                training_frame,
+                experiment,
+                text_column=text_column,
+                device=training_runtime.device,
+                device_type=training_runtime.device_type,
+            )
+            hard = (
+                mine_hard_examples(training_frame, mining_records)
+                if mining_records
+                else pd.DataFrame(
+                    columns=[
+                        "query_id",
+                        "lower_product_id",
+                        "higher_product_id",
+                        "lower_grade",
+                        "higher_grade",
+                        "grade_difference",
+                        "source_baseline",
+                        "score_margin",
+                    ]
                 )
             )
-        hard = (
-            mine_hard_examples(training_frame, mining_records)
-            if mining_records
-            else pd.DataFrame(
-                columns=[
-                    "query_id",
-                    "lower_product_id",
-                    "higher_product_id",
-                    "lower_grade",
-                    "higher_grade",
-                    "grade_difference",
-                    "source_baseline",
-                    "score_margin",
-                ]
+        with training_stage("sampling"):
+            hard_fraction = 0.0 if experiment.sampling_strategy == "random_only_v1" else 0.5
+            sample = build_mixed_sample(
+                training_frame,
+                hard,
+                hard_fraction=hard_fraction,
+                seed=experiment.seed,
+                text_column=text_column,
             )
-        )
-        hard_fraction = 0.0 if experiment.sampling_strategy == "random_only_v1" else 0.5
-        sample = build_mixed_sample(
-            training_frame,
-            hard,
-            hard_fraction=hard_fraction,
-            seed=experiment.seed,
-            text_column=text_column,
-        )
-        sampling_counts = {
-            str(key): int(value)
-            for key, value in sample["sampling_source"].value_counts().sort_index().items()
-        }
-        label_counts = {
-            str(key): int(value)
-            for key, value in sample["esci_label"].value_counts().sort_index().items()
-        }
-        run.run_dir.mkdir(parents=True, exist_ok=True)
-        hard_path = run.run_dir / "hard-examples.parquet"
-        sample_path = run.run_dir / "training-sample.parquet"
-        hard.to_parquet(hard_path, index=False)
-        sample.to_parquet(sample_path, index=False)
+            sampling_counts = {
+                str(key): int(value)
+                for key, value in sample["sampling_source"].value_counts().sort_index().items()
+            }
+            label_counts = {
+                str(key): int(value)
+                for key, value in sample["esci_label"].value_counts().sort_index().items()
+            }
+        with training_stage("artifact_write"):
+            run.run_dir.mkdir(parents=True, exist_ok=True)
+            hard_path = run.run_dir / "hard-examples.parquet"
+            sample_path = run.run_dir / "training-sample.parquet"
+            hard.to_parquet(hard_path, index=False)
+            sample.to_parquet(sample_path, index=False)
         result = train_candidate(
             sample,
             validation_frame,
             experiment,
             output_dir=run.run_dir / "candidate",
-            device=training_device,
+            device=training_runtime.device,
             checkpoint_dir=os.environ.get("SEARCH_RANK_CHECKPOINT_DIR"),
             log_context=training_log_context,
         )
-        if declared_accelerator is not None and result.accelerator_type != declared_accelerator:
-            raise RuntimeError("actual training accelerator differs from the frozen cloud request")
-        frozen_copy = run.run_dir / "candidate" / "frozen-experiment.yaml"
-        shutil.copy2(config, frozen_copy)
-        candidate_id = f"candidate-{experiment.config_id}-{experiment.config_hash[7:19]}"
-        checkpoint_checksum = f"sha256:{sha256_directory(result.best_checkpoint)}"
-        checkpoint_size_bytes = sum(
-            path.stat().st_size
-            for path in Path(result.best_checkpoint).rglob("*")
-            if path.is_file()
-        )
-        artifact = ModelArtifact.model_validate(
-            {
-                "schema_version": "1.0.0",
-                "model_id": candidate_id,
-                "run_id": os.environ.get("SEARCH_RANK_CLOUD_RUN_ID", run.run_id),
-                "base_model_id": experiment.base_model_id,
-                "base_model_revision": experiment.base_model_revision,
-                "tokenizer_revision": experiment.base_model_revision,
-                "checkpoint_uri": "candidate/best",
-                "artifact_checksum": checkpoint_checksum,
-                "artifact_size_bytes": checkpoint_size_bytes,
-                "config_id": experiment.config_id,
-                "config_hash": experiment.config_hash,
-                "dataset_manifest_hash": manifest_hash,
-                "input_contract_version": experiment.input_template_version,
-                "label_mapping_version": experiment.label_mapping_version,
-                "sampling_strategy": experiment.sampling_strategy,
-                "hard_example_sources": experiment.hard_example_sources,
-                "promoted": False,
-                "promotion_reason": "pending held-out evaluation",
-                "evaluation_report_id": "not_evaluated",
-                "git_sha": os.environ.get("SEARCH_RANK_GIT_SHA", "unavailable"),
-                "image_digest": os.environ.get("SEARCH_RANK_TRAINING_IMAGE_DIGEST", "unavailable"),
-                "sample_statistics": {
-                    "row_count": len(sample),
-                    "sampling_source_counts": sampling_counts,
-                    "label_counts": label_counts,
+        with training_stage("post_train"):
+            if declared_accelerator is not None and result.accelerator_type != declared_accelerator:
+                raise RuntimeError(
+                    "actual training accelerator differs from the frozen cloud request"
+                )
+            frozen_copy = run.run_dir / "candidate" / "frozen-experiment.yaml"
+            shutil.copy2(config, frozen_copy)
+            candidate_id = f"candidate-{experiment.config_id}-{experiment.config_hash[7:19]}"
+            checkpoint_checksum = f"sha256:{sha256_directory(result.best_checkpoint)}"
+            checkpoint_size_bytes = sum(
+                path.stat().st_size
+                for path in Path(result.best_checkpoint).rglob("*")
+                if path.is_file()
+            )
+            artifact = ModelArtifact.model_validate(
+                {
+                    "schema_version": "1.0.0",
+                    "model_id": candidate_id,
+                    "run_id": os.environ.get("SEARCH_RANK_CLOUD_RUN_ID", run.run_id),
+                    "base_model_id": experiment.base_model_id,
+                    "base_model_revision": experiment.base_model_revision,
+                    "tokenizer_revision": experiment.base_model_revision,
+                    "checkpoint_uri": "candidate/best",
+                    "artifact_checksum": checkpoint_checksum,
+                    "artifact_size_bytes": checkpoint_size_bytes,
+                    "config_id": experiment.config_id,
+                    "config_hash": experiment.config_hash,
+                    "dataset_manifest_hash": manifest_hash,
+                    "input_contract_version": experiment.input_template_version,
+                    "label_mapping_version": experiment.label_mapping_version,
+                    "sampling_strategy": experiment.sampling_strategy,
+                    "hard_example_sources": experiment.hard_example_sources,
+                    "promoted": False,
+                    "promotion_reason": "pending held-out evaluation",
+                    "evaluation_report_id": "not_evaluated",
+                    "git_sha": os.environ.get("SEARCH_RANK_GIT_SHA", "unavailable"),
+                    "image_digest": os.environ.get(
+                        "SEARCH_RANK_TRAINING_IMAGE_DIGEST", "unavailable"
+                    ),
+                    "sample_statistics": {
+                        "row_count": len(sample),
+                        "sampling_source_counts": sampling_counts,
+                        "label_counts": label_counts,
+                    },
+                    "training_result": {
+                        **result.__dict__,
+                        "best_checkpoint": "candidate/best",
+                        "curves_path": "candidate/curves.json",
+                    },
+                    "created_at": datetime.now(UTC),
+                }
+            )
+            model_manifest = run.run_dir / "model-manifest.json"
+            model_manifest.write_text(
+                artifact.model_dump_json(indent=2) + "\n",
+                encoding="utf-8",
+            )
+            for name, path in {
+                "hard_examples": hard_path,
+                "training_sample": sample_path,
+                "model_manifest": model_manifest,
+                "training_curves": Path(result.curves_path),
+                "frozen_config": frozen_copy,
+            }.items():
+                run.add_artifact(name, path)
+            _success(
+                run,
+                {
+                    "candidate_model_id": candidate_id,
+                    "checkpoint": result.best_checkpoint,
+                    "checkpoint_checksum": checkpoint_checksum,
+                    "config_hash": experiment.config_hash,
+                    "dataset_manifest_hash": manifest_hash,
+                    "best_validation_ndcg_at_10": result.best_validation_ndcg_at_10,
+                    "duration_seconds": result.duration_seconds,
+                    "hardware_class": cloud_hardware or "local-cpu",
+                    "accelerator": result.accelerator_type,
+                    "device_type": result.device_type,
+                    "cuda_available": result.cuda_available,
+                    "cuda_device_count": result.cuda_device_count,
+                    "training_image_digest": os.environ.get(
+                        "SEARCH_RANK_TRAINING_IMAGE_DIGEST", "sha256:" + "0" * 64
+                    ),
+                    "region": os.environ.get("AWS_REGION", "local"),
+                    "input_template_version": experiment.input_template_version,
+                    "frozen_config": str(frozen_copy.resolve()),
+                    "sample_statistics": {
+                        "row_count": len(sample),
+                        "sampling_source_counts": sampling_counts,
+                        "label_counts": label_counts,
+                    },
                 },
-                "training_result": {
-                    **result.__dict__,
-                    "best_checkpoint": "candidate/best",
-                    "curves_path": "candidate/curves.json",
-                },
-                "created_at": datetime.now(UTC),
-            }
-        )
-        model_manifest = run.run_dir / "model-manifest.json"
-        model_manifest.write_text(
-            artifact.model_dump_json(indent=2) + "\n",
-            encoding="utf-8",
-        )
-        for name, path in {
-            "hard_examples": hard_path,
-            "training_sample": sample_path,
-            "model_manifest": model_manifest,
-            "training_curves": Path(result.curves_path),
-            "frozen_config": frozen_copy,
-        }.items():
-            run.add_artifact(name, path)
-        _success(
-            run,
-            {
-                "candidate_model_id": candidate_id,
-                "checkpoint": result.best_checkpoint,
-                "checkpoint_checksum": checkpoint_checksum,
-                "config_hash": experiment.config_hash,
-                "dataset_manifest_hash": manifest_hash,
-                "best_validation_ndcg_at_10": result.best_validation_ndcg_at_10,
-                "duration_seconds": result.duration_seconds,
-                "hardware_class": cloud_hardware or "local-cpu",
-                "accelerator": result.accelerator_type,
-                "device_type": result.device_type,
-                "cuda_available": result.cuda_available,
-                "cuda_device_count": result.cuda_device_count,
-                "training_image_digest": os.environ.get(
-                    "SEARCH_RANK_TRAINING_IMAGE_DIGEST", "sha256:" + "0" * 64
-                ),
-                "region": os.environ.get("AWS_REGION", "local"),
-                "input_template_version": experiment.input_template_version,
-                "frozen_config": str(frozen_copy.resolve()),
-                "sample_statistics": {
-                    "row_count": len(sample),
-                    "sampling_source_counts": sampling_counts,
-                    "label_counts": label_counts,
-                },
-            },
-        )
+            )
     except (OSError, ValueError, ValidationError, RuntimeError, AssertionError) as error:
         _abort(run, error)
 
