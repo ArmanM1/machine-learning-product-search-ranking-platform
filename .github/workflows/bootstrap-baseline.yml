@@ -174,15 +174,23 @@ jobs:
           set -euo pipefail
           mkdir baseline-input
           [[ "${DATASET_MANIFEST_S3_KEY}" == */manifest.json ]]
-          dataset_checksums_s3_key="${DATASET_MANIFEST_S3_KEY%/manifest.json}/artifact-checksums.json"
+          # User metadata is immutable with this create-only manifest object, and
+          # DATASET_PROCESSED_SHA256 independently binds its decoded JSON content.
+          checksums_b64="$(aws s3api head-object \
+            --bucket "${ARTIFACT_BUCKET}" \
+            --key "${DATASET_MANIFEST_S3_KEY}" \
+            --query 'Metadata."artifact-checksums-b64"' \
+            --output text)"
+          [[ "${checksums_b64}" =~ ^[A-Za-z0-9+/]+={0,2}$ ]]
+          ((${#checksums_b64} <= 1600))
+          printf '%s' "${checksums_b64}" \
+            | base64 --decode > baseline-input/artifact-checksums.json
           aws s3 cp "s3://${ARTIFACT_BUCKET}/${BASELINE_COMMAND_SUMMARY_S3_KEY}" \
             baseline-input/summary.json --no-progress
           aws s3 cp "s3://${ARTIFACT_BUCKET}/${BASELINE_SUMMARY_S3_KEY}" \
             baseline-input/baseline-summary.json --no-progress
           aws s3 cp "s3://${ARTIFACT_BUCKET}/${DATASET_MANIFEST_S3_KEY}" \
             baseline-input/manifest.json --no-progress
-          aws s3 cp "s3://${ARTIFACT_BUCKET}/${dataset_checksums_s3_key}" \
-            baseline-input/artifact-checksums.json --no-progress
           aws s3 cp "s3://${ARTIFACT_BUCKET}/${CURATED_QUERIES_S3_KEY}" \
             baseline-input/curated-queries.json --no-progress
           test "$(sha256sum baseline-input/summary.json | cut -d' ' -f1)" = \

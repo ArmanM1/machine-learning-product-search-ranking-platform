@@ -257,7 +257,7 @@ def test_release_binds_baseline_evidence_to_current_clean_commit_and_config() ->
     assert ".validation_baseline_summary_checksum == $baseline_summary" in release
 
 
-def test_baseline_bootstrap_receives_run_scoped_checksum_index_fail_closed() -> None:
+def test_baseline_bootstrap_receives_checksum_index_via_manifest_metadata() -> None:
     baseline = (WORKFLOWS / "baseline.yml").read_text(encoding="utf-8")
     bootstrap = (WORKFLOWS / "bootstrap-baseline.yml").read_text(encoding="utf-8")
     iam = (ROOT / "infra/terraform/modules/platform/iam.tf").read_text(encoding="utf-8")
@@ -271,48 +271,60 @@ def test_baseline_bootstrap_receives_run_scoped_checksum_index_fail_closed() -> 
         'checksums_path="data/processed/esci-us-v1/'
         '${DATASET_PROCESSED_SHA256#sha256:}/artifact-checksums.json"'
     )
+    checksum_encoding = 'checksums_b64="$(base64 -w 0 "${checksums_path}")"'
+    manifest_metadata = 'metadata_args=(--metadata "artifact-checksums-b64=${checksums_b64}")'
     assert checksums_path in publication
-    assert '"${checksums_path}:artifact-checksums.json"' in publication
-    assert publication.index(checksums_path) < publication.index(
-        '"${checksums_path}:artifact-checksums.json"'
+    assert checksum_encoding in publication
+    assert '[[ "${checksums_b64}" =~ ^[A-Za-z0-9+/]+={0,2}$ ]]' in publication
+    assert "((${#checksums_b64} <= 1600))" in publication
+    assert 'if [[ "${remote_name}" == "manifest.json" ]]; then' in publication
+    assert manifest_metadata in publication
+    assert '"${metadata_args[@]}"' in publication
+    assert '"${checksums_path}:artifact-checksums.json"' not in publication
+    assert (
+        publication.index(checksums_path)
+        < publication.index(checksum_encoding)
+        < publication.index(manifest_metadata)
     )
 
     download = bootstrap.split("name: Download and checksum-verify validation evidence only", 1)[
         1
     ].split("name: Build and verify the typed validation-only bundle", 1)[0]
     strict_manifest_suffix = '[[ "${DATASET_MANIFEST_S3_KEY}" == */manifest.json ]]'
-    sibling_derivation = (
-        'dataset_checksums_s3_key="${DATASET_MANIFEST_S3_KEY%/manifest.json}'
-        '/artifact-checksums.json"'
+    manifest_head = (
+        "aws s3api head-object \\\n"
+        '            --bucket "${ARTIFACT_BUCKET}" \\\n'
+        '            --key "${DATASET_MANIFEST_S3_KEY}"'
     )
-    checksum_download = (
-        'aws s3 cp "s3://${ARTIFACT_BUCKET}/${dataset_checksums_s3_key}" \\\n'
-        "            baseline-input/artifact-checksums.json --no-progress"
+    metadata_query = "--query 'Metadata.\"artifact-checksums-b64\"'"
+    checksum_decode = (
+        "printf '%s' \"${checksums_b64}\" \\\n"
+        "            | base64 --decode > baseline-input/artifact-checksums.json"
     )
     assert strict_manifest_suffix in download
-    assert sibling_derivation in download
-    assert checksum_download in download
+    assert manifest_head in download
+    assert metadata_query in download
+    assert '[[ "${checksums_b64}" =~ ^[A-Za-z0-9+/]+={0,2}$ ]]' in download
+    assert "((${#checksums_b64} <= 1600))" in download
+    assert checksum_decode in download
+    assert "dataset_checksums_s3_key=" not in download
+    assert "artifact-checksums.json --no-progress" not in download
     assert (
         download.index(strict_manifest_suffix)
-        < download.index(sibling_derivation)
-        < download.index(checksum_download)
+        < download.index(manifest_head)
+        < download.index(metadata_query)
+        < download.index(checksum_decode)
     )
-    assert bootstrap.index(checksum_download) < bootstrap.index(
+    assert bootstrap.index(checksum_decode) < bootstrap.index(
         "uv run python -m search_rank.cli bootstrap-baseline-release"
     )
 
     baseline_release_iam = iam.split(
         'data "aws_iam_policy_document" "github_baseline_release" {', 1
     )[1].split('resource "aws_iam_role_policy" "github_baseline_release"', 1)[0]
-    checksum_resources = [
-        line.strip()
-        for line in baseline_release_iam.splitlines()
-        if "artifact-checksums.json" in line
-    ]
-    assert checksum_resources == [
-        '"${aws_s3_bucket.artifacts.arn}/runs/*/artifact-checksums.json",'
-    ]
+    assert "artifact-checksums.json" not in baseline_release_iam
     assert "/data/processed/" not in baseline_release_iam
+    assert '"${aws_s3_bucket.artifacts.arn}/runs/*/manifest.json",' in baseline_release_iam
 
     bootstrap_command = cli.split('@app.command("bootstrap-baseline-release")', 1)[1].split(
         '@app.command("freeze-config")', 1
