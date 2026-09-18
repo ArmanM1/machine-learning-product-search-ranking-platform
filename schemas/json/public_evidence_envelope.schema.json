@@ -873,6 +873,30 @@
           ],
           "title": "Delta"
         },
+        "ci_lower": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ci Lower"
+        },
+        "ci_upper": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ci Upper"
+        },
         "low_sample": {
           "title": "Low Sample",
           "type": "boolean"

@@ -257,6 +257,8 @@ export interface SliceResult {
   baseline_ndcg_at_10: number | null
   candidate_ndcg_at_10: number | null
   delta: number | null
+  ci_lower: number | null
+  ci_upper: number | null
   low_sample: boolean
 }
 
@@ -407,6 +409,8 @@ export interface VerifiedPublicSlice {
   baseline_graded_ndcg_at_10: number | null
   candidate_graded_ndcg_at_10: number | null
   delta: number | null
+  ci_lower?: number | null
+  ci_upper?: number | null
   low_sample: boolean
   finding: 'improvement' | 'regression' | 'uncertain' | 'insufficient_data'
 }

@@ -87,7 +87,7 @@ export function FailuresPage() {
         <DataTable
           caption="Candidate versus baseline performance by evaluation slice"
           className="slice-table"
-          headers={[{ label: 'Slice' }, { label: 'Queries', align: 'right' }, { label: 'Baseline', align: 'right' }, { label: 'Candidate', align: 'right' }, { label: 'Delta', align: 'right' }]}
+          headers={[{ label: 'Slice' }, { label: 'Queries', align: 'right' }, { label: 'Baseline', align: 'right' }, { label: 'Candidate', align: 'right' }, { label: 'Delta', align: 'right' }, { label: 'Paired CI', align: 'right' }]}
           rows={sortedSlices.map((slice) => [
             <span className="slice-cell"><strong>{slice.display_name}</strong><small>{slice.description}</small>{slice.low_sample ? <em><AlertIcon /> Low sample</em> : null}</span>,
             slice.query_count.toLocaleString(),
@@ -96,6 +96,9 @@ export function FailuresPage() {
             slice.delta === null
               ? '—'
               : <span className={slice.delta > 0 ? 'delta-positive' : slice.delta < 0 ? 'delta-negative' : ''}>{signed(slice.delta)}</span>,
+            slice.ci_lower === null || slice.ci_upper === null
+              ? '—'
+              : `[${signed(slice.ci_lower)}, ${signed(slice.ci_upper)}]`,
           ])}
         />
         {sortedSlices.some((slice) => slice.low_sample) ? (

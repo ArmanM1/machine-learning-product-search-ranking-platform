@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { App } from '../src/App'
 
@@ -22,5 +22,15 @@ describe('application shell and overview', () => {
     expect(screen.getByText('404')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /evidence path does not exist/i })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /return to overview/i })).toHaveAttribute('href', '/')
+  })
+
+  it('shows paired slice intervals while marking an inadequate interval unavailable', async () => {
+    render(<MemoryRouter initialEntries={['/failures']}><App /></MemoryRouter>)
+
+    expect(await screen.findByRole('columnheader', { name: 'Paired CI' })).toBeInTheDocument()
+    expect(screen.getByText('[−0.015, +0.004]')).toBeInTheDocument()
+    const inadequateRow = screen.getByText('Accessory intent').closest('tr')
+    expect(inadequateRow).not.toBeNull()
+    expect(within(inadequateRow!).getByText('—')).toBeInTheDocument()
   })
 })

@@ -237,6 +237,8 @@ def test_public_evidence_is_typed_bound_and_fail_closed() -> None:
     assert evidence.run.metrics.candidate_graded_ndcg_at_10 == 0.70
     assert evidence.run.training_provenance.hardware_class == "ml.g4dn.xlarge"
     assert evidence.run.evaluation_provenance.hardware_class == "ml.m5.xlarge"
+    assert evidence.failure_analysis.slices[0].ci_lower is None
+    assert evidence.failure_analysis.slices[0].ci_upper is None
 
     mismatched = public_evidence_values()
     mismatched["failure_analysis"]["run_id"] = "run-2"  # type: ignore[index]
@@ -257,6 +259,37 @@ def test_public_evidence_is_typed_bound_and_fail_closed() -> None:
     mislabeled_evaluation["run"]["evaluation_provenance"]["hardware_class"] = "ml.g4dn.xlarge"
     with pytest.raises(ValidationError, match=r"ml\.m5\.xlarge"):
         PublicEvidenceEnvelope.model_validate(mislabeled_evaluation)
+
+
+def test_public_slice_intervals_are_optional_complete_and_ordered() -> None:
+    values = public_evidence_values()
+    slice_result = values["failure_analysis"]["slices"][0]  # type: ignore[index]
+    slice_result.update({"ci_lower": -0.01, "ci_upper": 0.04})
+
+    evidence = PublicEvidenceEnvelope.model_validate(values)
+    assert evidence.failure_analysis.slices[0].ci_lower == -0.01
+    assert evidence.failure_analysis.slices[0].ci_upper == 0.04
+
+    slice_result.pop("ci_upper")
+    with pytest.raises(ValidationError, match="both bounds or neither"):
+        PublicEvidenceEnvelope.model_validate(values)
+
+    slice_result["ci_upper"] = -0.02
+    with pytest.raises(ValidationError, match="ci_lower must not exceed ci_upper"):
+        PublicEvidenceEnvelope.model_validate(values)
+
+    inadequate = public_evidence_values()
+    inadequate_slice = inadequate["failure_analysis"]["slices"][0]  # type: ignore[index]
+    inadequate_slice.update(
+        {
+            "ci_lower": -0.01,
+            "ci_upper": 0.04,
+            "low_sample": True,
+            "finding": "insufficient_data",
+        }
+    )
+    with pytest.raises(ValidationError, match="low-sample slices cannot publish"):
+        PublicEvidenceEnvelope.model_validate(inadequate)
 
 
 def test_both_public_run_modes_require_a_canonical_split_manifest_hash() -> None:

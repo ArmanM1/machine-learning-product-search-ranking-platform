@@ -294,11 +294,11 @@ export const fixtureFailures: FailureAnalysisData = {
   status: 'complete',
   minimum_slice_size: 50,
   slices: [
-    { slice_id: 'accessory-intent', display_name: 'Accessory intent', description: 'Queries seeking an item made for another product.', query_count: 42, baseline_ndcg_at_10: 0.662, candidate_ndcg_at_10: 0.638, delta: -0.024, low_sample: true },
-    { slice_id: 'short-brand-query', display_name: 'Short brand queries', description: 'One or two terms containing a brand token.', query_count: 118, baseline_ndcg_at_10: 0.704, candidate_ndcg_at_10: 0.696, delta: -0.008, low_sample: false },
-    { slice_id: 'near-duplicate', display_name: 'Near-duplicate candidates', description: 'Candidate lists with highly similar titles.', query_count: 96, baseline_ndcg_at_10: 0.681, candidate_ndcg_at_10: 0.683, delta: 0.002, low_sample: false },
-    { slice_id: 'attribute-rich', display_name: 'Attribute-rich queries', description: 'Three or more explicit product attributes.', query_count: 307, baseline_ndcg_at_10: 0.621, candidate_ndcg_at_10: 0.657, delta: 0.036, low_sample: false },
-    { slice_id: 'ambiguous-short', display_name: 'Ambiguous short queries', description: 'One to three terms with multiple plausible intents.', query_count: 214, baseline_ndcg_at_10: 0.574, candidate_ndcg_at_10: 0.628, delta: 0.054, low_sample: false },
+    { slice_id: 'accessory-intent', display_name: 'Accessory intent', description: 'Queries seeking an item made for another product.', query_count: 42, baseline_ndcg_at_10: 0.662, candidate_ndcg_at_10: 0.638, delta: -0.024, ci_lower: null, ci_upper: null, low_sample: true },
+    { slice_id: 'short-brand-query', display_name: 'Short brand queries', description: 'One or two terms containing a brand token.', query_count: 118, baseline_ndcg_at_10: 0.704, candidate_ndcg_at_10: 0.696, delta: -0.008, ci_lower: -0.015, ci_upper: 0.004, low_sample: false },
+    { slice_id: 'near-duplicate', display_name: 'Near-duplicate candidates', description: 'Candidate lists with highly similar titles.', query_count: 96, baseline_ndcg_at_10: 0.681, candidate_ndcg_at_10: 0.683, delta: 0.002, ci_lower: -0.009, ci_upper: 0.013, low_sample: false },
+    { slice_id: 'attribute-rich', display_name: 'Attribute-rich queries', description: 'Three or more explicit product attributes.', query_count: 307, baseline_ndcg_at_10: 0.621, candidate_ndcg_at_10: 0.657, delta: 0.036, ci_lower: 0.018, ci_upper: 0.052, low_sample: false },
+    { slice_id: 'ambiguous-short', display_name: 'Ambiguous short queries', description: 'One to three terms with multiple plausible intents.', query_count: 214, baseline_ndcg_at_10: 0.574, candidate_ndcg_at_10: 0.628, delta: 0.054, ci_lower: 0.031, ci_upper: 0.076, low_sample: false },
   ],
   examples: [
     {
