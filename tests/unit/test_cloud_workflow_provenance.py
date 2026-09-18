@@ -503,9 +503,7 @@ def test_serving_throttle_supports_product_flows_but_preserves_compute_bound() -
     serving = (ROOT / "infra/terraform/modules/platform/serving.tf").read_text(encoding="utf-8")
     deploy = (WORKFLOWS / "deploy.yml").read_text(encoding="utf-8")
     benchmark = (WORKFLOWS / "benchmark-serving.yml").read_text(encoding="utf-8")
-    variables = (ROOT / "infra/terraform/modules/platform/variables.tf").read_text(
-        encoding="utf-8"
-    )
+    variables = (ROOT / "infra/terraform/modules/platform/variables.tf").read_text(encoding="utf-8")
 
     assert serving.count("throttling_burst_limit = 40") == 2
     assert serving.count("throttling_rate_limit  = 20") == 2
@@ -588,7 +586,9 @@ def test_manual_rollback_resolves_live_infrastructure_from_protected_state() -> 
     assert "terraform output -raw cloudfront_distribution_id" in rollback_job
     assert "terraform output -raw cloudfront_url" in rollback_job
     assert "LAMBDA_FUNCTION_NAME: ${{ vars.AWS_LAMBDA_FUNCTION_NAME }}" not in rollback_job
-    assert "CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.AWS_CLOUDFRONT_DISTRIBUTION_ID }}" not in rollback_job
+    assert (
+        "CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.AWS_CLOUDFRONT_DISTRIBUTION_ID }}" not in rollback_job
+    )
     assert "CLOUDFRONT_URL: ${{ vars.AWS_CLOUDFRONT_URL }}" not in rollback_job
 
 
