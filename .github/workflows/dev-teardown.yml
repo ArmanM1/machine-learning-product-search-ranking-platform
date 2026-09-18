@@ -1,0 +1,348 @@
+name: Verify disposable dev teardown
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Plan first; destroy requires the separately reviewed plan fingerprint
+        required: true
+        type: choice
+        options: [plan, destroy]
+      reviewed_commit_sha:
+        description: Exact full main commit SHA being reviewed and destroyed
+        required: true
+        type: string
+      approved_plan_sha256:
+        description: Required for destroy; exact SHA-256 emitted by the plan run
+        required: false
+        type: string
+      authorization:
+        description: For destroy, type DESTROY DISPOSABLE DEV
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: aws-financial-operations
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  DEPLOYMENT_ENVIRONMENT: dev
+  PROOF_PROFILE: base-infrastructure-no-serving-no-budgets
+
+jobs:
+  lifecycle:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: aws-dev-lifecycle
+    env:
+      OPERATION: ${{ inputs.operation }}
+      REVIEWED_COMMIT_SHA: ${{ inputs.reviewed_commit_sha }}
+      APPROVED_PLAN_SHA256: ${{ inputs.approved_plan_sha256 }}
+      AUTHORIZATION: ${{ inputs.authorization }}
+      DEV_LIFECYCLE_ROLE_ARN: ${{ vars.AWS_DEV_LIFECYCLE_ROLE_ARN }}
+      TF_STATE_BUCKET: ${{ vars.AWS_TERRAFORM_STATE_BUCKET }}
+      TF_OWNER_ALIAS: ${{ vars.TF_OWNER_ALIAS }}
+      TF_GITHUB_REPOSITORY: ${{ github.repository }}
+      TF_GITHUB_REPOSITORY_OWNER_ID: ${{ vars.TF_GITHUB_REPOSITORY_OWNER_ID }}
+      TF_GITHUB_REPOSITORY_ID: ${{ vars.TF_GITHUB_REPOSITORY_ID }}
+      TF_GITHUB_OIDC_PROVIDER_ARN: ${{ vars.AWS_GITHUB_OIDC_PROVIDER_ARN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Validate exact immutable authorization
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${REVIEWED_COMMIT_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          test "${REVIEWED_COMMIT_SHA}" = "${GITHUB_SHA}"
+          test "$(git rev-parse HEAD)" = "${REVIEWED_COMMIT_SHA}"
+          git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
+          test "$(git rev-parse refs/remotes/origin/main)" = "${REVIEWED_COMMIT_SHA}"
+          test "${TF_GITHUB_REPOSITORY}" = "${GITHUB_REPOSITORY}"
+          test "${DEPLOYMENT_ENVIRONMENT}" = "dev"
+          test "${PROOF_PROFILE}" = "base-infrastructure-no-serving-no-budgets"
+          case "${OPERATION}" in
+            plan)
+              test -z "${APPROVED_PLAN_SHA256}"
+              test -z "${AUTHORIZATION}"
+              ;;
+            destroy)
+              test "${AUTHORIZATION}" = "DESTROY DISPOSABLE DEV"
+              [[ "${APPROVED_PLAN_SHA256}" =~ ^[0-9a-f]{64}$ ]]
+              ;;
+            *)
+              exit 1
+              ;;
+          esac
+          echo "target=${REVIEWED_COMMIT_SHA}" >> "${GITHUB_OUTPUT}"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - name: Install the minimal locked lifecycle dependency
+        run: python -m pip install --disable-pip-version-check boto3==1.43.86
+      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ vars.AWS_DEV_LIFECYCLE_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-dev-lifecycle-${{ github.run_id }}
+          mask-aws-account-id: true
+      - name: Attest the external dev-only lifecycle role
+        id: identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          account_id="$(aws sts get-caller-identity --query Account --output text)"
+          [[ "${account_id}" =~ ^[0-9]{12}$ ]]
+          echo "::add-mask::${account_id}"
+          expected_role_arn="arn:aws:iam::${account_id}:role/product-search-github-dev-lifecycle"
+          test "${DEV_LIFECYCLE_ROLE_ARN}" = "${expected_role_arn}"
+          caller_arn="$(aws sts get-caller-identity --query Arn --output text)"
+          [[ "${caller_arn}" == "arn:aws:sts::${account_id}:assumed-role/product-search-github-dev-lifecycle/"* ]]
+
+          attestation_dir="$(mktemp -d)"
+          cleanup_attestation() {
+            rm -f "${attestation_dir}/role.json" "${attestation_dir}/inline-list.json"
+            rm -f "${attestation_dir}/attached-list.json" "${attestation_dir}/inline.json"
+            rmdir "${attestation_dir}"
+          }
+          trap cleanup_attestation EXIT
+          aws iam get-role --role-name product-search-github-dev-lifecycle \
+            --output json > "${attestation_dir}/role.json"
+          aws iam list-role-policies --role-name product-search-github-dev-lifecycle \
+            --output json > "${attestation_dir}/inline-list.json"
+          aws iam list-attached-role-policies --role-name product-search-github-dev-lifecycle \
+            --output json > "${attestation_dir}/attached-list.json"
+          aws iam get-role-policy \
+            --role-name product-search-github-dev-lifecycle \
+            --policy-name destroy-only-disposable-dev \
+            --output json > "${attestation_dir}/inline.json"
+          ATTESTATION_DIR="${attestation_dir}" ACCOUNT_ID="${account_id}" python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          from urllib.parse import unquote
+
+          from scripts.render_bootstrap_iam import build_dev_lifecycle_policy, build_trust
+
+          root = Path(os.environ["ATTESTATION_DIR"])
+          account_id = os.environ["ACCOUNT_ID"]
+
+          def load(name: str) -> dict[str, object]:
+              return json.loads((root / name).read_text(encoding="utf-8"))
+
+          def policy_document(value: object) -> object:
+              if isinstance(value, str):
+                  return json.loads(unquote(value))
+              return value
+
+          role = load("role.json")["Role"]
+          if not isinstance(role, dict):
+              raise SystemExit("Lifecycle role response is invalid")
+          inline_names = load("inline-list.json").get("PolicyNames")
+          attached = load("attached-list.json").get("AttachedPolicies")
+          inline = policy_document(load("inline.json")["PolicyDocument"])
+          expected_role_arn = (
+              f"arn:aws:iam::{account_id}:role/product-search-github-dev-lifecycle"
+          )
+          if role.get("Arn") != expected_role_arn or role.get("RoleName") != expected_role_arn.rsplit("/", 1)[1]:
+              raise SystemExit("Live lifecycle role identity differs from the dev-only contract")
+          if role.get("PermissionsBoundary") is not None:
+              raise SystemExit("External lifecycle role must have no unreviewed permissions boundary")
+          if inline_names != ["destroy-only-disposable-dev"] or attached != []:
+              raise SystemExit("Lifecycle role must have one exact inline policy and no attachments")
+          expected_trust = build_trust(
+              account_id,
+              os.environ["TF_GITHUB_REPOSITORY"].split("/", 1)[0],
+              os.environ["TF_GITHUB_REPOSITORY_OWNER_ID"],
+              os.environ["TF_GITHUB_REPOSITORY_ID"],
+              "dev-lifecycle",
+          )
+          if policy_document(role.get("AssumeRolePolicyDocument")) != expected_trust:
+              raise SystemExit("Live lifecycle trust differs from the immutable repository contract")
+          if inline != build_dev_lifecycle_policy(account_id):
+              raise SystemExit("Live lifecycle policy differs from the exact dev-only contract")
+          PY
+          echo "account_id=${account_id}" >> "${GITHUB_OUTPUT}"
+      - name: Prove no project SageMaker job is active
+        shell: bash
+        env:
+          ACCOUNT_ID: ${{ steps.identity.outputs.account_id }}
+        run: |
+          set -euo pipefail
+          prefix="product-search-ranking-dev-"
+          active=0
+          for status in InProgress Stopping; do
+            training="$(aws sagemaker list-training-jobs \
+              --name-contains "${prefix}" --status-equals "${status}" \
+              --query 'length(TrainingJobSummaries)' --output text)"
+            processing="$(aws sagemaker list-processing-jobs \
+              --name-contains "${prefix}" --status-equals "${status}" \
+              --query 'length(ProcessingJobSummaries)' --output text)"
+            [[ "${training}" =~ ^[0-9]+$ ]]
+            [[ "${processing}" =~ ^[0-9]+$ ]]
+            active=$((active + training + processing))
+          done
+          test "${active}" -eq 0 || {
+            echo "Disposable dev has active managed jobs; teardown is refused." >&2
+            exit 1
+          }
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: "1.10.5"
+      - name: Reproduce the exact destroy plan and optionally apply it
+        id: teardown
+        working-directory: infra/terraform/environments/dev
+        shell: bash
+        env:
+          ACCOUNT_ID: ${{ steps.identity.outputs.account_id }}
+          TARGET_COMMIT: ${{ steps.source.outputs.target }}
+          TF_IN_AUTOMATION: "true"
+        run: |
+          set -euo pipefail
+          cleanup_private_files() {
+            rm -f current-state.private.json destroy-plan.private.json post-destroy-state.private.json destroy.tfplan
+            rm -f destroy-plan.private.log destroy-apply.private.log cleanup.private.log
+          }
+          trap cleanup_private_files EXIT
+          terraform fmt -check -recursive ../../
+          lockfile_sha256_before="$(sha256sum .terraform.lock.hcl | cut -d' ' -f1)"
+          terraform init -input=false \
+            -lockfile=readonly \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="key=product-search-ranking/dev/terraform.tfstate" \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config="encrypt=true" \
+            -backend-config="use_lockfile=true"
+          lockfile_sha256_after="$(sha256sum .terraform.lock.hcl | cut -d' ' -f1)"
+          test "${lockfile_sha256_before}" = "${lockfile_sha256_after}"
+          terraform validate
+          terraform state pull > current-state.private.json
+          state_sha256="$(sha256sum current-state.private.json | cut -d' ' -f1)"
+          if ! terraform plan -destroy -input=false -out=destroy.tfplan \
+            -var="owner_alias=${TF_OWNER_ALIAS}" \
+            -var="github_repository=${TF_GITHUB_REPOSITORY}" \
+            -var="github_repository_owner_id=${TF_GITHUB_REPOSITORY_OWNER_ID}" \
+            -var="github_repository_id=${TF_GITHUB_REPOSITORY_ID}" \
+            -var="create_github_oidc_provider=false" \
+            -var="existing_github_oidc_provider_arn=${TF_GITHUB_OIDC_PROVIDER_ARN}" \
+            -var="enable_budgets=false" \
+            -var="budget_notification_email=" \
+            -var="alarm_notification_email=" \
+            -var="enable_serving=false" \
+            -var="enable_public_serving=false" \
+            -var="serving_image_uri=" \
+            -var="serving_git_sha=" \
+            -var="serving_deployment_nonce=" \
+            > destroy-plan.private.log 2>&1; then
+            echo "Private disposable-dev destroy planning failed; no plan details were published." >&2
+            exit 1
+          fi
+          terraform show -json destroy.tfplan > destroy-plan.private.json
+          PYTHONPATH=../../../.. python ../../../../scripts/dev_teardown_contract.py plan \
+            --plan destroy-plan.private.json \
+            --account-id "${ACCOUNT_ID}" \
+            --source-sha "${TARGET_COMMIT}" \
+            --terraform-lock-sha256 "${lockfile_sha256_after}" \
+            --state-sha256 "${state_sha256}" \
+            --output dev-teardown-plan.json \
+            --sha-output dev-teardown-plan.sha256
+          plan_sha256="$(tr -d '\r\n' < dev-teardown-plan.sha256)"
+          [[ "${plan_sha256}" =~ ^[0-9a-f]{64}$ ]]
+          {
+            echo "Disposable dev plan SHA-256: `${plan_sha256}`"
+            echo "Reviewed commit: `${TARGET_COMMIT}`"
+            echo "Scope: exact 56-resource non-serving dev fixture in us-east-1"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          if [[ "${OPERATION}" == "destroy" ]]; then
+            test "${plan_sha256}" = "${APPROVED_PLAN_SHA256}" || {
+              echo "Destroy plan differs from the separately reviewed fingerprint." >&2
+              exit 1
+            }
+            if ! PYTHONPATH=../../../.. python ../../../../scripts/empty_versioned_dev_bucket.py \
+              --account-id "${ACCOUNT_ID}" --kind artifacts \
+              --output artifact-bucket-cleanup.json \
+              > cleanup.private.log 2>&1; then
+              echo "Private artifact-bucket cleanup failed; no identifiers were published." >&2
+              exit 1
+            fi
+            if ! PYTHONPATH=../../../.. python ../../../../scripts/empty_versioned_dev_bucket.py \
+              --account-id "${ACCOUNT_ID}" --kind site \
+              --output site-bucket-cleanup.json \
+              >> cleanup.private.log 2>&1; then
+              echo "Private site-bucket cleanup failed; no identifiers were published." >&2
+              exit 1
+            fi
+            if ! PYTHONPATH=../../../.. python ../../../../scripts/empty_dev_repositories.py \
+              --account-id "${ACCOUNT_ID}" \
+              --output repository-cleanup.json \
+              >> cleanup.private.log 2>&1; then
+              echo "Private repository cleanup failed; no identifiers were published." >&2
+              exit 1
+            fi
+            if ! terraform apply -input=false -auto-approve destroy.tfplan \
+              > destroy-apply.private.log 2>&1; then
+              echo "Private disposable-dev destroy apply failed; no plan details were published." >&2
+              exit 1
+            fi
+            terraform show -json > post-destroy-state.private.json
+            state_count="$(PYTHONPATH=../../../.. python \
+              ../../../../scripts/dev_teardown_contract.py state-count \
+              --state post-destroy-state.private.json)"
+            [[ "${state_count}" =~ ^[0-9]+$ ]]
+            echo "state_count=${state_count}" >> "${GITHUB_OUTPUT}"
+          fi
+      - name: Collect exact post-destroy absence evidence
+        if: inputs.operation == 'destroy'
+        working-directory: infra/terraform/environments/dev
+        shell: bash
+        env:
+          ACCOUNT_ID: ${{ steps.identity.outputs.account_id }}
+          STATE_COUNT: ${{ steps.teardown.outputs.state_count }}
+        run: |
+          set -euo pipefail
+          cleanup_private_log() {
+            rm -f absence.private.log
+          }
+          trap cleanup_private_log EXIT
+          if ! PYTHONPATH=../../../.. python ../../../../scripts/collect_dev_teardown_absence.py \
+            --account-id "${ACCOUNT_ID}" \
+            --terraform-state-resources "${STATE_COUNT}" \
+            --output dev-teardown-absence.json \
+            > absence.private.log 2>&1; then
+            echo "Post-destroy absence inspection failed closed; no identifiers were published." >&2
+            exit 1
+          fi
+          completed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          PYTHONPATH=../../../.. python ../../../../scripts/dev_teardown_contract.py evidence \
+            --plan-contract dev-teardown-plan.json \
+            --absence dev-teardown-absence.json \
+            --completed-at "${completed_at}" \
+            --operator-alias "${TF_OWNER_ALIAS}" \
+            --output dev-teardown-evidence.json
+          echo "Disposable dev Terraform resources are absent; protected state was retained." \
+            >> "${GITHUB_STEP_SUMMARY}"
+          echo "FR-CLOUD-009 remains incomplete until the external lifecycle role is removed by the human bootstrap operator." \
+            >> "${GITHUB_STEP_SUMMARY}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: disposable-dev-teardown-${{ inputs.operation }}-${{ github.sha }}
+          path: |
+            infra/terraform/environments/dev/dev-teardown-plan.json
+            infra/terraform/environments/dev/dev-teardown-plan.sha256
+            infra/terraform/environments/dev/dev-teardown-absence.json
+            infra/terraform/environments/dev/dev-teardown-evidence.json
+            infra/terraform/environments/dev/artifact-bucket-cleanup.json
+            infra/terraform/environments/dev/repository-cleanup.json
+            infra/terraform/environments/dev/site-bucket-cleanup.json
+          if-no-files-found: ignore
+          retention-days: 30
