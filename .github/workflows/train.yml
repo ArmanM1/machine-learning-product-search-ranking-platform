@@ -445,7 +445,6 @@ jobs:
               --arg retention "${retention_class}" \
               '.ContentType == $content_type and
                (.ChecksumSHA256 | type == "string" and length > 0) and
-               .TagCount == 1 and
                .Metadata == {"retention-class": $retention, sha256: $sha}' \
               "${head}" >/dev/null
           }
@@ -1176,7 +1175,6 @@ jobs:
             jq -e --arg content_type "${content_type}" --arg sha "${local_sha}" '
               .ContentType == $content_type and
               (.ChecksumSHA256 | type == "string" and length > 0) and
-              .TagCount == 1 and
               .Metadata == {"retention-class": "candidate", sha256: $sha}' \
               "${head}" >/dev/null
           }

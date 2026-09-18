@@ -12,6 +12,7 @@ import pytest
 from pydantic import ValidationError
 
 from search_rank.schemas.evidence import BundleChecksums, ReleaseManifest
+from search_rank.schemas.publication import HeldoutAccessCounter
 from search_rank.schemas.workflow import (
     AutomaticDeploymentRollback,
     BenchmarkCostPreflight,
@@ -44,6 +45,23 @@ FINANCIAL_SNAPSHOT = {
     "campaign_spend_to_date_redacted": True,
     "remaining_applicable_credit_redacted": True,
 }
+
+
+def test_heldout_access_counter_accepts_size_encoded_trailing_whitespace() -> None:
+    payload = {
+        "schema_version": "1.0.0",
+        "artifact_type": "heldout_access_counter",
+        "count": 1,
+        "clean_run": 1,
+        "candidate_run_id": "candidate-run-1",
+        "code_commit": GIT_SHA,
+        "workflow_run_id": "123456789",
+    }
+    encoded = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    padded = encoded + (b" " * (4097 - len(encoded)))
+
+    assert len(padded) == 4097
+    assert HeldoutAccessCounter.model_validate_json(padded).count == 1
 
 
 def test_sagemaker_managed_spot_quota_preflight_binds_exact_live_quota() -> None:

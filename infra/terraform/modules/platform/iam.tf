@@ -724,7 +724,6 @@ data "aws_iam_policy_document" "github_training" {
     actions = [
       "s3:GetObject",
       "s3:GetObjectAttributes",
-      "s3:GetObjectTagging",
       "s3:GetObjectVersion",
     ]
     resources = [
@@ -863,7 +862,6 @@ data "aws_iam_policy_document" "github_trial_selection" {
     actions = [
       "s3:GetObject",
       "s3:GetObjectAttributes",
-      "s3:GetObjectTagging",
       "s3:GetObjectVersion",
     ]
     resources = ["${aws_s3_bucket.artifacts.arn}/runs/*"]
@@ -1079,13 +1077,10 @@ data "aws_iam_policy_document" "github_heldout_release" {
     actions = [
       "s3:GetObject",
       "s3:GetObjectAttributes",
-      "s3:GetObjectTagging",
       "s3:GetObjectVersion",
     ]
     resources = [
       "${aws_s3_bucket.artifacts.arn}/data/processed/*/manifest.json",
-      "${aws_s3_bucket.artifacts.arn}/heldout/access-counter.json",
-      "${aws_s3_bucket.artifacts.arn}/public/*",
       "${aws_s3_bucket.artifacts.arn}/runs/*",
       "${aws_s3_bucket.artifacts.arn}/promoted/*",
     ]

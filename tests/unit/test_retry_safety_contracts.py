@@ -134,15 +134,34 @@ def test_release_counter_reservations_recover_without_double_increment() -> None
 
     assert 'base_name="${PROJECT_NAME}-${ENVIRONMENT_NAME}-release-${GITHUB_RUN_ID}"' in jobs
     assert "GITHUB_RUN_ATTEMPT" not in jobs
+    assert 'test "${TEST_ACCESS_COUNTER}" -le 999999' in workflow
     assert (
         'reservation_key="runs/${base_name}/reservations/'
         'access-counter-clean-${clean_run}.json"' in reservation
     )
+    assert "local counter_size_base=4096" in reservation
+    assert 'test "${expected}" -le 1000000' in reservation
+    assert 'expected_size="$((counter_size_base + expected))"' in reservation
+    assert "printf '%*s'" in reservation
+    assert "aws s3api get-bucket-versioning" in reservation
+    assert "aws s3api list-object-versions" in reservation
+    assert 'previous="$((latest_size - counter_size_base))"' in reservation
     assert 'if [[ "${previous}" -eq "${expected}" ]]' in reservation
-    assert 'test "${expected}" -eq "$((previous + 1))"' in reservation
-    assert 'write_condition=(--if-match "${current_etag}")' in reservation
+    assert 'if [[ "${expected}" -ne "$((previous + 1))" ]]' in reservation
+    assert "--if-match" not in reservation
     assert "write_condition=(--if-none-match '*')" in reservation
-    assert 'cmp -s "counter-after-put-${clean_run}.json"' in reservation
+    assert "--content-md5" in reservation
+    assert "--checksum-sha256" in reservation
+    assert "--server-side-encryption AES256" in reservation
+    assert ".ChecksumSHA256 == $checksum" in reservation
+    assert ".VersionId == $version" in reservation
+    assert reservation.count('. != "null"') >= 3
+    assert ".Size == $size" in reservation
+    assert 'index("SHA256") != null' in reservation
+    assert (
+        'aws s3api get-object \\\n+                --bucket "${ARTIFACT_BUCKET}" \\\n+                --key "${counter_key}"'
+        not in reservation
+    )
     assert jobs.index('reserve_counter "${first_counter}" 1') < jobs.index(
         'submit_and_wait 1 "${first_counter}"'
     )
@@ -175,22 +194,36 @@ def test_release_rerun_reuses_only_exact_processing_jobs() -> None:
     assert "is terminal and unsuccessful" in submission
 
 
-def test_release_and_freeze_publications_compare_existing_bytes_and_metadata() -> None:
+def test_release_and_freeze_publications_fail_closed_and_verify_integrity() -> None:
     release = (WORKFLOWS / "release.yml").read_text(encoding="utf-8")
     freeze = (WORKFLOWS / "freeze-trial-selection.yml").read_text(encoding="utf-8")
     public = release.split("publish_public_json()", 1)[1].split(
-        'public_readback="$(mktemp -d)"', 1
+        'public_receipts="$(mktemp -d)"', 1
     )[0]
     promoted = release.split("put_promoted_immutable_or_verify_identical()", 1)[1].split(
         "while IFS= read -r -d '' file", 1
     )[0]
 
-    for block in (public, promoted, freeze):
+    assert "--if-none-match '*'" in public
+    assert "--content-md5" in public
+    assert "--checksum-algorithm SHA256" in public
+    assert "--checksum-sha256" in public
+    assert "--server-side-encryption AES256" in public
+    assert ".ChecksumSHA256 == $checksum" in public
+    assert ".ETag == $etag" in public
+    assert '.ServerSideEncryption == "AES256"' in public
+    assert ".VersionId | type" in public
+    assert '. != "null"' in public
+    assert "existing write-only key cannot be proven identical" in public
+    assert "aws s3api get-object" not in public
+    assert "aws s3api head-object" not in public
+    assert 'cmp -s "${source_file}" "${existing}"' not in public
+
+    for block in (promoted, freeze):
         assert "--if-none-match '*'" in block
         assert "--checksum-algorithm SHA256" in block
         assert "--checksum-mode ENABLED" in block
         assert ".Metadata ==" in block
-    assert 'cmp -s "${source_file}" "${existing}"' in public
     assert 'cmp -s "${source_file}" "${existing}"' in promoted
     assert "cmp -s .trial-selection/trial-selection.json" in freeze
     assert "promoted bundle S3 inventory is not exact" in release
