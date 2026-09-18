@@ -88,8 +88,47 @@ def _observability_route(request: Request) -> str:
 
 def _error(request: Request, status: int, code: str, message: str) -> JSONResponse:
     request.state.error_code = code
-    body = ApiError(status=status, code=code, message=message, request_id=_request_id(request))
-    return JSONResponse(status_code=status, content=body.model_dump(mode="json"))
+    request_id = _request_id(request)
+    body = ApiError(status=status, code=code, message=message, request_id=request_id)
+    response = JSONResponse(status_code=status, content=body.model_dump(mode="json"))
+    response.headers["x-request-id"] = request_id
+    return response
+
+
+def _content_length(request: Request) -> int | None:
+    """Parse one unambiguous decimal Content-Length value, when supplied."""
+
+    values = [
+        value
+        for name, value in request.scope.get("headers", [])
+        if name.lower() == b"content-length"
+    ]
+    if not values:
+        return None
+    if len(values) != 1:
+        raise ValueError("ambiguous Content-Length")
+    try:
+        value = values[0].decode("ascii")
+        if not value or not value.isdecimal():
+            raise ValueError("invalid Content-Length")
+        return int(value)
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise ValueError("invalid Content-Length") from exc
+
+
+async def _cache_bounded_body(request: Request, maximum_bytes: int) -> int | None:
+    """Cache at most ``maximum_bytes`` so downstream validation can safely reread it."""
+
+    chunks: list[bytes] = []
+    received = 0
+    async for chunk in request.stream():
+        received += len(chunk)
+        if received > maximum_bytes:
+            return None
+        chunks.append(chunk)
+    # Starlette's BaseHTTPMiddleware replays this cache to the downstream app.
+    request._body = b"".join(chunks)
+    return received
 
 
 def _serialized_rank_response(body: RankResponse) -> JSONResponse:
@@ -143,11 +182,34 @@ def create_app(
         request.state.candidate_count = None
         request.state.model_latency_ms = None
         request.state.error_code = None
-        length = request.headers.get("content-length")
-        if length and length.isdigit() and int(length) > settings.maximum_body_bytes:
-            response = _error(request, 413, "request_too_large", "Request body exceeds the limit.")
+        try:
+            declared_length = _content_length(request)
+        except ValueError:
+            response = _error(
+                request,
+                400,
+                "invalid_content_length",
+                "Content-Length header is invalid.",
+            )
         else:
-            response = await call_next(request)
+            received_length = (
+                None
+                if declared_length is not None and declared_length > settings.maximum_body_bytes
+                else await _cache_bounded_body(request, settings.maximum_body_bytes)
+            )
+            if received_length is None:
+                response = _error(
+                    request, 413, "request_too_large", "Request body exceeds the limit."
+                )
+            elif declared_length is not None and declared_length != received_length:
+                response = _error(
+                    request,
+                    400,
+                    "invalid_content_length",
+                    "Content-Length header does not match the request body.",
+                )
+            else:
+                response = await call_next(request)
         response.headers["x-request-id"] = _request_id(request)
         log_event(
             LOGGER,
@@ -264,7 +326,9 @@ def create_app(
             400: {"model": ApiError},
             404: {"model": ApiError},
             409: {"model": ApiError},
+            413: {"model": ApiError},
             422: {"model": ApiError},
+            500: {"model": ApiError},
         },
     )
     async def rank(request: Request, body: RankRequest) -> RankResponse | JSONResponse:

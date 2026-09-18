@@ -51,7 +51,7 @@ def test_openapi_preserves_versioned_ranking_request_and_response_models() -> No
         "format": "double",
         "minimum": 0.0,
     }
-    for status in ("400", "404", "409", "422"):
+    for status in ("400", "404", "409", "413", "422", "500"):
         assert _reference(operation, status) == "#/components/schemas/ApiError"
 
     components = schema["components"]["schemas"]
