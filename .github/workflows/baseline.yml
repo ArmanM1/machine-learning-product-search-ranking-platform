@@ -248,15 +248,23 @@ jobs:
           [[ "${strongest}" =~ ^[A-Za-z0-9][A-Za-z0-9._@-]{2,99}$ ]]
           manifest_path="data/processed/esci-us-v1/${DATASET_PROCESSED_SHA256#sha256:}/manifest.json"
           checksums_path="data/processed/esci-us-v1/${DATASET_PROCESSED_SHA256#sha256:}/artifact-checksums.json"
+          checksums_b64="$(base64 -w 0 "${checksums_path}")"
+          [[ "${checksums_b64}" =~ ^[A-Za-z0-9+/]+={0,2}$ ]]
+          ((${#checksums_b64} <= 1600))
+          # Keep the checksum index on the already-authorized manifest object so
+          # baseline bootstrap can verify semantic identity without broader S3 access.
           prefix="runs/${run_id}/"
           for mapping in \
             "baseline-command-summary.json:summary.json" \
             "baseline-summary.json:baseline-summary.json" \
             "curated-queries.json:curated-queries.json" \
-            "${manifest_path}:manifest.json" \
-            "${checksums_path}:artifact-checksums.json"; do
+            "${manifest_path}:manifest.json"; do
             local_file="${mapping%%:*}"
             remote_name="${mapping#*:}"
+            metadata_args=()
+            if [[ "${remote_name}" == "manifest.json" ]]; then
+              metadata_args=(--metadata "artifact-checksums-b64=${checksums_b64}")
+            fi
             PYTHONPATH=src uv run python scripts/validate_financial_snapshot.py emit \
               --output /dev/null
             aws s3api put-object \
@@ -265,6 +273,7 @@ jobs:
               --body "${local_file}" \
               --checksum-algorithm SHA256 \
               --tagging "RetentionClass=run" \
+              "${metadata_args[@]}" \
               --if-none-match '*' >/dev/null
           done
           jq -n \
