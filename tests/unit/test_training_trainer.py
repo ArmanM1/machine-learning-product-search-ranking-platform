@@ -143,6 +143,100 @@ def _validation_rows() -> pd.DataFrame:
     )
 
 
+def test_epoch_log_carries_allowlisted_execution_provenance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(trainer, "_model", lambda config, device: _TinyCrossEncoder())
+    monkeypatch.setattr(trainer, "CrossEncoder", _TinyCrossEncoder)
+    monkeypatch.setattr(
+        trainer,
+        "load_checkpoint",
+        lambda path, device="cpu": _TinyCrossEncoder(path),
+    )
+    events: list[tuple[str, dict[str, Any]]] = []
+
+    def capture_event(_: Any, event: str, **context: Any) -> None:
+        events.append((event, context))
+
+    monkeypatch.setattr(trainer, "log_event", capture_event)
+    config = _config().model_copy(update={"max_epochs": 1})
+    log_context = trainer.TrainingLogContext(
+        run_id="search-rank-training-123",
+        job_id="search-rank-training-123",
+        git_sha="1" * 40,
+        image_digest="sha256:" + "2" * 64,
+        hardware_class="ml.m5.xlarge",
+    )
+
+    trainer.train_candidate(
+        _training_rows(),
+        _validation_rows(),
+        config,
+        output_dir=tmp_path / "run",
+        device="cpu",
+        log_context=log_context,
+    )
+
+    epoch_logs = [context for event, context in events if event == "training_epoch_complete"]
+    assert len(epoch_logs) == 1
+    epoch_log = epoch_logs[0]
+    assert {
+        "run_id": epoch_log["run_id"],
+        "job_id": epoch_log["job_id"],
+        "git_sha": epoch_log["git_sha"],
+        "image_digest": epoch_log["image_digest"],
+        "dataset_manifest_hash": epoch_log["dataset_manifest_hash"],
+        "config_hash": epoch_log["config_hash"],
+        "hardware_class": epoch_log["hardware_class"],
+        "accelerator": epoch_log["accelerator"],
+        "precision": epoch_log["precision"],
+        "status": epoch_log["status"],
+    } == {
+        "run_id": "search-rank-training-123",
+        "job_id": "search-rank-training-123",
+        "git_sha": "1" * 40,
+        "image_digest": "sha256:" + "2" * 64,
+        "dataset_manifest_hash": config.dataset_manifest_hash,
+        "config_hash": config.config_hash,
+        "hardware_class": "ml.m5.xlarge",
+        "accelerator": "cpu",
+        "precision": "float32",
+        "status": "succeeded",
+    }
+    assert epoch_log["epoch"] == 1
+    assert epoch_log["duration_seconds"] >= 0
+    assert epoch_log["started_at"] <= epoch_log["ended_at"]
+    assert not ({"account_id", "role_arn", "bucket", "input_text"} & epoch_log.keys())
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("run_id", "arn:aws:sagemaker:private"),
+        ("job_id", "job/with/path"),
+        ("git_sha", "not-a-commit"),
+        ("image_digest", "registry.example/private:tag"),
+        ("hardware_class", "hardware with spaces"),
+    ],
+)
+def test_training_log_context_rejects_unstructured_or_sensitive_values(
+    field: str,
+    value: str,
+) -> None:
+    context = {
+        "run_id": "run-123",
+        "job_id": "job-123",
+        "git_sha": "1" * 40,
+        "image_digest": "sha256:" + "2" * 64,
+        "hardware_class": "ml.g4dn.xlarge",
+    }
+    context[field] = value
+
+    with pytest.raises(ValueError, match=f"training log {field}"):
+        trainer.TrainingLogContext(**context)
+
+
 @pytest.mark.slow
 def test_tiny_torch_model_overfits_and_selected_checkpoint_changed(
     tmp_path: Path,
