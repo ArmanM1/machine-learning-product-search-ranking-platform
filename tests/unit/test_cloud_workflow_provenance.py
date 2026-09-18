@@ -233,6 +233,12 @@ def test_split_manifest_identity_is_derived_and_bound_across_release_surfaces() 
     ].split("name: Build and verify the typed validation-only bundle", 1)[0]
     assert "printf 'SPLIT_MANIFEST_HASH=%s\\n'" in download
     assert '>> "${GITHUB_ENV}"' in download
+    build = bootstrap.split("name: Build and verify the typed validation-only bundle", 1)[1].split(
+        "name: Publish the immutable baseline bundle and create the initial pointer", 1
+    )[0]
+    assert 'SEARCH_RANK_GIT_SHA="${GITHUB_SHA}"' in build
+    assert 'test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"' in bootstrap
+    assert 'test -z "$(git status --porcelain --untracked-files=all)"' in bootstrap
     assert '.split_manifest_hash | select(test("^sha256:[0-9a-f]{64}$"))' in release
     assert ".result.split_manifest_hash == $split" in release
     assert ".split_manifest_hash == $split" in release

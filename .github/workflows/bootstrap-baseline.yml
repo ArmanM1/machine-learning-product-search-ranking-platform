@@ -74,6 +74,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test -z "$(git status --porcelain --untracked-files=all)"
           test "${AUTHORIZATION}" = "PUBLISH VALIDATION BASELINE"
           test "${ALLOW_HELDOUT_EVAL}" = "0"
           [[ "${BASELINE_COMMAND_SUMMARY_S3_KEY}" =~ ^runs/[A-Za-z0-9._/-]+/summary\.json$ ]]
@@ -258,6 +260,7 @@ jobs:
           baseline_git_sha="$(jq -r '.git_sha' baseline-input/summary.json)"
           SEARCH_RANK_RUN_ROOT="$(pwd)/baseline-bootstrap-command"
           export SEARCH_RANK_RUN_ROOT
+          SEARCH_RANK_GIT_SHA="${GITHUB_SHA}" \
           uv run python -m search_rank.cli bootstrap-baseline-release \
             --baseline-summary baseline-input/summary.json \
             --baseline-config "${BASELINE_CONFIG_PATH}" \
