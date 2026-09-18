@@ -247,12 +247,14 @@ jobs:
           [[ "${run_id}" =~ ^baseline-run-[A-Za-z0-9TZ-]+$ ]]
           [[ "${strongest}" =~ ^[A-Za-z0-9][A-Za-z0-9._@-]{2,99}$ ]]
           manifest_path="data/processed/esci-us-v1/${DATASET_PROCESSED_SHA256#sha256:}/manifest.json"
+          checksums_path="data/processed/esci-us-v1/${DATASET_PROCESSED_SHA256#sha256:}/artifact-checksums.json"
           prefix="runs/${run_id}/"
           for mapping in \
             "baseline-command-summary.json:summary.json" \
             "baseline-summary.json:baseline-summary.json" \
             "curated-queries.json:curated-queries.json" \
-            "${manifest_path}:manifest.json"; do
+            "${manifest_path}:manifest.json" \
+            "${checksums_path}:artifact-checksums.json"; do
             local_file="${mapping%%:*}"
             remote_name="${mapping#*:}"
             PYTHONPATH=src uv run python scripts/validate_financial_snapshot.py emit \
