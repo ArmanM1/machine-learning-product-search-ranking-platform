@@ -43,7 +43,7 @@ def test_workflow_has_one_fixed_dev_scope_and_two_dispatch_phases() -> None:
 def test_live_role_and_reproduced_plan_are_attested_before_any_destructive_write() -> None:
     source, payload = _workflow()
     role_attestation = source.index("Attest the external dev-only lifecycle role")
-    active_jobs = source.index("Prove no project SageMaker job is active")
+    active_jobs = source.index("Prove no project SageMaker job or endpoint is active")
     plan = source.index("terraform plan -destroy")
     bucket_cleanup = source.index("empty_versioned_dev_bucket.py")
     repository_cleanup = source.index("empty_dev_repositories.py")
@@ -56,6 +56,7 @@ def test_live_role_and_reproduced_plan_are_attested_before_any_destructive_write
     assert "attached != []" in source[role_attestation:plan]
     assert 'role.get("PermissionsBoundary") is not None' in source[role_attestation:plan]
     assert "dev_teardown_contract.py plan" in source
+    assert "aws sagemaker list-endpoints" in source[active_jobs:plan]
     assert 'test "${plan_sha256}" = "${APPROVED_PLAN_SHA256}"' in source
     assert "> destroy-plan.private.log 2>&1" in source
     assert "> destroy-apply.private.log 2>&1" in source

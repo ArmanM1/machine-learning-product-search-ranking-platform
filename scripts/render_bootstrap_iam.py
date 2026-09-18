@@ -915,6 +915,7 @@ def build_dev_lifecycle_policy(account_id: str) -> dict[str, Any]:
                     "cloudfront:ListResponseHeadersPolicies",
                     "events:ListRules",
                     "logs:DescribeLogGroups",
+                    "sagemaker:ListEndpoints",
                     "sagemaker:ListProcessingJobs",
                     "sagemaker:ListTrainingJobs",
                     "sns:ListTopics",

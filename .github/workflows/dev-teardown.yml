@@ -171,7 +171,7 @@ jobs:
               raise SystemExit("Live lifecycle policy differs from the exact dev-only contract")
           PY
           echo "account_id=${account_id}" >> "${GITHUB_OUTPUT}"
-      - name: Prove no project SageMaker job is active
+      - name: Prove no project SageMaker job or endpoint is active
         shell: bash
         env:
           ACCOUNT_ID: ${{ steps.identity.outputs.account_id }}
@@ -190,8 +190,13 @@ jobs:
             [[ "${processing}" =~ ^[0-9]+$ ]]
             active=$((active + training + processing))
           done
+          endpoints="$(aws sagemaker list-endpoints \
+            --name-contains "${prefix}" \
+            --query 'length(Endpoints)' --output text)"
+          [[ "${endpoints}" =~ ^[0-9]+$ ]]
+          active=$((active + endpoints))
           test "${active}" -eq 0 || {
-            echo "Disposable dev has active managed jobs; teardown is refused." >&2
+            echo "Disposable dev has an active managed job or endpoint; teardown is refused." >&2
             exit 1
           }
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1

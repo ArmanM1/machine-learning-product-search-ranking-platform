@@ -32,6 +32,7 @@ class _InventoryClient:
             "describe_log_groups": [{"logGroups": []}],
             "get_apis": [{"Items": []}],
             "list_distributions": [{"DistributionList": {"Items": []}}],
+            "list_endpoints": [{"Endpoints": []}],
             "list_functions": [{"FunctionList": {"Items": []}}],
             "list_origin_access_controls": [{"OriginAccessControlList": {"Items": []}}],
             "list_processing_jobs": [{"ProcessingJobSummaries": []}],
