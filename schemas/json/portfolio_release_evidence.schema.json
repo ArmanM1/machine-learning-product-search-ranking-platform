@@ -1,0 +1,1764 @@
+{
+  "$defs": {
+    "CuratedQuerySummary": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate_count": {
+          "maximum": 40,
+          "minimum": 1,
+          "title": "Candidate Count",
+          "type": "integer"
+        },
+        "query": {
+          "minLength": 1,
+          "title": "Query",
+          "type": "string"
+        },
+        "query_id": {
+          "minLength": 1,
+          "title": "Query Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "query_id",
+        "query",
+        "candidate_count"
+      ],
+      "title": "CuratedQuerySummary",
+      "type": "object"
+    },
+    "PairedDifference": {
+      "additionalProperties": false,
+      "properties": {
+        "baseline_model_id": {
+          "minLength": 1,
+          "title": "Baseline Model Id",
+          "type": "string"
+        },
+        "bootstrap_resamples": {
+          "minimum": 1,
+          "title": "Bootstrap Resamples",
+          "type": "integer"
+        },
+        "bootstrap_seed": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "title": "Bootstrap Seed",
+          "type": "integer"
+        },
+        "candidate_model_id": {
+          "minLength": 1,
+          "title": "Candidate Model Id",
+          "type": "string"
+        },
+        "ci_lower": {
+          "title": "Ci Lower",
+          "type": "number"
+        },
+        "ci_upper": {
+          "title": "Ci Upper",
+          "type": "number"
+        },
+        "confidence_level": {
+          "exclusiveMaximum": 1,
+          "exclusiveMinimum": 0,
+          "title": "Confidence Level",
+          "type": "number"
+        },
+        "excluded_query_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Excluded Query Count",
+          "type": "integer"
+        },
+        "metric_name": {
+          "minLength": 1,
+          "title": "Metric Name",
+          "type": "string"
+        },
+        "point_estimate": {
+          "title": "Point Estimate",
+          "type": "number"
+        },
+        "query_count": {
+          "minimum": 1,
+          "title": "Query Count",
+          "type": "integer"
+        },
+        "resampling_unit": {
+          "const": "query",
+          "default": "query",
+          "title": "Resampling Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "metric_name",
+        "candidate_model_id",
+        "baseline_model_id",
+        "point_estimate",
+        "ci_lower",
+        "ci_upper",
+        "confidence_level",
+        "query_count",
+        "bootstrap_seed",
+        "bootstrap_resamples"
+      ],
+      "title": "PairedDifference",
+      "type": "object"
+    },
+    "PortfolioAblationContrast": {
+      "additionalProperties": false,
+      "description": "Allowlisted result for one mandatory single-factor validation contrast.",
+      "properties": {
+        "contrast_id": {
+          "enum": [
+            "mixed_vs_random_sampling",
+            "enriched_vs_title_input"
+          ],
+          "title": "Contrast Id",
+          "type": "string"
+        },
+        "control_role": {
+          "enum": [
+            "random_negative_control",
+            "title_only_control"
+          ],
+          "title": "Control Role",
+          "type": "string"
+        },
+        "control_validation_graded_ndcg_at_10": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Control Validation Graded Ndcg At 10",
+          "type": "number"
+        },
+        "controlled_difference_fields": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Controlled Difference Fields",
+          "type": "array"
+        },
+        "treatment_minus_control": {
+          "maximum": 1,
+          "minimum": -1,
+          "title": "Treatment Minus Control",
+          "type": "number"
+        },
+        "treatment_validation_graded_ndcg_at_10": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Treatment Validation Graded Ndcg At 10",
+          "type": "number"
+        }
+      },
+      "required": [
+        "contrast_id",
+        "control_role",
+        "controlled_difference_fields",
+        "treatment_validation_graded_ndcg_at_10",
+        "control_validation_graded_ndcg_at_10",
+        "treatment_minus_control"
+      ],
+      "title": "PortfolioAblationContrast",
+      "type": "object"
+    },
+    "PortfolioAblationEvidence": {
+      "additionalProperties": false,
+      "description": "Sanitized and checksum-bound projection of the frozen trial selection.",
+      "properties": {
+        "artifact_type": {
+          "const": "portfolio_ablation_evidence",
+          "title": "Artifact Type",
+          "type": "string"
+        },
+        "contrasts": {
+          "items": {
+            "$ref": "#/$defs/PortfolioAblationContrast"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "title": "Contrasts",
+          "type": "array"
+        },
+        "dataset_manifest_sha256": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Dataset Manifest Sha256",
+          "type": "string"
+        },
+        "git_sha": {
+          "pattern": "^[0-9a-f]{40}$",
+          "title": "Git Sha",
+          "type": "string"
+        },
+        "metric": {
+          "const": "graded_ndcg@10",
+          "title": "Metric",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "1.0.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "selected_config_sha256": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Selected Config Sha256",
+          "type": "string"
+        },
+        "selected_model_id": {
+          "maxLength": 128,
+          "minLength": 3,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{2,127}$",
+          "title": "Selected Model Id",
+          "type": "string"
+        },
+        "selection_id": {
+          "pattern": "^trial-selection-[0-9a-f]{20}$",
+          "title": "Selection Id",
+          "type": "string"
+        },
+        "source_trial_selection_sha256": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Source Trial Selection Sha256",
+          "type": "string"
+        },
+        "test_access_count": {
+          "const": 0,
+          "title": "Test Access Count",
+          "type": "integer"
+        },
+        "trials": {
+          "items": {
+            "$ref": "#/$defs/PortfolioAblationTrial"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "title": "Trials",
+          "type": "array"
+        }
+      },
+      "required": [
+        "schema_version",
+        "artifact_type",
+        "source_trial_selection_sha256",
+        "selection_id",
+        "git_sha",
+        "dataset_manifest_sha256",
+        "metric",
+        "test_access_count",
+        "selected_model_id",
+        "selected_config_sha256",
+        "trials",
+        "contrasts"
+      ],
+      "title": "PortfolioAblationEvidence",
+      "type": "object"
+    },
+    "PortfolioAblationTrial": {
+      "additionalProperties": false,
+      "description": "Allowlisted validation result for one preregistered treatment or control.",
+      "properties": {
+        "config_id": {
+          "maxLength": 128,
+          "minLength": 3,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{2,127}$",
+          "title": "Config Id",
+          "type": "string"
+        },
+        "config_sha256": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Config Sha256",
+          "type": "string"
+        },
+        "hard_example_sources": {
+          "items": {
+            "enum": [
+              "bm25",
+              "pretrained_cross_encoder"
+            ],
+            "type": "string"
+          },
+          "title": "Hard Example Sources",
+          "type": "array"
+        },
+        "input_template_version": {
+          "enum": [
+            "title_v1",
+            "enriched_v1"
+          ],
+          "title": "Input Template Version",
+          "type": "string"
+        },
+        "model_id": {
+          "maxLength": 128,
+          "minLength": 3,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{2,127}$",
+          "title": "Model Id",
+          "type": "string"
+        },
+        "promotion_eligible": {
+          "title": "Promotion Eligible",
+          "type": "boolean"
+        },
+        "role": {
+          "enum": [
+            "candidate_treatment",
+            "random_negative_control",
+            "title_only_control"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "sampling_strategy": {
+          "enum": [
+            "mixed_hard_random_v1",
+            "random_only_v1"
+          ],
+          "title": "Sampling Strategy",
+          "type": "string"
+        },
+        "validation_graded_ndcg_at_10": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Validation Graded Ndcg At 10",
+          "type": "number"
+        }
+      },
+      "required": [
+        "role",
+        "promotion_eligible",
+        "model_id",
+        "config_id",
+        "config_sha256",
+        "input_template_version",
+        "sampling_strategy",
+        "hard_example_sources",
+        "validation_graded_ndcg_at_10"
+      ],
+      "title": "PortfolioAblationTrial",
+      "type": "object"
+    },
+    "PortfolioArtifactChecksums": {
+      "additionalProperties": false,
+      "properties": {
+        "baseline_deployment_evidence": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Baseline Deployment Evidence",
+          "type": "string"
+        },
+        "benchmark_evidence_checksums": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Benchmark Evidence Checksums",
+          "type": "string"
+        },
+        "benchmark_performance_report": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Benchmark Performance Report",
+          "type": "string"
+        },
+        "bundle_checksums": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Bundle Checksums",
+          "type": "string"
+        },
+        "deployment_evidence": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Deployment Evidence",
+          "type": "string"
+        },
+        "heldout_evaluation_provenance": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Heldout Evaluation Provenance",
+          "type": "string"
+        },
+        "heldout_evaluation_report": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Heldout Evaluation Report",
+          "type": "string"
+        },
+        "promotion_pointer": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Promotion Pointer",
+          "type": "string"
+        },
+        "public_ablation_evidence": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Public Ablation Evidence",
+          "type": "string"
+        },
+        "public_evidence": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Public Evidence",
+          "type": "string"
+        },
+        "redeployment_evidence": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Redeployment Evidence",
+          "type": "string"
+        },
+        "release_manifest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Release Manifest",
+          "type": "string"
+        },
+        "rollback_evidence": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Rollback Evidence",
+          "type": "string"
+        }
+      },
+      "required": [
+        "release_manifest",
+        "public_evidence",
+        "bundle_checksums",
+        "heldout_evaluation_report",
+        "heldout_evaluation_provenance",
+        "public_ablation_evidence",
+        "baseline_deployment_evidence",
+        "deployment_evidence",
+        "promotion_pointer",
+        "benchmark_performance_report",
+        "benchmark_evidence_checksums",
+        "rollback_evidence",
+        "redeployment_evidence"
+      ],
+      "title": "PortfolioArtifactChecksums",
+      "type": "object"
+    },
+    "PortfolioBenchmark": {
+      "additionalProperties": false,
+      "properties": {
+        "controlled_cold_init_ms": {
+          "minimum": 0,
+          "title": "Controlled Cold Init Ms",
+          "type": "number"
+        },
+        "controlled_cold_max_memory_mb": {
+          "minimum": 0,
+          "title": "Controlled Cold Max Memory Mb",
+          "type": "number"
+        },
+        "controlled_cold_start_ms": {
+          "minimum": 0,
+          "title": "Controlled Cold Start Ms",
+          "type": "number"
+        },
+        "latency_claim": {
+          "minLength": 1,
+          "title": "Latency Claim",
+          "type": "string"
+        },
+        "limitations": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 5,
+          "title": "Limitations",
+          "type": "array"
+        },
+        "measured_error_count": {
+          "minimum": 0,
+          "title": "Measured Error Count",
+          "type": "integer"
+        },
+        "measured_request_count": {
+          "const": 1800,
+          "title": "Measured Request Count",
+          "type": "integer"
+        },
+        "measured_success_count": {
+          "minimum": 0,
+          "title": "Measured Success Count",
+          "type": "integer"
+        },
+        "measured_throttle_count": {
+          "minimum": 0,
+          "title": "Measured Throttle Count",
+          "type": "integer"
+        },
+        "primary_candidate_count": {
+          "const": 40,
+          "title": "Primary Candidate Count",
+          "type": "integer"
+        },
+        "primary_end_to_end_latency_ms": {
+          "$ref": "#/$defs/PortfolioLatencySummary"
+        },
+        "primary_model_latency_ms": {
+          "$ref": "#/$defs/PortfolioLatencySummary"
+        },
+        "primary_offered_concurrency": {
+          "const": 1,
+          "title": "Primary Offered Concurrency",
+          "type": "integer"
+        },
+        "primary_serialization_latency_ms": {
+          "$ref": "#/$defs/PortfolioLatencySummary"
+        },
+        "protocol": {
+          "const": "warm_after_explicit_per_condition_warmups",
+          "title": "Protocol",
+          "type": "string"
+        },
+        "scaling_claim_eligible": {
+          "const": false,
+          "title": "Scaling Claim Eligible",
+          "type": "boolean"
+        },
+        "throughput_claim_eligible": {
+          "const": false,
+          "title": "Throughput Claim Eligible",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "protocol",
+        "primary_candidate_count",
+        "primary_offered_concurrency",
+        "measured_request_count",
+        "measured_success_count",
+        "measured_error_count",
+        "measured_throttle_count",
+        "primary_end_to_end_latency_ms",
+        "primary_model_latency_ms",
+        "primary_serialization_latency_ms",
+        "controlled_cold_start_ms",
+        "controlled_cold_init_ms",
+        "controlled_cold_max_memory_mb",
+        "latency_claim",
+        "throughput_claim_eligible",
+        "scaling_claim_eligible",
+        "limitations"
+      ],
+      "title": "PortfolioBenchmark",
+      "type": "object"
+    },
+    "PortfolioClaimBoundaries": {
+      "additionalProperties": false,
+      "properties": {
+        "held_out_positive_claim_allowed": {
+          "title": "Held Out Positive Claim Allowed",
+          "type": "boolean"
+        },
+        "limitations": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Limitations",
+          "type": "array"
+        },
+        "negative_result_required": {
+          "title": "Negative Result Required",
+          "type": "boolean"
+        },
+        "prohibited_claims": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Prohibited Claims",
+          "type": "array"
+        },
+        "scaling_claim_eligible": {
+          "const": false,
+          "title": "Scaling Claim Eligible",
+          "type": "boolean"
+        },
+        "throughput_claim_eligible": {
+          "const": false,
+          "title": "Throughput Claim Eligible",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "held_out_positive_claim_allowed",
+        "negative_result_required",
+        "throughput_claim_eligible",
+        "scaling_claim_eligible",
+        "limitations",
+        "prohibited_claims"
+      ],
+      "title": "PortfolioClaimBoundaries",
+      "type": "object"
+    },
+    "PortfolioDeployment": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate_gate_error_rate": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Candidate Gate Error Rate",
+          "type": "number"
+        },
+        "candidate_gate_p95_ms": {
+          "minimum": 0,
+          "title": "Candidate Gate P95 Ms",
+          "type": "number"
+        },
+        "controlled_cold_start_ms": {
+          "minimum": 0,
+          "title": "Controlled Cold Start Ms",
+          "type": "number"
+        },
+        "public_url": {
+          "pattern": "^https://[a-z0-9-]+\\.cloudfront\\.net$",
+          "title": "Public Url",
+          "type": "string"
+        },
+        "smoke_tests_passed": {
+          "const": true,
+          "title": "Smoke Tests Passed",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "public_url",
+        "smoke_tests_passed",
+        "candidate_gate_error_rate",
+        "candidate_gate_p95_ms",
+        "controlled_cold_start_ms"
+      ],
+      "title": "PortfolioDeployment",
+      "type": "object"
+    },
+    "PortfolioEvaluatedCandidate": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_sha256": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Artifact Sha256",
+          "type": "string"
+        },
+        "base_model_id": {
+          "minLength": 1,
+          "title": "Base Model Id",
+          "type": "string"
+        },
+        "base_model_revision": {
+          "minLength": 1,
+          "title": "Base Model Revision",
+          "type": "string"
+        },
+        "config_sha256": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Config Sha256",
+          "type": "string"
+        },
+        "model_id": {
+          "maxLength": 128,
+          "minLength": 3,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{2,127}$",
+          "title": "Model Id",
+          "type": "string"
+        },
+        "training_strategy": {
+          "minLength": 1,
+          "title": "Training Strategy",
+          "type": "string"
+        }
+      },
+      "required": [
+        "model_id",
+        "artifact_sha256",
+        "config_sha256",
+        "base_model_id",
+        "base_model_revision",
+        "training_strategy"
+      ],
+      "title": "PortfolioEvaluatedCandidate",
+      "type": "object"
+    },
+    "PortfolioLatencySummary": {
+      "additionalProperties": false,
+      "properties": {
+        "maximum": {
+          "minimum": 0,
+          "title": "Maximum",
+          "type": "number"
+        },
+        "mean": {
+          "minimum": 0,
+          "title": "Mean",
+          "type": "number"
+        },
+        "minimum": {
+          "minimum": 0,
+          "title": "Minimum",
+          "type": "number"
+        },
+        "p50": {
+          "minimum": 0,
+          "title": "P50",
+          "type": "number"
+        },
+        "p95": {
+          "minimum": 0,
+          "title": "P95",
+          "type": "number"
+        },
+        "p99": {
+          "minimum": 0,
+          "title": "P99",
+          "type": "number"
+        }
+      },
+      "required": [
+        "p50",
+        "p95",
+        "p99",
+        "mean",
+        "minimum",
+        "maximum"
+      ],
+      "title": "PortfolioLatencySummary",
+      "type": "object"
+    },
+    "PortfolioMetrics": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate_minus_baseline": {
+          "title": "Candidate Minus Baseline",
+          "type": "number"
+        },
+        "candidate_value": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Candidate Value",
+          "type": "number"
+        },
+        "paired_differences": {
+          "items": {
+            "$ref": "#/$defs/PairedDifference"
+          },
+          "minItems": 1,
+          "title": "Paired Differences",
+          "type": "array"
+        },
+        "primary_metric": {
+          "const": "graded_ndcg@10",
+          "title": "Primary Metric",
+          "type": "string"
+        },
+        "strongest_baseline_value": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Strongest Baseline Value",
+          "type": "number"
+        }
+      },
+      "required": [
+        "primary_metric",
+        "candidate_value",
+        "strongest_baseline_value",
+        "candidate_minus_baseline",
+        "paired_differences"
+      ],
+      "title": "PortfolioMetrics",
+      "type": "object"
+    },
+    "PortfolioPublicEvidence": {
+      "additionalProperties": false,
+      "description": "Durable allowlist copied from the typed public evidence served by the release.",
+      "properties": {
+        "ablations": {
+          "$ref": "#/$defs/PortfolioAblationEvidence"
+        },
+        "dataset_name": {
+          "minLength": 1,
+          "title": "Dataset Name",
+          "type": "string"
+        },
+        "dataset_version": {
+          "minLength": 1,
+          "title": "Dataset Version",
+          "type": "string"
+        },
+        "evaluated_candidate": {
+          "$ref": "#/$defs/PortfolioEvaluatedCandidate"
+        },
+        "evaluation_provenance": {
+          "$ref": "#/$defs/PublicEvaluationProvenance"
+        },
+        "examples": {
+          "items": {
+            "$ref": "#/$defs/PublicFailureExample"
+          },
+          "minItems": 15,
+          "title": "Examples",
+          "type": "array"
+        },
+        "held_out_test_access_count": {
+          "minimum": 1,
+          "title": "Held Out Test Access Count",
+          "type": "integer"
+        },
+        "limitations": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Limitations",
+          "type": "array"
+        },
+        "locale": {
+          "const": "us",
+          "title": "Locale",
+          "type": "string"
+        },
+        "model_metrics": {
+          "items": {
+            "$ref": "#/$defs/PublicModelMetricRow"
+          },
+          "minItems": 2,
+          "title": "Model Metrics",
+          "type": "array"
+        },
+        "prohibited_claims": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Prohibited Claims",
+          "type": "array"
+        },
+        "secondary_metrics": {
+          "items": {
+            "$ref": "#/$defs/PublicMetricComparison"
+          },
+          "title": "Secondary Metrics",
+          "type": "array"
+        },
+        "selected_release_model": {
+          "$ref": "#/$defs/PortfolioSelectedReleaseModel"
+        },
+        "slices": {
+          "items": {
+            "$ref": "#/$defs/PublicSliceResult"
+          },
+          "title": "Slices",
+          "type": "array"
+        },
+        "source_public_evidence_sha256": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Source Public Evidence Sha256",
+          "type": "string"
+        },
+        "training_provenance": {
+          "$ref": "#/$defs/PortfolioTrainingProvenance"
+        }
+      },
+      "required": [
+        "source_public_evidence_sha256",
+        "dataset_name",
+        "dataset_version",
+        "locale",
+        "selected_release_model",
+        "evaluated_candidate",
+        "training_provenance",
+        "evaluation_provenance",
+        "held_out_test_access_count",
+        "model_metrics",
+        "secondary_metrics",
+        "ablations",
+        "slices",
+        "examples",
+        "limitations",
+        "prohibited_claims"
+      ],
+      "title": "PortfolioPublicEvidence",
+      "type": "object"
+    },
+    "PortfolioRedeployment": {
+      "additionalProperties": false,
+      "properties": {
+        "exact_winner_redeployed": {
+          "const": true,
+          "title": "Exact Winner Redeployed",
+          "type": "boolean"
+        },
+        "fresh_runtime_revision_published": {
+          "const": true,
+          "title": "Fresh Runtime Revision Published",
+          "type": "boolean"
+        },
+        "model_id": {
+          "maxLength": 128,
+          "minLength": 3,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{2,127}$",
+          "title": "Model Id",
+          "type": "string"
+        },
+        "public_url": {
+          "pattern": "^https://[a-z0-9-]+\\.cloudfront\\.net$",
+          "title": "Public Url",
+          "type": "string"
+        },
+        "release_id": {
+          "maxLength": 128,
+          "minLength": 3,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{2,127}$",
+          "title": "Release Id",
+          "type": "string"
+        },
+        "verified": {
+          "const": true,
+          "title": "Verified",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "verified",
+        "release_id",
+        "model_id",
+        "exact_winner_redeployed",
+        "fresh_runtime_revision_published",
+        "public_url"
+      ],
+      "title": "PortfolioRedeployment",
+      "type": "object"
+    },
+    "PortfolioReleaseGate": {
+      "additionalProperties": false,
+      "properties": {
+        "decision": {
+          "enum": [
+            "promote_candidate",
+            "retain_baseline"
+          ],
+          "title": "Decision",
+          "type": "string"
+        },
+        "evaluated_candidate_model_id": {
+          "maxLength": 128,
+          "minLength": 3,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{2,127}$",
+          "title": "Evaluated Candidate Model Id",
+          "type": "string"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        },
+        "promoted_model_id": {
+          "maxLength": 128,
+          "minLength": 3,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{2,127}$",
+          "title": "Promoted Model Id",
+          "type": "string"
+        },
+        "strongest_baseline_model_id": {
+          "maxLength": 128,
+          "minLength": 3,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{2,127}$",
+          "title": "Strongest Baseline Model Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "passed",
+        "decision",
+        "promoted_model_id",
+        "evaluated_candidate_model_id",
+        "strongest_baseline_model_id"
+      ],
+      "title": "PortfolioReleaseGate",
+      "type": "object"
+    },
+    "PortfolioReleaseIdentities": {
+      "additionalProperties": false,
+      "properties": {
+        "dataset_manifest_sha256": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Dataset Manifest Sha256",
+          "type": "string"
+        },
+        "deployment_git_sha": {
+          "pattern": "^[0-9a-f]{40}$",
+          "title": "Deployment Git Sha",
+          "type": "string"
+        },
+        "evaluation_image_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Evaluation Image Digest",
+          "type": "string"
+        },
+        "model_artifact_sha256": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Model Artifact Sha256",
+          "type": "string"
+        },
+        "release_git_sha": {
+          "pattern": "^[0-9a-f]{40}$",
+          "title": "Release Git Sha",
+          "type": "string"
+        },
+        "serving_image_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Serving Image Digest",
+          "type": "string"
+        },
+        "trial_selection_id": {
+          "pattern": "^trial-selection-[0-9a-f]{20}$",
+          "title": "Trial Selection Id",
+          "type": "string"
+        },
+        "trial_selection_sha256": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Trial Selection Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "release_git_sha",
+        "deployment_git_sha",
+        "dataset_manifest_sha256",
+        "model_artifact_sha256",
+        "evaluation_image_digest",
+        "serving_image_digest",
+        "trial_selection_id",
+        "trial_selection_sha256"
+      ],
+      "title": "PortfolioReleaseIdentities",
+      "type": "object"
+    },
+    "PortfolioRollback": {
+      "additionalProperties": false,
+      "properties": {
+        "restored_model_id": {
+          "maxLength": 128,
+          "minLength": 3,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{2,127}$",
+          "title": "Restored Model Id",
+          "type": "string"
+        },
+        "smoke_tests_passed": {
+          "const": true,
+          "title": "Smoke Tests Passed",
+          "type": "boolean"
+        },
+        "verified": {
+          "const": true,
+          "title": "Verified",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "verified",
+        "restored_model_id",
+        "smoke_tests_passed"
+      ],
+      "title": "PortfolioRollback",
+      "type": "object"
+    },
+    "PortfolioSelectedReleaseModel": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_sha256": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Artifact Sha256",
+          "type": "string"
+        },
+        "model_id": {
+          "maxLength": 128,
+          "minLength": 3,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{2,127}$",
+          "title": "Model Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "model_id",
+        "artifact_sha256"
+      ],
+      "title": "PortfolioSelectedReleaseModel",
+      "type": "object"
+    },
+    "PortfolioTrainingProvenance": {
+      "additionalProperties": false,
+      "description": "Allowlisted training provenance with private workflow/job identity removed.",
+      "properties": {
+        "accelerator": {
+          "enum": [
+            "cpu",
+            "gpu"
+          ],
+          "title": "Accelerator",
+          "type": "string"
+        },
+        "actual_cost_usd": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Actual Cost Usd"
+        },
+        "config_hash": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Config Hash",
+          "type": "string"
+        },
+        "cost_evidence": {
+          "minLength": 1,
+          "title": "Cost Evidence",
+          "type": "string"
+        },
+        "estimated_cost_usd": {
+          "minimum": 0,
+          "title": "Estimated Cost Usd",
+          "type": "number"
+        },
+        "git_sha": {
+          "pattern": "^[0-9a-f]{40}$",
+          "title": "Git Sha",
+          "type": "string"
+        },
+        "hardware_class": {
+          "enum": [
+            "ml.m5.xlarge",
+            "ml.g4dn.xlarge"
+          ],
+          "title": "Hardware Class",
+          "type": "string"
+        },
+        "image_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Image Digest",
+          "type": "string"
+        },
+        "region": {
+          "const": "us-east-1",
+          "title": "Region",
+          "type": "string"
+        },
+        "run_manifest_sha256": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Run Manifest Sha256",
+          "type": "string"
+        },
+        "runtime_seconds": {
+          "minimum": 0,
+          "title": "Runtime Seconds",
+          "type": "number"
+        },
+        "selected_model_artifact_checksum": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Selected Model Artifact Checksum",
+          "type": "string"
+        },
+        "selected_model_id": {
+          "maxLength": 128,
+          "minLength": 3,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{2,127}$",
+          "title": "Selected Model Id",
+          "type": "string"
+        },
+        "trial_selection_id": {
+          "pattern": "^trial-selection-[0-9a-f]{20}$",
+          "title": "Trial Selection Id",
+          "type": "string"
+        },
+        "trial_selection_sha256": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Trial Selection Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "trial_selection_id",
+        "trial_selection_sha256",
+        "run_manifest_sha256",
+        "selected_model_id",
+        "selected_model_artifact_checksum",
+        "config_hash",
+        "git_sha",
+        "image_digest",
+        "hardware_class",
+        "accelerator",
+        "region",
+        "runtime_seconds",
+        "estimated_cost_usd",
+        "cost_evidence"
+      ],
+      "title": "PortfolioTrainingProvenance",
+      "type": "object"
+    },
+    "PublicEvaluationProvenance": {
+      "additionalProperties": false,
+      "description": "Allowlisted provenance for the two clean held-out Processing executions.",
+      "properties": {
+        "actual_cost_usd": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Actual Cost Usd"
+        },
+        "candidate_model_artifact_checksum": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Candidate Model Artifact Checksum",
+          "type": "string"
+        },
+        "candidate_model_id": {
+          "minLength": 1,
+          "title": "Candidate Model Id",
+          "type": "string"
+        },
+        "clean_execution_count": {
+          "const": 2,
+          "title": "Clean Execution Count",
+          "type": "integer"
+        },
+        "cost_evidence": {
+          "minLength": 1,
+          "title": "Cost Evidence",
+          "type": "string"
+        },
+        "estimated_cost_usd": {
+          "minimum": 0,
+          "title": "Estimated Cost Usd",
+          "type": "number"
+        },
+        "evaluation_config_hash": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Evaluation Config Hash",
+          "type": "string"
+        },
+        "git_sha": {
+          "pattern": "^[0-9a-f]{40}$",
+          "title": "Git Sha",
+          "type": "string"
+        },
+        "hardware_class": {
+          "const": "ml.m5.xlarge",
+          "title": "Hardware Class",
+          "type": "string"
+        },
+        "image_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Image Digest",
+          "type": "string"
+        },
+        "region": {
+          "const": "us-east-1",
+          "title": "Region",
+          "type": "string"
+        },
+        "runtime_basis": {
+          "const": "processing_job_wall_clock_sum",
+          "title": "Runtime Basis",
+          "type": "string"
+        },
+        "runtime_seconds": {
+          "minimum": 0,
+          "title": "Runtime Seconds",
+          "type": "number"
+        }
+      },
+      "required": [
+        "candidate_model_id",
+        "candidate_model_artifact_checksum",
+        "evaluation_config_hash",
+        "git_sha",
+        "image_digest",
+        "hardware_class",
+        "region",
+        "clean_execution_count",
+        "runtime_seconds",
+        "runtime_basis",
+        "estimated_cost_usd",
+        "cost_evidence"
+      ],
+      "title": "PublicEvaluationProvenance",
+      "type": "object"
+    },
+    "PublicFailureExample": {
+      "additionalProperties": false,
+      "properties": {
+        "baseline_metric": {
+          "title": "Baseline Metric",
+          "type": "number"
+        },
+        "candidate_metric": {
+          "title": "Candidate Metric",
+          "type": "number"
+        },
+        "category": {
+          "enum": [
+            "win",
+            "loss",
+            "tie_or_uncertain",
+            "lexical_preferred",
+            "complement_exact_confusion"
+          ],
+          "title": "Category",
+          "type": "string"
+        },
+        "delta": {
+          "title": "Delta",
+          "type": "number"
+        },
+        "example_id": {
+          "minLength": 1,
+          "title": "Example Id",
+          "type": "string"
+        },
+        "interpretation": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Interpretation"
+        },
+        "next_experiment": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Next Experiment"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notes"
+        },
+        "public_product_ids": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Public Product Ids",
+          "type": "array"
+        },
+        "query": {
+          "$ref": "#/$defs/CuratedQuerySummary"
+        },
+        "selection_rule": {
+          "minLength": 1,
+          "title": "Selection Rule",
+          "type": "string"
+        }
+      },
+      "required": [
+        "example_id",
+        "query",
+        "category",
+        "baseline_metric",
+        "candidate_metric",
+        "delta",
+        "selection_rule"
+      ],
+      "title": "PublicFailureExample",
+      "type": "object"
+    },
+    "PublicMetricComparison": {
+      "additionalProperties": false,
+      "properties": {
+        "baseline": {
+          "title": "Baseline",
+          "type": "number"
+        },
+        "candidate": {
+          "title": "Candidate",
+          "type": "number"
+        },
+        "delta": {
+          "title": "Delta",
+          "type": "number"
+        },
+        "display_name": {
+          "minLength": 1,
+          "title": "Display Name",
+          "type": "string"
+        },
+        "metric": {
+          "enum": [
+            "graded_ndcg@10",
+            "exact_mrr@10",
+            "recall_exact_or_substitute@10",
+            "pairwise_ordinal_accuracy",
+            "graded_ndcg@5",
+            "exact_top_1_rate"
+          ],
+          "title": "Metric",
+          "type": "string"
+        }
+      },
+      "required": [
+        "metric",
+        "display_name",
+        "baseline",
+        "candidate",
+        "delta"
+      ],
+      "title": "PublicMetricComparison",
+      "type": "object"
+    },
+    "PublicModelMetricRow": {
+      "additionalProperties": false,
+      "description": "Measured model values only; unavailable measurements stay null.",
+      "properties": {
+        "display_name": {
+          "minLength": 1,
+          "title": "Display Name",
+          "type": "string"
+        },
+        "exact_mrr_at_10": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Exact Mrr At 10"
+        },
+        "exact_top_1_rate": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Exact Top 1 Rate"
+        },
+        "graded_ndcg_at_10": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Graded Ndcg At 10",
+          "type": "number"
+        },
+        "graded_ndcg_at_5": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Graded Ndcg At 5"
+        },
+        "kind": {
+          "enum": [
+            "bm25",
+            "pretrained",
+            "fine_tuned"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "model_id": {
+          "minLength": 1,
+          "title": "Model Id",
+          "type": "string"
+        },
+        "p95_inference_latency_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "P95 Inference Latency Ms"
+        },
+        "pairwise_ordinal_accuracy": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pairwise Ordinal Accuracy"
+        },
+        "recall_exact_or_substitute_at_10": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Recall Exact Or Substitute At 10"
+        }
+      },
+      "required": [
+        "model_id",
+        "display_name",
+        "kind",
+        "graded_ndcg_at_10"
+      ],
+      "title": "PublicModelMetricRow",
+      "type": "object"
+    },
+    "PublicSliceResult": {
+      "additionalProperties": false,
+      "properties": {
+        "baseline_graded_ndcg_at_10": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Baseline Graded Ndcg At 10"
+        },
+        "candidate_graded_ndcg_at_10": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Candidate Graded Ndcg At 10"
+        },
+        "ci_lower": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ci Lower"
+        },
+        "ci_upper": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ci Upper"
+        },
+        "delta": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Delta"
+        },
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "display_name": {
+          "minLength": 1,
+          "title": "Display Name",
+          "type": "string"
+        },
+        "excluded_query_count": {
+          "minimum": 0,
+          "title": "Excluded Query Count",
+          "type": "integer"
+        },
+        "finding": {
+          "enum": [
+            "improvement",
+            "regression",
+            "uncertain",
+            "insufficient_data"
+          ],
+          "title": "Finding",
+          "type": "string"
+        },
+        "low_sample": {
+          "title": "Low Sample",
+          "type": "boolean"
+        },
+        "query_count": {
+          "minimum": 0,
+          "title": "Query Count",
+          "type": "integer"
+        },
+        "slice_id": {
+          "minLength": 1,
+          "title": "Slice Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "slice_id",
+        "display_name",
+        "description",
+        "query_count",
+        "excluded_query_count",
+        "baseline_graded_ndcg_at_10",
+        "candidate_graded_ndcg_at_10",
+        "delta",
+        "low_sample",
+        "finding"
+      ],
+      "title": "PublicSliceResult",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.example.invalid/search-rank/portfolio_release_evidence.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One immutable, resume-safe release record assembled from the full evidence chain.",
+  "properties": {
+    "artifact_sha256": {
+      "$ref": "#/$defs/PortfolioArtifactChecksums"
+    },
+    "benchmark": {
+      "$ref": "#/$defs/PortfolioBenchmark"
+    },
+    "claim_boundaries": {
+      "$ref": "#/$defs/PortfolioClaimBoundaries"
+    },
+    "deployment": {
+      "$ref": "#/$defs/PortfolioDeployment"
+    },
+    "evidence_mode": {
+      "const": "verified",
+      "title": "Evidence Mode",
+      "type": "string"
+    },
+    "evidence_status": {
+      "const": "verified_measurement",
+      "title": "Evidence Status",
+      "type": "string"
+    },
+    "generated_at": {
+      "format": "date-time",
+      "title": "Generated At",
+      "type": "string"
+    },
+    "identities": {
+      "$ref": "#/$defs/PortfolioReleaseIdentities"
+    },
+    "metrics": {
+      "$ref": "#/$defs/PortfolioMetrics"
+    },
+    "public_demo_expires_at": {
+      "format": "date-time",
+      "title": "Public Demo Expires At",
+      "type": "string"
+    },
+    "public_evidence": {
+      "$ref": "#/$defs/PortfolioPublicEvidence"
+    },
+    "redeployment": {
+      "$ref": "#/$defs/PortfolioRedeployment"
+    },
+    "release_gate": {
+      "$ref": "#/$defs/PortfolioReleaseGate"
+    },
+    "release_id": {
+      "maxLength": 128,
+      "minLength": 3,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{2,127}$",
+      "title": "Release Id",
+      "type": "string"
+    },
+    "rollback": {
+      "$ref": "#/$defs/PortfolioRollback"
+    },
+    "schema_version": {
+      "const": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "evidence_status",
+    "generated_at",
+    "public_demo_expires_at",
+    "evidence_mode",
+    "release_id",
+    "identities",
+    "release_gate",
+    "metrics",
+    "public_evidence",
+    "deployment",
+    "benchmark",
+    "rollback",
+    "redeployment",
+    "claim_boundaries",
+    "artifact_sha256"
+  ],
+  "title": "PortfolioReleaseEvidence",
+  "type": "object"
+}

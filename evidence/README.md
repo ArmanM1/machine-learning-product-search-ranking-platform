@@ -33,6 +33,7 @@ releases/<release-id>/release-manifest.json
 releases/<release-id>/deployment-evidence.json
 releases/<release-id>/performance/<workflow-run>/performance-report.json
 releases/<release-id>/rollback-evidence.json
+releases/<release-id>.json                                  # durable portfolio release record
 cloud/cost-evidence.json
 cloud/teardown-evidence.json
 ```
@@ -42,5 +43,9 @@ Only templates and explicit pending markers are committed before runs.
 The training selection is frozen before any held-out access. It binds exactly one preregistered candidate treatment and the random-negative and title-only validation controls to their candidate-input JSON, model archive, cloud RunManifest, frozen config, source commit, and image digest. The selected treatment does not change in response to the observed control values. `docs/trial-selection.md` defines the protected order and the distinction between the official three-trial comparison and any separately recorded exploratory runs.
 
 A validation-only baseline release substitutes `baseline-summary.json` for `evaluation-report.json`, records `evidence_mode=validation_only`, and records a zero test-access count. It also retains the successful baseline and bootstrap command summaries. A verified candidate release uses the checksum-bound two-job evaluation report. Both modes require `public-evidence.json`, `release-manifest.json`, and the exact recursive `bundle-checksums.json` inventory.
+
+After the complete verified release, `scripts/assemble_release_evidence.py` writes one immutable `releases/<release-id>.json` record conforming to `schemas/json/portfolio_release_evidence.schema.json`. The record retains an explicitly allowlisted subset of the typed public evidence so the training/evaluation provenance, test-access count, selected model and configuration, validation ablations, intervals, slices, representative examples, costs, limitations, and prohibited claims remain reviewable after the temporary CloudFront demo expires. Its checksums bind that subset to the release bundle and sanitized ablation projection. The assembler rejects unknown fields and private locators before using an atomic no-clobber write.
+
+The durable record intentionally omits GitHub workflow run IDs, SageMaker job names, Lambda version IDs, AWS account/resource identifiers, private object routes, signed receipts, and balances. Workflow-derived training and held-out run names use a one-way short SHA-256 token rather than embedding the numeric GitHub run ID; the private source artifacts remain checksum-bound without turning that routing identity into a portfolio claim.
 
 Local evidence currently includes two byte-identical data-preparation runs in `data/milestone-1-reproducibility.json` and two separate validation baseline scoring processes in `baselines/milestone-2-validation.json`. The baseline processes reproduced the exact config, dataset, query set, six quality vectors, rank order, and scores. Their raw ranking transports differ only because serialized local `latency_ms` values changed; both processes used a dirty shared worktree, and p95 varied materially. Quality and ranking reproducibility are therefore complete, while controlled latency and clean-checkout reproduction remain pending. Neither file is cloud, held-out, promotion, or deployment evidence.

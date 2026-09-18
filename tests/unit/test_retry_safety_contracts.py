@@ -75,7 +75,9 @@ def test_training_rerun_reuses_only_the_exact_existing_job() -> None:
         1
     ].split("name: Wait for completion and capture sanitized evidence", 1)[0]
 
-    assert 'run_id="${PROJECT_NAME}-${ENVIRONMENT_NAME}-${RUN_KIND}-${GITHUB_RUN_ID}"' in submission
+    assert 'run_token="h$(printf \'%s\' "${GITHUB_RUN_ID}" | sha256sum | cut -c1-16)"' in submission
+    assert 'run_id="${PROJECT_NAME}-${ENVIRONMENT_NAME}-${RUN_KIND}-${run_token}"' in submission
+    assert "${RUN_KIND}-${GITHUB_RUN_ID}" not in submission
     assert "GITHUB_RUN_ATTEMPT" not in submission
     assert submission.index("aws sagemaker describe-training-job") < submission.index(
         "aws sagemaker create-training-job"
@@ -132,7 +134,9 @@ def test_release_counter_reservations_recover_without_double_increment() -> None
     ].split("name: Verify both clean outputs", 1)[0]
     reservation = jobs.split("reserve_counter()", 1)[1].split("submit_and_wait()", 1)[0]
 
-    assert 'base_name="${PROJECT_NAME}-${ENVIRONMENT_NAME}-release-${GITHUB_RUN_ID}"' in jobs
+    assert 'run_token="h$(printf \'%s\' "${GITHUB_RUN_ID}" | sha256sum | cut -c1-16)"' in jobs
+    assert 'base_name="${PROJECT_NAME}-${ENVIRONMENT_NAME}-release-${run_token}"' in jobs
+    assert "release-${GITHUB_RUN_ID}" not in jobs
     assert "GITHUB_RUN_ATTEMPT" not in jobs
     assert 'test "${TEST_ACCESS_COUNTER}" -le 999999' in workflow
     assert (

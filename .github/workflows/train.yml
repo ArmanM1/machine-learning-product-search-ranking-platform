@@ -393,7 +393,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          run_id="${PROJECT_NAME}-${ENVIRONMENT_NAME}-${RUN_KIND}-${GITHUB_RUN_ID}"
+          run_token="h$(printf '%s' "${GITHUB_RUN_ID}" | sha256sum | cut -c1-16)"
+          run_id="${PROJECT_NAME}-${ENVIRONMENT_NAME}-${RUN_KIND}-${run_token}"
           run_id="${run_id:0:63}"
           config_file_hash="$(sha256sum "${CONFIG_PATH}" | cut -d' ' -f1)"
           training_input_uri="s3://${ARTIFACT_BUCKET}/runs/${run_id}/training-input/"

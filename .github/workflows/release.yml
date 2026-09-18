@@ -481,6 +481,9 @@ jobs:
             --kind trial-selection-verification trial-selection-verification.json
           uv run python scripts/validate_release_artifacts.py file \
             --kind trial-selection-binding trial-selection-binding.json
+          uv run python scripts/project_portfolio_ablations.py \
+            --selection trial-selection.json \
+            --output portfolio-ablation-evidence.json
       - name: Capture the required rollback-safe baseline pointer
         shell: bash
         run: |
@@ -514,7 +517,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          base_name="${PROJECT_NAME}-${ENVIRONMENT_NAME}-release-${GITHUB_RUN_ID}"
+          run_token="h$(printf '%s' "${GITHUB_RUN_ID}" | sha256sum | cut -c1-16)"
+          base_name="${PROJECT_NAME}-${ENVIRONMENT_NAME}-release-${run_token}"
           base_name="${base_name:0:55}"
           shared_prefix="s3://${ARTIFACT_BUCKET}/runs/${base_name}/shared/"
           config_prefix="${shared_prefix}evaluation/"
@@ -1679,6 +1683,7 @@ jobs:
             evaluation-report.json
             evaluation-provenance.json
             previous-pointer.json
+            portfolio-ablation-evidence.json
             promotion-pointer.json
             promotion-publication-evidence.json
             processing-quota-preflight.json

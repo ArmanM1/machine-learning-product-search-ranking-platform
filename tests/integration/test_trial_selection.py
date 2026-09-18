@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+from scripts.project_portfolio_ablations import project as project_portfolio_ablations
 from search_rank.artifacts.checksums import sha256_directory, sha256_file
 from search_rank.schemas import TrialSelection
 from search_rank.training.configuration import load_frozen_experiment
@@ -201,6 +202,22 @@ def test_three_trial_builder_binds_treatment_controls_and_zero_test_access(
     assert {trial.role for trial in selection.trials} == set(trial_selection.ROLES)
     assert {trial.training_config_role for trial in selection.trials} == set(trial_selection.ROLES)
     assert selection.trials[0].training_git_sha == GIT_SHA
+
+    public_ablations = project_portfolio_ablations(Path(args.output))
+    rendered = public_ablations.model_dump_json()
+    assert public_ablations.selection_id == selection.selection_id
+    assert public_ablations.source_trial_selection_sha256 == (
+        "sha256:" + sha256_file(Path(args.output))
+    )
+    assert {trial.role for trial in public_ablations.trials} == set(trial_selection.ROLES)
+    for private_marker in (
+        "123456789012",
+        "s3_key",
+        "training_job_id",
+        "candidate_run_id",
+        "training_image_uri",
+    ):
+        assert private_marker not in rendered
 
     verified = trial_selection.verify(
         Namespace(
