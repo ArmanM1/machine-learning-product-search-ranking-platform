@@ -579,6 +579,29 @@ def test_heldout_release_role_can_read_only_the_required_live_quota() -> None:
     assert heldout.count('"servicequotas:GetServiceQuota"') == 1
 
 
+def test_artifact_publishers_can_verify_their_required_s3_tag_count() -> None:
+    iam = (ROOT / "infra/terraform/modules/platform/iam.tf").read_text(encoding="utf-8")
+
+    for policy, workflow_name in (
+        ("github_training", "train.yml"),
+        ("github_trial_selection", "freeze-trial-selection.yml"),
+        ("github_heldout_release", "release.yml"),
+    ):
+        policy_body = iam.split(f'data "aws_iam_policy_document" "{policy}"', 1)[1].split(
+            f'resource "aws_iam_role_policy" "{policy}"', 1
+        )[0]
+        workflow = (ROOT / ".github/workflows" / workflow_name).read_text(encoding="utf-8")
+
+        assert ".TagCount == 1" in workflow
+        assert '"s3:GetObjectTagging"' in policy_body
+
+    heldout = iam.split('data "aws_iam_policy_document" "github_heldout_release"', 1)[1].split(
+        'resource "aws_iam_role_policy" "github_heldout_release"', 1
+    )[0]
+    assert '"${aws_s3_bucket.artifacts.arn}/heldout/access-counter.json"' in heldout
+    assert '"${aws_s3_bucket.artifacts.arn}/public/*"' in heldout
+
+
 def test_cloudfront_function_is_tagged_for_request_and_resource_tag_guards() -> None:
     serving = (ROOT / "infra/terraform/modules/platform/serving.tf").read_text(encoding="utf-8")
     function = serving.split('resource "aws_cloudfront_function" "spa_rewrite" {', 1)[1].split(
