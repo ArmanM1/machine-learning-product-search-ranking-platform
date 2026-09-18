@@ -41,6 +41,7 @@ from .query_store import QueryStore
 
 LOGGER = logging.getLogger(__name__)
 _MAX_OPERATIONAL_EVIDENCE_BYTES = 1_048_576
+_ACCESS_DENIED_PENDING_SECONDS = 120
 
 
 class OperationalEvidenceConflict(ValueError):
@@ -89,6 +90,7 @@ class ServiceState:
     release_manifest: dict[str, Any] | None = None
     evidence: PublicEvidenceEnvelope | None = None
     s3_client: Any | None = None
+    operational_access_denied_at: float | None = None
     model_load_duration_ms: float | None = None
     startup_succeeded: bool = False
 
@@ -298,8 +300,17 @@ class ServiceState:
             # therefore reports a not-yet-created key as AccessDenied instead
             # of NoSuchKey. Pending is claim-safe: verified values still require
             # a readable, checksummed, fully validated canonical object.
-            if code in {"AccessDenied", "NoSuchKey", "NotFound", "403", "404"}:
+            if code in {"NoSuchKey", "NotFound", "404"}:
                 return pending
+            if code in {"AccessDenied", "403"}:
+                now = time.monotonic()
+                if self.operational_access_denied_at is None:
+                    self.operational_access_denied_at = now
+                if now - self.operational_access_denied_at <= _ACCESS_DENIED_PENDING_SECONDS:
+                    return pending
+                raise OperationalEvidenceUnavailable(
+                    "deployment evidence access remained denied after the publication window"
+                ) from exc
             raise OperationalEvidenceUnavailable(
                 "deployment evidence store is unavailable"
             ) from exc
@@ -307,6 +318,7 @@ class ServiceState:
             raise OperationalEvidenceUnavailable(
                 "deployment evidence store is unavailable"
             ) from exc
+        self.operational_access_denied_at = None
 
         content_length = response.get("ContentLength")
         content_type = response.get("ContentType")
