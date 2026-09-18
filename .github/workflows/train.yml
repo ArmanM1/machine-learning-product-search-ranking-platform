@@ -1451,7 +1451,7 @@ jobs:
           : "${TARGET_JOB_NAME:?Missing temporary failed-training job secret}"
           : "${ARTIFACT_BUCKET:?Missing AWS_ARTIFACT_BUCKET variable}"
           [[ "${TARGET_JOB_NAME}" =~ ^product-search-ranking-prod-(development|final|ablation)-h[0-9a-f]{16}$ ]]
-      - uses: actions/checkout@3d3c42e5aac5ba805825a76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}

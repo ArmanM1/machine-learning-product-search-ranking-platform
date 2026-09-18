@@ -277,6 +277,12 @@ def test_read_only_diagnostic_job_cannot_submit_compute_or_publish_raw_reason() 
     assert "inputs.diagnostic_only == false" in jobs["submit"]["if"]
     assert "inputs.diagnostic_only == false" in jobs["quota-probe"]["if"]
     assert "inputs.diagnostic_only == true" in diagnostic["if"]
+    diagnostic_checkout_refs = [
+        step["uses"]
+        for step in diagnostic["steps"]
+        if str(step.get("uses", "")).startswith("actions/checkout@")
+    ]
+    assert diagnostic_checkout_refs == ["actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"]
 
     mode_guard = jobs["validate-mode"]
     guard_source = json.dumps(mode_guard, sort_keys=True)
