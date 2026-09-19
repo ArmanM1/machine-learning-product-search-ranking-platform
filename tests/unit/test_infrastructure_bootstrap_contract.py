@@ -584,6 +584,7 @@ def test_infrastructure_and_production_roles_have_separate_non_escalating_author
     assert 'variable = "s3:prefix"' in deployment_bucket_list
     assert "local.artifact_bucket_arn" in deployment_bucket_list
     assert "local.site_bucket_arn" in deployment_bucket_list
+    assert '"index.html"' in deployment_bucket_list
     for policy in (infrastructure, production):
         assert "apigateway:" not in policy
     assert (

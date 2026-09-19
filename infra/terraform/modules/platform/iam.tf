@@ -493,6 +493,10 @@ data "aws_iam_policy_document" "github_deployment" {
       variable = "s3:prefix"
       values = [
         "",
+        # S3 evaluates a missing root index read against ListBucket using the
+        # requested key as the prefix. This lets first activation prove that
+        # index.html is absent and take the fail-closed bootstrap path.
+        "index.html",
         "promoted/*",
         "public/*",
         "releases/*",
