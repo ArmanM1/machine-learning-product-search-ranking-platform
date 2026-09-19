@@ -174,6 +174,8 @@ def test_cloud_workflows_keep_controlled_cold_and_warm_measurements_separate() -
     assert "--qualifier candidate" in deploy
     assert 'cold_request_id="$(python -c \'import uuid; print(uuid.uuid4())\')"' in deploy
     assert 'cold_request_id="cold-${GITHUB_RUN_ID}' not in deploy
+    assert 'observed_request_id="$(jq -er \'.request_id\' candidate-cold-response.json)"' in deploy
+    assert '--request-id "${observed_request_id}"' in deploy
     assert 'controlled_cold_sample_included": False' in deploy
     assert "--slurpfile controlled_cold_start candidate-cold-start.json" in deploy
     assert '"measurement_class": "warm_after_explicit_per_condition_warmups"' in benchmark

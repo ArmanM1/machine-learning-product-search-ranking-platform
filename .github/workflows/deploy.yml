@@ -1023,12 +1023,16 @@ jobs:
             --write-out $'%{http_code}\t%{time_total}' \
             "${candidate_url%/}/api/v1/rank")"
           test "${cold_result%%$'\t'*}" = "200"
+          observed_request_id="$(jq -er '.request_id' candidate-cold-response.json)"
+          python -c \
+            'import sys, uuid; supplied=sys.argv[1]; assert str(uuid.UUID(supplied)) == supplied' \
+            "${observed_request_id}"
           cold_seconds="${cold_result#*$'\t'}"
           cold_end_to_end_ms="$(python -c \
             'import sys; value=float(sys.argv[1]); assert value > 0; print(value * 1000.0)' \
             "${cold_seconds}")"
           jq -e \
-            --arg request "${cold_request_id}" \
+            --arg request "${observed_request_id}" \
             --arg query "${query_id}" \
             --arg model "${MODEL_ID}" \
             --arg dataset "${dataset_hash}" \
@@ -1060,7 +1064,7 @@ jobs:
               --model-id "${MODEL_ID}" \
               --dataset-manifest-hash "${dataset_hash}" \
               --model-artifact-checksum "${model_checksum}" \
-              --request-id "${cold_request_id}" \
+              --request-id "${observed_request_id}" \
               --request-started-at "${cold_request_started_at}" \
               --end-to-end-ms "${cold_end_to_end_ms}" \
               --candidate-count "${candidate_count}" \
