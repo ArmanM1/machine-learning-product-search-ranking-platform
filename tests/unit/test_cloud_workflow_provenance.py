@@ -385,6 +385,15 @@ def test_deploy_diagnostics_are_scoped_to_the_candidate_version() -> None:
     assert 'candidate_version = str(config.get("Version", ""))' in workflow
     assert 'stream_marker = f"[{candidate_version}]"' in workflow
     assert 'if stream_marker in str(event.get("logStreamName", ""))' in workflow
+    assert 'if name == "model_runtime_phase"' in workflow
+    for phase in (
+        "import_torch",
+        "import_transformers",
+        "load_tokenizer",
+        "load_model",
+        "model_ready",
+    ):
+        assert f'"{phase}"' in workflow
 
 
 def test_benchmark_validates_then_immutably_publishes_and_revalidates_readback() -> None:

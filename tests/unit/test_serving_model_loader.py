@@ -132,6 +132,7 @@ def test_checkpoint_loading_is_local_only_and_places_model_on_cpu(
 
     loaded_model = _LoadedModel()
     calls: list[tuple[str, str, dict[str, object]]] = []
+    phases: list[str] = []
 
     def load_tokenizer(path: str, **options: object) -> object:
         calls.append(("tokenizer", path, options))
@@ -141,15 +142,17 @@ def test_checkpoint_loading_is_local_only_and_places_model_on_cpu(
         calls.append(("model", path, options))
         return loaded_model
 
+    tokenizer_factory = SimpleNamespace(from_pretrained=load_tokenizer)
+    model_factory = SimpleNamespace(from_pretrained=load_model)
     monkeypatch.setattr(
-        model_loader.AutoTokenizer,
-        "from_pretrained",
-        staticmethod(load_tokenizer),
+        model_loader,
+        "_transformer_classes",
+        lambda: (tokenizer_factory, model_factory),
     )
     monkeypatch.setattr(
-        model_loader.AutoModelForSequenceClassification,
-        "from_pretrained",
-        staticmethod(load_model),
+        model_loader,
+        "log_event",
+        lambda _logger, _message, **context: phases.append(str(context["phase"])),
     )
 
     runtime = model_loader._load_sequence_classifier(checkpoint)
@@ -170,6 +173,13 @@ def test_checkpoint_loading_is_local_only_and_places_model_on_cpu(
     ]
     assert loaded_model.devices == ["cpu"]
     assert loaded_model.eval_calls == 1
+    assert phases == [
+        "import_torch",
+        "import_transformers",
+        "load_tokenizer",
+        "load_model",
+        "model_ready",
+    ]
 
 
 def _summary(model_id: str, checksum: str, *, promoted: bool) -> dict[str, object]:
@@ -281,13 +291,15 @@ def test_serving_helpers_match_canonical_tokenization_and_ranking() -> None:
     )
 
 
-def test_importing_serving_loader_does_not_import_sentence_transformers() -> None:
+def test_importing_serving_loader_defers_ml_framework_imports() -> None:
     completed = subprocess.run(
         [
             sys.executable,
             "-c",
             "import sys; import search_rank.serving.model_loader; "
-            "assert not any(name.startswith('sentence_transformers') for name in sys.modules)",
+            "blocked=('torch', 'transformers', 'sentence_transformers'); "
+            "assert not any(name == root or name.startswith(root + '.') "
+            "for name in sys.modules for root in blocked)",
         ],
         check=False,
         capture_output=True,

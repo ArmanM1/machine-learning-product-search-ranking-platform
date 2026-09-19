@@ -67,7 +67,7 @@ RUN apt-get update \
        pandas pyarrow scikit-learn scipy sentence-transformers \
        psutil typer uvicorn \
     && "${UV_PROJECT_ENVIRONMENT}/bin/python" -c \
-       'import importlib.util; import yaml; import search_rank.lambda_handler; blocked=("pandas", "pyarrow", "scipy", "sklearn", "sentence_transformers"); assert all(importlib.util.find_spec(name) is None for name in blocked)' \
+       'import importlib.util; import torch; import yaml; import search_rank.lambda_handler; blocked=("pandas", "pyarrow", "scipy", "sklearn", "sentence_transformers", "triton", "nvidia"); assert torch.version.cuda is None; assert all(importlib.util.find_spec(name) is None for name in blocked)' \
     && uv cache clean \
     && "${system_python}" -m pip uninstall --yes uv setuptools wheel \
     && "${system_python}" -c 'import pathlib, shutil, sysconfig; path = pathlib.Path(sysconfig.get_paths()["purelib"]) / "setuptools"; shutil.rmtree(path) if path.exists() else None' \

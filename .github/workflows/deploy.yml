@@ -2835,6 +2835,17 @@ jobs:
                   }:
                       application[f"service_startup_phase:{phase}"] += 1
                   continue
+              if name == "model_runtime_phase":
+                  phase = payload.get("phase")
+                  if phase in {
+                      "import_torch",
+                      "import_transformers",
+                      "load_tokenizer",
+                      "load_model",
+                      "model_ready",
+                  }:
+                      application[f"model_runtime_phase:{phase}"] += 1
+                  continue
               if name in {
                   "lambda_bootstrap_import_started",
                   "lambda_bootstrap_import_succeeded",

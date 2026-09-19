@@ -2,25 +2,30 @@
 
 from __future__ import annotations
 
+import importlib
+import logging
 import math
 import re
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import numpy as np
-import torch
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 from search_rank.artifacts.checksums import sha256_directory, sha256_file
+from search_rank.logging import log_event
 from search_rank.schemas.evidence import ReleaseManifest
 from search_rank.schemas.model import ModelArtifact
 
 from .query_store import CuratedQuery
 
+if TYPE_CHECKING:
+    import torch
+
 _TOKEN_PATTERN = re.compile(r"\w+", flags=re.UNICODE)
+LOGGER = logging.getLogger(__name__)
 
 
 def _tokenize(value: str) -> list[str]:
@@ -92,22 +97,37 @@ class _SequenceClassifierRuntime:
     model: _SequenceClassifier
 
 
+def _transformer_classes() -> tuple[Any, Any]:
+    from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
+    return AutoTokenizer, AutoModelForSequenceClassification
+
+
 def _load_sequence_classifier(checkpoint: Path) -> _SequenceClassifierRuntime:
     """Load a standard local Hugging Face sequence-classification checkpoint."""
 
+    log_event(LOGGER, "model_runtime_phase", phase="import_torch")
+    importlib.import_module("torch")
+
+    log_event(LOGGER, "model_runtime_phase", phase="import_transformers")
+    auto_tokenizer, auto_model = _transformer_classes()
+
     checkpoint_path = str(checkpoint)
-    tokenizer = AutoTokenizer.from_pretrained(  # type: ignore[no-untyped-call]
+    log_event(LOGGER, "model_runtime_phase", phase="load_tokenizer")
+    tokenizer = auto_tokenizer.from_pretrained(
         checkpoint_path,
         local_files_only=True,
         trust_remote_code=False,
     )
-    model = AutoModelForSequenceClassification.from_pretrained(
+    log_event(LOGGER, "model_runtime_phase", phase="load_model")
+    model = auto_model.from_pretrained(
         checkpoint_path,
         local_files_only=True,
         trust_remote_code=False,
     )
     model.to("cpu")
     model.eval()
+    log_event(LOGGER, "model_runtime_phase", phase="model_ready")
     return _SequenceClassifierRuntime(
         tokenizer=cast(_PairTokenizer, tokenizer),
         model=cast(_SequenceClassifier, model),
@@ -174,6 +194,8 @@ class CrossEncoderRanker:
         self.model = self._runtime.model
 
     def _predict_raw_logits(self, pairs: list[tuple[str, str]]) -> list[float]:
+        import torch
+
         # CrossEncoder.predict sorts standard text pairs by descending character
         # length before batching, then restores caller order. Keep that batching
         # contract so this lean runtime produces the same raw checkpoint logits.

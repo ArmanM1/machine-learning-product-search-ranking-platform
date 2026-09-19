@@ -31,7 +31,9 @@ def test_container_contract_is_digest_pinned_and_uses_scoped_runtime_user(filena
         assert "OPENBLAS_NUM_THREADS=2" in text
         assert "pandas pyarrow scikit-learn scipy sentence-transformers" in text
         assert "psutil pyyaml" not in text
-        assert "import yaml; import search_rank.lambda_handler" in text
+        assert "import torch; import yaml; import search_rank.lambda_handler" in text
+        assert "torch.version.cuda is None" in text
+        assert '\"triton\", \"nvidia\"' in text
         assert "importlib.util.find_spec(name) is None" in text
         assert "ARG VITE_DATA_MODE=api" in text
         assert 'test "${VITE_DATA_MODE}" = "api"' in text
