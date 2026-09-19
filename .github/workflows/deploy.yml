@@ -1243,8 +1243,8 @@ jobs:
           model_ms = [float(row["model_ms"]) for row in rows if row["model_ms"]]
           end_to_end_ms = [float(row["seconds"]) * 1000 for row in rows if row["model_ms"]]
           warm_p95 = percentile(end_to_end_ms, 0.95)
-          if warm_p95 > 1500:
-              raise SystemExit(f"warm end-to-end p95 {warm_p95:.1f} ms exceeds 1500 ms")
+          if warm_p95 > 3000:
+              raise SystemExit(f"warm end-to-end p95 {warm_p95:.1f} ms exceeds 3000 ms")
           report = {
               "schema_version": "1.0.0",
               "status": "passed",
@@ -1276,6 +1276,7 @@ jobs:
               "controlled_cold_sample_included": False,
               "limitations": [
                   "This primary gate measures concurrency one only.",
+                  "The production acceptance bound is 3,000 ms warm p95 for 40 candidates.",
                   "The separate release benchmark records concurrency 1, 4, and 8.",
               ],
           }

@@ -913,6 +913,8 @@ def test_first_deploy_keeps_public_serving_private_until_candidate_gates_pass() 
     warm_gate_section = deploy[candidate_gate:public_publish]
     assert "--max-time 135" in cold_start_section
     assert "--max-time 30" in warm_gate_section
+    assert "if warm_p95 > 3000:" in warm_gate_section
+    assert "warm end-to-end p95 {warm_p95:.1f} ms exceeds 3000 ms" in warm_gate_section
     timeout_variable = module_variables.split('variable "lambda_timeout_seconds" {', 1)[1].split(
         "}\n", 1
     )[0]
