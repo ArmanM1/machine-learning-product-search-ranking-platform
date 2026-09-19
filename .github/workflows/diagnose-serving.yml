@@ -1,0 +1,110 @@
+name: Diagnose candidate serving startup
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: aws-financial-operations
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    env:
+      AWS_REGION: us-east-1
+      FUNCTION_NAME: product-search-ranking-prod-api
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Summarize recent candidate startup failures
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws lambda get-function-configuration \
+            --function-name "${FUNCTION_NAME}" \
+            --qualifier candidate > function-private.json
+          start_ms="$(python - <<'PY'
+          from datetime import datetime, timedelta, timezone
+
+          print(int((datetime.now(timezone.utc) - timedelta(minutes=45)).timestamp() * 1000))
+          PY
+          )"
+          aws logs filter-log-events \
+            --log-group-name "/aws/lambda/${FUNCTION_NAME}" \
+            --start-time "${start_ms}" \
+            --no-interleaved > logs-private.json
+          python - <<'PY'
+          import json
+          import re
+          from collections import Counter
+          from pathlib import Path
+
+          config = json.loads(Path("function-private.json").read_text(encoding="utf-8"))
+          logs = json.loads(Path("logs-private.json").read_text(encoding="utf-8"))
+          events = logs.get("events", [])
+          platform = Counter()
+          application = Counter()
+          reports = []
+          report_pattern = re.compile(
+              r"Duration: (?P<duration>[0-9.]+) ms.*?"
+              r"Memory Size: (?P<memory>[0-9]+) MB.*?"
+              r"Max Memory Used: (?P<maximum>[0-9]+) MB"
+              r"(?:.*?Init Duration: (?P<init>[0-9.]+) ms)?"
+              r"(?:.*?Status: (?P<status>[A-Za-z]+))?"
+              r"(?:.*?Error Type: (?P<error>[A-Za-z0-9_.-]+))?"
+          )
+          for event in events:
+              message = str(event.get("message", ""))
+              lowered = message.lower()
+              if "task timed out" in lowered:
+                  platform["task_timeout"] += 1
+              if "runtime exited" in lowered:
+                  platform["runtime_exit"] += 1
+              if "signal: killed" in lowered or "out of memory" in lowered:
+                  platform["memory_termination"] += 1
+              if message.startswith("REPORT RequestId:"):
+                  match = report_pattern.search(message)
+                  if match:
+                      reports.append(
+                          {
+                              key: (float(value) if key in {"duration", "init"} else int(value))
+                              if key in {"duration", "init", "memory", "maximum"}
+                              else value
+                              for key, value in match.groupdict().items()
+                              if value is not None
+                          }
+                      )
+              try:
+                  payload = json.loads(message)
+              except (TypeError, ValueError):
+                  continue
+              name = payload.get("message")
+              if name in {
+                  "service_startup_success",
+                  "service_startup_failed",
+                  "api_request",
+              }:
+                  application[str(name)] += 1
+          summary = {
+              "configuration": {
+                  "state": config.get("State"),
+                  "last_update_status": config.get("LastUpdateStatus"),
+                  "timeout_seconds": config.get("Timeout"),
+                  "memory_mb": config.get("MemorySize"),
+              },
+              "event_count": len(events),
+              "platform_event_counts": dict(sorted(platform.items())),
+              "application_event_counts": dict(sorted(application.items())),
+              "recent_reports": reports[-5:],
+          }
+          print(json.dumps(summary, indent=2, sort_keys=True))
+          PY
