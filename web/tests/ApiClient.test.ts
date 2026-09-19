@@ -3,6 +3,71 @@ import { fixtureEvaluation, fixtureModels, fixtureQueries } from '../src/api/fix
 import type { CuratedQuery, EvaluationData, ModelSummary } from '../src/types/api'
 
 describe('API client contract', () => {
+  it('limits live API fan-out to two requests', async () => {
+    vi.resetModules()
+    vi.stubEnv('VITE_DATA_MODE', 'api')
+    let active = 0
+    let maximumActive = 0
+    const release: Array<() => void> = []
+    const fetchMock = vi.fn().mockImplementation(() => {
+      active += 1
+      maximumActive = Math.max(maximumActive, active)
+      return new Promise((resolve) => {
+        release.push(() => {
+          active -= 1
+          resolve({ ok: true, json: async () => [] })
+        })
+      })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const { apiClient: apiModeClient } = await import('../src/api/client')
+
+    const requests = Array.from({ length: 4 }, () => apiModeClient.getModels())
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    expect(maximumActive).toBe(2)
+
+    release.shift()?.()
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
+    expect(maximumActive).toBe(2)
+
+    release.shift()?.()
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4))
+    expect(maximumActive).toBe(2)
+
+    release.splice(0).forEach((finish) => finish())
+    await expect(Promise.all(requests)).resolves.toEqual([[], [], [], []])
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
+  })
+
+  it('removes an aborted request from the live API queue before fetch starts', async () => {
+    vi.resetModules()
+    vi.stubEnv('VITE_DATA_MODE', 'api')
+    const release: Array<() => void> = []
+    const fetchMock = vi.fn().mockImplementation(() => new Promise((resolve) => {
+      release.push(() => resolve({ ok: true, json: async () => [] }))
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { apiClient: apiModeClient } = await import('../src/api/client')
+    const first = apiModeClient.getModels()
+    const second = apiModeClient.getModels()
+    const controller = new AbortController()
+    const queued = apiModeClient.getModels(controller.signal)
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    controller.abort()
+    await expect(queued).rejects.toMatchObject({ name: 'AbortError' })
+
+    release.shift()?.()
+    await first
+    await Promise.resolve()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    release.shift()?.()
+    await second
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
+  })
+
   it('sends the benchmark-judgment toggle as an explicit request parameter', () => {
     expect(buildComparisonPath('query / one', 'bm25-v1', 'candidate-v1', false)).toBe(
       '/api/v1/comparisons/query%20%2F%20one?baseline=bm25-v1&candidate=candidate-v1&include_judgments=false',

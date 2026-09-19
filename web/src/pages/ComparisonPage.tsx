@@ -72,6 +72,10 @@ export function ComparisonPage() {
         <StatusPanel state={queries} subject="Curated query index" retry={queries.retry} />
       )}
 
+      {models.status !== 'loading' && models.status !== 'success' ? (
+        <StatusPanel state={models} subject="Ranking systems" retry={models.retry} />
+      ) : null}
+
       <section className="comparison-controls" aria-label="Comparison controls">
         <label>
           <span>Reference system</span>

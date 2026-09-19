@@ -47,6 +47,62 @@ export class ApiClientError extends Error {
   }
 }
 
+interface QueuedRequest {
+  start: () => void
+  reject: (reason: DOMException) => void
+  onAbort?: () => void
+}
+
+class RequestLimiter {
+  private active = 0
+  private readonly queue: QueuedRequest[] = []
+
+  constructor(private readonly maximumConcurrency: number) {}
+
+  run<T>(request: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    if (signal?.aborted) {
+      return Promise.reject(new DOMException('The request was cancelled.', 'AbortError'))
+    }
+
+    return new Promise<T>((resolve, reject) => {
+      const queued: QueuedRequest = {
+        reject,
+        start: () => {
+          if (queued.onAbort) signal?.removeEventListener('abort', queued.onAbort)
+          this.active += 1
+          void Promise.resolve().then(request).then(resolve, reject).finally(() => {
+            this.active -= 1
+            this.drain()
+          })
+        },
+      }
+
+      queued.onAbort = () => {
+        const index = this.queue.indexOf(queued)
+        if (index === -1) return
+        this.queue.splice(index, 1)
+        queued.reject(new DOMException('The request was cancelled.', 'AbortError'))
+      }
+
+      this.queue.push(queued)
+      signal?.addEventListener('abort', queued.onAbort, { once: true })
+      this.drain()
+    })
+  }
+
+  private drain() {
+    while (this.active < this.maximumConcurrency) {
+      const next = this.queue.shift()
+      if (!next) return
+      next.start()
+    }
+  }
+}
+
+// Public Lambda capacity is deliberately fixed at two. Keeping browser fan-out
+// within the same bound prevents a single page from throttling its own requests.
+const liveRequestLimiter = new RequestLimiter(2)
+
 function waitForFixture(signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     const timer = window.setTimeout(resolve, 80)
@@ -64,10 +120,13 @@ function waitForFixture(signal?: AbortSignal): Promise<void> {
 async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   let response: Response
   try {
-    response = await fetch(`${config.baseUrl}${path}`, {
-      headers: { Accept: 'application/json' },
+    response = await liveRequestLimiter.run(
+      () => fetch(`${config.baseUrl}${path}`, {
+        headers: { Accept: 'application/json' },
+        signal,
+      }),
       signal,
-    })
+    )
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error
     throw new ApiClientError('The evidence service could not be reached.', 0, 'network_error')
