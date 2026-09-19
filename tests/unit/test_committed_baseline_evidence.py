@@ -143,4 +143,53 @@ def test_query_identity_and_public_claim_boundary_are_consistent() -> None:
     assert claim["validation_baseline_ranking_and_score_reproducibility_verified"] is True
     assert claim["validation_baseline_latency_reproducibility_verified"] is False
     assert claim["validation_baseline_clean_checkout_reproducibility_verified"] is False
-    assert claim["baselines_verified"] is False
+    assert claim["baselines_verified"] is True
+    assert claim["validation_baseline_bundle_published"] is True
+    assert claim["candidate_trained"] is False
+    assert claim["heldout_evaluation_completed"] is False
+    assert claim["candidate_promoted"] is False
+    assert claim["public_demo_deployed"] is False
+
+    assert status["full_prd_completed"] is False
+    assert status["current_evidence_mode"] == "validation_only"
+    assert status["release_evidence_modes"]["validation_only"] == {
+        "bundle_published": True,
+        "required_test_access_count": 0,
+        "held_out_claims_allowed": False,
+    }
+    assert status["verified_result"] is None
+    assert status["public_demo_url"] is None
+    assert status["evidence_manifest_sha256"] is None
+
+    validation = status["validation_result"]
+    assert validation["scope"] == "validation_only"
+    assert validation["query_count"] == 2057
+    assert validation["test_access_count"] == 0
+    assert validation["active_system"]["weights_updated_by_project"] is False
+    assert validation["active_system"]["revision"] in evidence["strongest_unchanged_baseline"][
+        "model_id"
+    ]
+    assert validation["reproducibility"] == {
+        "separate_scoring_processes": 2,
+        "quality_metrics_exact_match": True,
+        "rank_order_exact_match": True,
+        "scores_exact_match": True,
+        "controlled_latency_reproduction_complete": False,
+        "clean_checkout_reproduction_complete": False,
+    }
+
+    active_metrics = evidence["systems"][
+        "pretrained-cross-encoder@233902d25c440f23af6f7d6e94d2946bac0bee0a-enriched_v1"
+    ]["quality_metrics"]
+    comparison_metrics = evidence["systems"][
+        "bm25-v1-text_enriched_v1-unicode_words_casefold_v1-k1-1.5-b-0.75"
+    ]["quality_metrics"]
+    for metric_name, status_metric in validation["metrics"].items():
+        assert status_metric["active_system"] == active_metrics[metric_name]
+        assert status_metric["comparison_system"] == comparison_metrics[metric_name]
+        assert math.isclose(
+            status_metric["difference"],
+            active_metrics[metric_name] - comparison_metrics[metric_name],
+            rel_tol=0,
+            abs_tol=1e-15,
+        )

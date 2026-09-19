@@ -1,51 +1,51 @@
-# Two-minute demo script
+# Two-minute demo script: validation-only portfolio release
 
-Status: narration template; bracketed fields must come from verified public evidence. If the candidate gate fails, use the negative-result variant.
+Status: ready for the current unchanged cross-encoder release. Add the verified CloudFront URL and exact production latency only after the final deployment artifact and independent browser smoke test succeed.
 
-## 0:00–0:15 — Shopper problem
+## 0:00–0:20 — Rank a query
 
-“Short shopping queries can reward products that repeat the words without satisfying the likely intent. This platform reranks a supplied set of products; it is not a full marketplace search engine.”
+Open the **Rank** tab. Select a curated ambiguous shopping query and run it.
 
-Show the minimalist overview: one sentence, one verified outcome banner, and no decorative metric claims.
+“This service reranks a supplied set of products. The action is the interface: choose a query, run the ranker, and inspect what moved. It is not a landing page and it does not retrieve an entire marketplace catalog.”
 
-## 0:15–0:35 — Ambiguous query
+Point out the bounded candidate count and the clear loading/error state if the model is starting cold.
 
-Choose the first example produced by the documented selection procedure. Show the same candidate set under `[strongest unchanged baseline]` and `[promoted or evaluated candidate]`. State whether labels are benchmark annotations.
+## 0:20–0:50 — Compare semantic and lexical ranking
 
-## 0:35–0:55 — Model change
+Show the same candidates under the pinned cross-encoder and enriched-text BM25.
 
-“The candidate uses the same compact cross-encoder as the unchanged baseline, then fine-tunes it on graded Exact, Substitute, Complement, and Irrelevant judgments with a controlled mix of difficult and random training examples.”
+“The active model is the unchanged `cross-encoder/ms-marco-MiniLM-L6-v2` at an exact revision. It scores each query/product pair using enriched product text. BM25 is the lexical reference. No weights were fine-tuned by this project.”
 
-Show the exact model revision, config hash, and mandatory ablations only if their artifacts exist.
+Pick one visible rank movement and explain only what the displayed text supports. Use “consistent with the query” rather than asserting unobserved shopper intent.
 
-## 0:55–1:15 — Representative win
+## 0:50–1:20 — Show measured quality
 
-Show a deterministically selected win, the rank movement, and the relevant text evidence. Use “consistent with” rather than claiming the shopper’s unobserved intent.
+Open the **Evidence** tab.
 
-## 1:15–1:35 — Representative loss
+“On 2,057 validation query groups, the pinned cross-encoder reached 0.849037 graded nDCG@10 versus 0.821627 for enriched-text BM25, a descriptive difference of 0.027410. Exact MRR@10 was 0.819114 versus 0.741932, and exact top-1 rate was 0.721439 versus 0.610112.”
 
-Show a required loss or slice regression. Explain why the baseline was preferable and link to the failure report. Do not minimize the loss.
+“Two separate scoring processes reproduced every quality metric, rank, and score exactly. These are validation results, not held-out test claims, and the official test split was not accessed.”
 
-## 1:35–1:55 — Aggregate evidence
+## 1:20–1:45 — Show production evidence
 
-State only report-backed fields:
+Show the release and operations sections in **Evidence**.
 
-“On `[query count]` held-out query groups, the candidate changed project-defined graded nDCG@10 by `[delta]` versus `[baseline]`; the paired 95% interval was `[lower, upper]`. Warm p95 for 40 candidates was `[milliseconds]` on `[Lambda configuration]`, with cold starts reported separately.”
+“The same release identity connects the model revision, data/configuration hashes, container, Lambda version, and public UI. Cold start is reported separately from the warmed request matrix.”
 
-If the gate failed, say:
+After final activation, read the warm p95 and cold observation directly from the live Evidence tab. Do not substitute numbers from an incomplete workflow run.
 
-“The candidate did not clear the preregistered confidence gate. The prior baseline remains promoted, and the negative report, losses, and one validation-only next experiment are published.”
+## 1:45–2:00 — State the boundary
 
-## 1:55–2:00 — Engineering boundary
+“This release proves the complete baseline path: deterministic data, reproducible semantic ranking, immutable evidence, a bounded API, and a public interface. The repository also implements a guarded fine-tuning and held-out evaluation path, but that path has not run, so I do not claim a trained candidate or held-out improvement.”
 
-Show the public provenance fields linking the semantic data hash, canonical split-manifest hash, code commit, container digest, cloud job, checkpoint, report, and release. End with: “It reranks supplied candidates; it does not retrieve an entire catalog or measure customer conversion.”
+End on the **Rank** tab with the result still visible.
 
 ## Presenter checklist
 
-- [ ] Demo URL is the generated CloudFront domain and has passed current smoke tests.
-- [ ] Every spoken number resolves to a checksummed public report field.
-- [ ] One win and one loss are visible without scrolling through hidden panels.
+- [ ] The URL is the generated CloudFront domain and has passed an independent current smoke test.
+- [ ] The interface shows live API data, not fixture mode.
+- [ ] Every spoken quality value matches the committed validation evidence.
+- [ ] Production latency values are read from the successful deployment artifact/live Evidence tab.
 - [ ] Cold and warm latency are not conflated.
-- [ ] AWS services named in narration have actual completed-workload evidence.
+- [ ] No task-specific fine-tuning, held-out test result, promotion, rollback, or customer-impact claim is made.
 - [ ] No account ID, bucket path, signed URL, private product text, or internal stack trace appears.
-- [ ] Visual presentation remains restrained and readable, but limitations and uncertainty are prominent.

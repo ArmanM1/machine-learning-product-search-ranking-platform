@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0.0",
-  "as_of": "2026-09-18",
-  "project_status": "cloud_foundation_and_dataset_live",
+  "as_of": "2026-09-19",
+  "project_status": "validation_only_baseline_release_ready_for_public_activation",
   "public_repository_url": "https://github.com/ArmanM1/machine-learning-product-search-ranking-platform",
   "full_prd_completed": false,
   "milestone_0_accepted": false,
@@ -32,16 +32,16 @@
     "dataset_pipeline_verified": true,
     "dataset_cloud_publication_verified": true,
     "cloud_foundation_applied": true,
-    "terraform_no_drift_verified": true,
+    "terraform_no_drift_verified": false,
     "live_training_and_processing_quota_probe_verified": true,
-    "baselines_verified": false,
+    "baselines_verified": true,
     "validation_baseline_two_scoring_processes_completed": true,
     "validation_baseline_quality_reproducibility_verified": true,
     "validation_baseline_ranking_and_score_reproducibility_verified": true,
     "validation_baseline_latency_reproducibility_verified": false,
     "validation_baseline_clean_checkout_reproducibility_verified": false,
     "candidate_trained": false,
-    "validation_baseline_bundle_published": false,
+    "validation_baseline_bundle_published": true,
     "heldout_evaluation_completed": false,
     "candidate_promoted": false,
     "aws_training_executed": false,
@@ -55,10 +55,10 @@
   "aws_apply_completed": true,
   "terraform_managed_resource_count": 57,
   "aws_apply_blockers": [],
-  "current_evidence_mode": null,
+  "current_evidence_mode": "validation_only",
   "release_evidence_modes": {
     "validation_only": {
-      "bundle_published": false,
+      "bundle_published": true,
       "required_test_access_count": 0,
       "held_out_claims_allowed": false
     },
@@ -68,9 +68,51 @@
       "heldout_evaluation_completed": false
     }
   },
+  "validation_result": {
+    "scope": "validation_only",
+    "query_count": 2057,
+    "test_access_count": 0,
+    "active_system": {
+      "name": "cross-encoder/ms-marco-MiniLM-L6-v2",
+      "revision": "233902d25c440f23af6f7d6e94d2946bac0bee0a",
+      "input_representation": "enriched_product_text",
+      "weights_updated_by_project": false
+    },
+    "comparison_system": "enriched_text_bm25",
+    "metrics": {
+      "graded_ndcg@10": {
+        "active_system": 0.8490371644459062,
+        "comparison_system": 0.8216266804499482,
+        "difference": 0.027410483995958
+      },
+      "exact_mrr@10": {
+        "active_system": 0.8191143675100895,
+        "comparison_system": 0.7419319242848654,
+        "difference": 0.0771824432252241
+      },
+      "exact_top_1_rate": {
+        "active_system": 0.721438988818668,
+        "comparison_system": 0.6101118133203695,
+        "difference": 0.1113271754982985
+      }
+    },
+    "reproducibility": {
+      "separate_scoring_processes": 2,
+      "quality_metrics_exact_match": true,
+      "rank_order_exact_match": true,
+      "scores_exact_match": true,
+      "controlled_latency_reproduction_complete": false,
+      "clean_checkout_reproduction_complete": false
+    },
+    "limitations": [
+      "Validation-only comparison; no held-out generalization claim.",
+      "The active model is unchanged; no project-specific fine-tuning claim.",
+      "Differences are descriptive and do not include a paired confidence interval."
+    ]
+  },
   "verified_result": null,
   "public_demo_url": null,
   "current_release_id": null,
   "evidence_manifest_sha256": null,
-  "note": "The owner authorized the remaining bounded AWS work despite the acknowledged absence of a hard USD 0 guarantee. Bootstrap and production Terraform are applied, a post-apply plan found no drift, live quota probes confirm the selected training and processing capacity, and the clean cloud data-preparation workflow published the current dataset and split identities recorded in evidence/cloud/live-data-preparation.json. Two historical local validation scoring processes reproduced all six quality vectors and every rank and score exactly, but their uncontrolled p95 timings varied, so the broad baselines_verified flag remains false until the protected cloud baseline completes. No release evidence mode is current until an immutable bundle is published; candidate training, held-out evaluation, public deployment, benchmark, rollback, and redeployment remain pending."
+  "note": "The content-addressed dataset, two-process validation scoring, exact quality/ranking reproduction, and immutable validation-only baseline bundle are complete. The strongest unchanged system is the pinned cross-encoder over enriched product text. A final deployment is reconciling the remaining serving-surface drift and has not yet produced a successful public-activation artifact, so public_demo_deployed remains false and the URL/checksum fields remain null. Candidate training, held-out evaluation, candidate promotion, rollback proof, and teardown proof remain unexecuted."
 }
