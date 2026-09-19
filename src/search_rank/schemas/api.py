@@ -171,7 +171,7 @@ class CuratedQuerySummary(ContractModel):
 
 class RankRequest(ContractModel):
     query_id: PublicRequestIdentifier
-    model_id: PublicRequestIdentifier
+    model_id: PublicModelIdentifier
     top_k: Annotated[int, Field(ge=1, le=40)] = 10
 
 

@@ -23,9 +23,12 @@ OTHER_EVALUATION_GIT_SHA = "c" * 40
 
 
 def test_rank_request_applies_default_and_bounds() -> None:
-    assert RankRequest(query_id="q", model_id="m").top_k == 10
+    assert RankRequest(query_id="q", model_id="model-v1").top_k == 10
+    assert RankRequest(query_id="q", model_id="pretrained-cross-encoder@revision").top_k == 10
     with pytest.raises(ValidationError, match="less_than_equal"):
-        RankRequest(query_id="q", model_id="m", top_k=41)
+        RankRequest(query_id="q", model_id="model-v1", top_k=41)
+    with pytest.raises(ValidationError, match="string_pattern_mismatch"):
+        RankRequest(query_id="q", model_id="models/private/checkpoint")
 
 
 def test_rank_response_enforces_provenance_counts_and_contiguous_ranks() -> None:

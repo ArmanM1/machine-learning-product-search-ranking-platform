@@ -26,6 +26,7 @@ from search_rank.schemas.api import (
     HealthResponse,
     ModelSummary,
     PublicEvidenceEnvelope,
+    PublicModelIdentifier,
     PublicOperationsEvidence,
     PublicRequestIdentifier,
     RankedProduct,
@@ -385,8 +386,8 @@ def create_app(
     async def comparison(
         request: Request,
         query_id: PublicRequestIdentifier,
-        baseline: PublicRequestIdentifier,
-        candidate: PublicRequestIdentifier,
+        baseline: PublicModelIdentifier,
+        candidate: PublicModelIdentifier,
         include_judgments: bool = False,
     ) -> ComparisonResponse | JSONResponse:
         if not service_state.ready:
