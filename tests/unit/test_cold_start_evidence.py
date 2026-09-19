@@ -14,7 +14,7 @@ VERSION = "7"
 MODEL_ID = "candidate-v1"
 DATASET_HASH = "sha256:" + "a" * 64
 MODEL_CHECKSUM = "sha256:" + "b" * 64
-REQUEST_ID = "cold-123-1-v7"
+REQUEST_ID = "11111111-2222-4333-8444-555555555555"
 STREAM = "2026/09/02/[7]abcdef123456"
 
 
@@ -172,6 +172,8 @@ def test_cloud_workflows_keep_controlled_cold_and_warm_measurements_separate() -
     assert "candidate-cold-prior-events-private.json" in deploy
     assert "--previous-version" in deploy
     assert "--qualifier candidate" in deploy
+    assert 'cold_request_id="$(python -c \'import uuid; print(uuid.uuid4())\')"' in deploy
+    assert 'cold_request_id="cold-${GITHUB_RUN_ID}' not in deploy
     assert 'controlled_cold_sample_included": False' in deploy
     assert "--slurpfile controlled_cold_start candidate-cold-start.json" in deploy
     assert '"measurement_class": "warm_after_explicit_per_condition_warmups"' in benchmark

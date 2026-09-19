@@ -997,7 +997,7 @@ jobs:
           model_checksum="$(jq -er --arg model "${MODEL_ID}" \
             '.models[] | select(.model_id == $model) | .artifact_checksum' \
             .release/model/release-manifest.json)"
-          cold_request_id="cold-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-v${candidate_version}"
+          cold_request_id="$(python -c 'import uuid; print(uuid.uuid4())')"
           ((${#cold_request_id} <= 128))
           cold_payload="$(jq -cn \
             --arg query "${query_id}" \
@@ -1010,7 +1010,7 @@ jobs:
             "${GITHUB_WORKSPACE}/scripts/validate_financial_snapshot.py" emit \
             --output /dev/null
           cold_result="$(curl \
-            --silent --show-error --connect-timeout 10 --max-time 120 \
+            --silent --show-error --connect-timeout 10 --max-time 135 \
             --aws-sigv4 "aws:amz:${AWS_REGION}:lambda" \
             --user "${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}" \
             --header "x-amz-security-token: ${AWS_SESSION_TOKEN}" \
@@ -2781,7 +2781,13 @@ jobs:
 
           config = json.loads(Path("function-private.json").read_text(encoding="utf-8"))
           logs = json.loads(Path("logs-private.json").read_text(encoding="utf-8"))
-          events = logs.get("events", [])
+          candidate_version = str(config.get("Version", ""))
+          stream_marker = f"[{candidate_version}]"
+          events = [
+              event
+              for event in logs.get("events", [])
+              if stream_marker in str(event.get("logStreamName", ""))
+          ]
           platform = Counter()
           application = Counter()
           reports = []
@@ -2819,7 +2825,19 @@ jobs:
               except (TypeError, ValueError):
                   continue
               name = payload.get("message")
+              if name == "service_startup_phase":
+                  phase = payload.get("phase")
+                  if phase in {
+                      "validate_release",
+                      "load_public_evidence",
+                      "load_curated_queries",
+                      "load_rankers",
+                  }:
+                      application[f"service_startup_phase:{phase}"] += 1
+                  continue
               if name in {
+                  "lambda_bootstrap_import_started",
+                  "lambda_bootstrap_import_succeeded",
                   "service_startup_success",
                   "service_startup_failed",
                   "api_request",

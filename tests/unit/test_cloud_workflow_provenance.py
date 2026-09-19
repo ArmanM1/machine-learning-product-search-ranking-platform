@@ -379,6 +379,14 @@ def test_release_deploy_and_benchmark_inline_python_is_syntactically_valid() -> 
             compile(snippet, f"{workflow_name}-inline-{index}.py", "exec")
 
 
+def test_deploy_diagnostics_are_scoped_to_the_candidate_version() -> None:
+    workflow = (WORKFLOWS / "deploy.yml").read_text(encoding="utf-8")
+
+    assert 'candidate_version = str(config.get("Version", ""))' in workflow
+    assert 'stream_marker = f"[{candidate_version}]"' in workflow
+    assert 'if stream_marker in str(event.get("logStreamName", ""))' in workflow
+
+
 def test_benchmark_validates_then_immutably_publishes_and_revalidates_readback() -> None:
     workflow = (WORKFLOWS / "benchmark-serving.yml").read_text(encoding="utf-8")
     validator = (ROOT / "scripts" / "validate_benchmark_contracts.py").read_text(encoding="utf-8")
@@ -894,7 +902,7 @@ def test_first_deploy_keeps_public_serving_private_until_candidate_gates_pass() 
         deploy.index("Measure the newly published candidate's first on-demand invocation") : candidate_gate
     ]
     warm_gate_section = deploy[candidate_gate:public_publish]
-    assert "--max-time 120" in cold_start_section
+    assert "--max-time 135" in cold_start_section
     assert "--max-time 30" in warm_gate_section
     timeout_variable = module_variables.split('variable "lambda_timeout_seconds" {', 1)[1].split(
         "}\n", 1
