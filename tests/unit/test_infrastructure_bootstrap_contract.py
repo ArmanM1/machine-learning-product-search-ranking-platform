@@ -584,7 +584,24 @@ def test_infrastructure_and_production_roles_have_separate_non_escalating_author
     assert 'variable = "s3:prefix"' in deployment_bucket_list
     assert "local.artifact_bucket_arn" in deployment_bucket_list
     assert "local.site_bucket_arn" in deployment_bucket_list
-    assert 'actions   = ["apigateway:POST"]' in production
+    for policy in (infrastructure, production):
+        api_gateway_create = next(
+            block
+            for block in policy.split("statement {")
+            if '"arn:${local.partition}:apigateway:${var.aws_region}::/apis"' in block
+        )
+        assert 'actions = ["apigateway:POST"]' in api_gateway_create
+        assert (
+            '"arn:${local.partition}:apigateway:${var.aws_region}::/tags/'
+            'arn%3A${local.partition}%3Aapigateway%3A${var.aws_region}'
+            '%3A%3A%2Fv2%2Fapis%2F*"'
+            in api_gateway_create
+        )
+        assert '::/tags/*"' not in api_gateway_create
+        assert 'variable = "aws:RequestTag/Project"' in api_gateway_create
+        assert 'variable = "aws:RequestTag/Environment"' in api_gateway_create
+        assert "apigateway:PATCH" not in api_gateway_create
+        assert "apigateway:PUT" not in api_gateway_create
     assert (
         'actions   = ["cloudfront:CreateDistribution", "cloudfront:CreateFunction", "cloudfront:TagResource"]'
         in production

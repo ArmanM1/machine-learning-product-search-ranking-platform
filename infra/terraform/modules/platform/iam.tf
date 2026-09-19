@@ -1257,9 +1257,14 @@ data "aws_iam_policy_document" "github_terraform" {
   }
 
   statement {
-    effect    = "Allow"
-    actions   = ["apigateway:POST"]
-    resources = ["arn:${local.partition}:apigateway:${var.aws_region}::/apis"]
+    effect  = "Allow"
+    actions = ["apigateway:POST"]
+    resources = [
+      "arn:${local.partition}:apigateway:${var.aws_region}::/apis",
+      # API Gateway authorizes tags supplied to CreateApi/CreateStage against a
+      # separate, URL-encoded /tags resource before the new API has an ID.
+      "arn:${local.partition}:apigateway:${var.aws_region}::/tags/arn%3A${local.partition}%3Aapigateway%3A${var.aws_region}%3A%3A%2Fv2%2Fapis%2F*",
+    ]
 
     condition {
       test     = "StringEquals"
@@ -1625,9 +1630,14 @@ data "aws_iam_policy_document" "github_production_terraform" {
   }
 
   statement {
-    effect    = "Allow"
-    actions   = ["apigateway:POST"]
-    resources = ["arn:${local.partition}:apigateway:${var.aws_region}::/apis"]
+    effect  = "Allow"
+    actions = ["apigateway:POST"]
+    resources = [
+      "arn:${local.partition}:apigateway:${var.aws_region}::/apis",
+      # API Gateway authorizes tags supplied to CreateApi/CreateStage against a
+      # separate, URL-encoded /tags resource before the new API has an ID.
+      "arn:${local.partition}:apigateway:${var.aws_region}::/tags/arn%3A${local.partition}%3Aapigateway%3A${var.aws_region}%3A%3A%2Fv2%2Fapis%2F*",
+    ]
     condition {
       test     = "StringEquals"
       variable = "aws:RequestTag/Project"
