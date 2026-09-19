@@ -811,6 +811,7 @@ def test_deploy_static_and_compensation_paths_are_fail_closed() -> None:
     production = deploy.split("name: Verify the activated API", 1)[1].split(
         "name: Automatically restore", 1
     )[0]
+    rollback = deploy.split("name: Prepare rollback browser verification", 1)[1]
 
     assert 'aws s3 sync dist/ "s3://${SITE_BUCKET}/"' not in staged
     assert '"s3://${SITE_BUCKET}/releases/${RELEASE_ID}/"' in activation
@@ -824,6 +825,10 @@ def test_deploy_static_and_compensation_paths_are_fail_closed() -> None:
     assert "await page.locator('.failures-page').waitFor()" in production
     assert "await page.locator('.experiment-page').waitFor()" in production
     assert "await page.locator('main h1, main h2').first().waitFor()" not in production
+    assert "await page.locator('.evaluation-page').waitFor()" in rollback
+    assert "await page.locator('.failures-page').waitFor()" in rollback
+    assert "await page.locator('.experiment-page').waitFor()" in rollback
+    assert "await page.locator('main h1, main h2').first().waitFor()" not in rollback
     assert 'aws s3 rm "s3://${SITE_BUCKET}/index.html" --no-progress' not in deploy
     assert "workflow-restored-alias-revision.txt" in deploy
     assert "alias_restoration_safe" in deploy
