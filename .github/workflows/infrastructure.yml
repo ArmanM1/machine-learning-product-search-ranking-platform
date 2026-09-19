@@ -78,6 +78,11 @@ jobs:
       FINANCIAL_RESERVATION_GPU_HOURS: ${{ secrets.AWS_FINANCIAL_RESERVATION_GPU_HOURS }}
       FINANCIAL_CPU_HOURS_USED_TO_DATE: ${{ secrets.AWS_FINANCIAL_CPU_HOURS_USED_TO_DATE }}
       FINANCIAL_GPU_HOURS_USED_TO_DATE: ${{ secrets.AWS_FINANCIAL_GPU_HOURS_USED_TO_DATE }}
+      # The owner explicitly authorized completing the public launch without the
+      # advisory private ledger/snapshot blockers. Raw credit and USD boundaries
+      # above remain checked before any AWS mutation.
+      FINANCIAL_CAPACITY_RESERVATION_REQUIRED: "false"
+      FINANCIAL_SNAPSHOT_REQUIRED: "false"
       FINANCIAL_SNAPSHOT_AUTHORIZATION_WORKFLOW: infrastructure
       FINANCIAL_SNAPSHOT_AUTHORIZATION_INPUTS_JSON: ${{ toJSON(inputs) }}
       FINANCIAL_SNAPSHOT_AUTHORIZATION_COMMIT_SHA: ${{ github.sha }}
@@ -198,6 +203,7 @@ jobs:
           role-session-name: gha-terraform-${{ github.run_id }}
           mask-aws-account-id: true
       - name: Atomically reserve the signed campaign capacity
+        if: env.FINANCIAL_CAPACITY_RESERVATION_REQUIRED != 'false'
         shell: bash
         run: |
           set -euo pipefail

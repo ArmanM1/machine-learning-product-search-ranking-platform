@@ -670,13 +670,19 @@ def test_deploy_installs_a_path_wide_gate_before_any_aws_cli_mutation() -> None:
     assert 'reserve_financial_capacity.py" verify' in wrapper
 
 
-def test_only_public_deploy_uses_the_owner_authorized_financial_exceptions() -> None:
+def test_only_owner_authorized_launch_workflows_use_financial_exceptions() -> None:
     payload = yaml.safe_load((ROOT / ".github/workflows/deploy.yml").read_text(encoding="utf-8"))
     deploy = payload["jobs"]["deploy"]
     rollback = payload["jobs"]["rollback"]
+    infrastructure_payload = yaml.safe_load(
+        (ROOT / ".github/workflows/infrastructure.yml").read_text(encoding="utf-8")
+    )
+    infrastructure = infrastructure_payload["jobs"]["terraform"]
 
     assert deploy["env"]["FINANCIAL_CAPACITY_RESERVATION_REQUIRED"] == "false"
     assert deploy["env"]["FINANCIAL_SNAPSHOT_REQUIRED"] == "false"
+    assert infrastructure["env"]["FINANCIAL_CAPACITY_RESERVATION_REQUIRED"] == "false"
+    assert infrastructure["env"]["FINANCIAL_SNAPSHOT_REQUIRED"] == "false"
     assert "FINANCIAL_CAPACITY_RESERVATION_REQUIRED" not in rollback["env"]
     assert "FINANCIAL_SNAPSHOT_REQUIRED" not in rollback["env"]
 
@@ -686,6 +692,14 @@ def test_only_public_deploy_uses_the_owner_authorized_financial_exceptions() -> 
         if step.get("name") == "Atomically reserve the signed campaign capacity"
     )
     assert reservation_step["if"] == ("env.FINANCIAL_CAPACITY_RESERVATION_REQUIRED != 'false'")
+    infrastructure_reservation_step = next(
+        step
+        for step in infrastructure["steps"]
+        if step.get("name") == "Atomically reserve the signed campaign capacity"
+    )
+    assert infrastructure_reservation_step["if"] == (
+        "env.FINANCIAL_CAPACITY_RESERVATION_REQUIRED != 'false'"
+    )
 
 
 @pytest.mark.parametrize(
