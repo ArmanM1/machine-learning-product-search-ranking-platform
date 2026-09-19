@@ -145,6 +145,12 @@ def _arns(account_id: str, environment: Environment = DEFAULT_ENVIRONMENT) -> di
         ],
         "api_collection": f"arn:aws:apigateway:{REGION}::/apis",
         "api_resources": f"arn:aws:apigateway:{REGION}::/apis*",
+        # API Gateway v2 authorizes tags supplied during CreateApi/CreateStage
+        # against this separate URL-encoded resource before the API has an ID.
+        "api_tag_resources": (
+            f"arn:aws:apigateway:{REGION}::/tags/"
+            f"arn%3Aaws%3Aapigateway%3A{REGION}%3A%3A%2Fv2%2Fapis%2F*"
+        ),
         "cloudfront_distribution": f"arn:aws:cloudfront::{account_id}:distribution/*",
         "cloudfront_function": f"arn:aws:cloudfront::{account_id}:function/{name}-spa-rewrite",
         "event_rules": [
@@ -249,7 +255,7 @@ def build_boundary(
         _statement(
             "ApiC",
             ["apigateway:POST"],
-            [arn["api_collection"]],
+            [arn["api_collection"], arn["api_tag_resources"]],
             request_tags,
         ),
         _statement(

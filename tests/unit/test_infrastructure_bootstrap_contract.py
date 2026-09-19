@@ -87,6 +87,26 @@ def test_external_boundaries_are_environment_exact_and_forbid_identity_or_bucket
         assert "/aws/sagemaker/ProcessingJobs" not in serialized
         assert f"{PROJECT}-{environment}-sagemaker-training-failure" in serialized
         assert f"{PROJECT}-{environment}-sagemaker-processing-failure" in serialized
+        encoded_api_tag_resource = (
+            "arn:aws:apigateway:us-east-1::/tags/"
+            "arn%3Aaws%3Aapigateway%3Aus-east-1%3A%3A%2Fv2%2Fapis%2F*"
+        )
+        api_create = next(
+            statement
+            for statement in boundary["Statement"]
+            if statement.get("Action") == ["apigateway:POST"]
+            and encoded_api_tag_resource in statement.get("Resource", [])
+        )
+        assert api_create["Resource"] == [
+            "arn:aws:apigateway:us-east-1::/apis",
+            encoded_api_tag_resource,
+        ]
+        assert api_create["Condition"] == {
+            "StringEquals": {
+                "aws:RequestTag/Environment": environment,
+                "aws:RequestTag/Project": PROJECT,
+            }
+        }
 
     assert documents["dev"] != documents["prod"]
     assert boundary_name("dev") == f"{PROJECT}-dev-permissions-boundary"
