@@ -933,6 +933,14 @@ def test_first_deploy_keeps_public_serving_private_until_candidate_gates_pass() 
         "}\n", 2
     )[0]
     assert "origin_read_timeout    = 120" in production_origin
+    assert 'data "aws_cloudfront_cache_policy"' not in serving
+    assert 'data "aws_cloudfront_origin_request_policy"' not in serving
+    assert '"658327ea-f89d-4fab-a63d-7e88639e58f6"' in serving
+    assert '"4135ea2d-6df8-44a3-9df3-4b5a84be39ad"' in serving
+    assert '"b689b0a8-53d0-40ab-baf2-68738e2966ac"' in serving
+    assert "local.cloudfront_managed_caching_optimized_id" in serving
+    assert "local.cloudfront_managed_caching_disabled_id" in serving
+    assert "local.cloudfront_managed_all_viewer_except_host_header_id" in serving
 
     iam = (ROOT / "infra/terraform/modules/platform/iam.tf").read_text(encoding="utf-8")
     deployment_policy = iam.split(

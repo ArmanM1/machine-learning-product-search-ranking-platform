@@ -92,27 +92,6 @@ run "public_serving_does_not_implicitly_enable_kill_switch" {
     }
   }
 
-  override_data {
-    target = module.platform.data.aws_cloudfront_cache_policy.optimized[0]
-    values = {
-      id = "managed-caching-optimized"
-    }
-  }
-
-  override_data {
-    target = module.platform.data.aws_cloudfront_cache_policy.disabled[0]
-    values = {
-      id = "managed-caching-disabled"
-    }
-  }
-
-  override_data {
-    target = module.platform.data.aws_cloudfront_origin_request_policy.all_viewer_except_host[0]
-    values = {
-      id = "managed-all-viewer-except-host"
-    }
-  }
-
   assert {
     condition     = output.budget_kill_switch.status == "disabled"
     error_message = "Public serving must not implicitly arm the optional kill switch."
@@ -170,27 +149,6 @@ run "public_serving_kill_switch_requires_explicit_opt_in" {
       partition          = "aws"
       dns_suffix         = "amazonaws.com"
       reverse_dns_prefix = "com.amazonaws"
-    }
-  }
-
-  override_data {
-    target = module.platform.data.aws_cloudfront_cache_policy.optimized[0]
-    values = {
-      id = "managed-caching-optimized"
-    }
-  }
-
-  override_data {
-    target = module.platform.data.aws_cloudfront_cache_policy.disabled[0]
-    values = {
-      id = "managed-caching-disabled"
-    }
-  }
-
-  override_data {
-    target = module.platform.data.aws_cloudfront_origin_request_policy.all_viewer_except_host[0]
-    values = {
-      id = "managed-all-viewer-except-host"
     }
   }
 

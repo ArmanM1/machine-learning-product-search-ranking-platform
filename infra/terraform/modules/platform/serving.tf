@@ -135,19 +135,12 @@ resource "aws_cloudfront_origin_access_control" "site" {
   signing_protocol                  = "sigv4"
 }
 
-data "aws_cloudfront_cache_policy" "optimized" {
-  count = var.enable_public_serving ? 1 : 0
-  name  = "Managed-CachingOptimized"
-}
-
-data "aws_cloudfront_cache_policy" "disabled" {
-  count = var.enable_public_serving ? 1 : 0
-  name  = "Managed-CachingDisabled"
-}
-
-data "aws_cloudfront_origin_request_policy" "all_viewer_except_host" {
-  count = var.enable_public_serving ? 1 : 0
-  name  = "Managed-AllViewerExceptHostHeader"
+locals {
+  # AWS-managed CloudFront policy IDs are global, documented constants. Binding
+  # them directly avoids List* permissions in the restricted production role.
+  cloudfront_managed_caching_optimized_id             = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+  cloudfront_managed_caching_disabled_id              = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
+  cloudfront_managed_all_viewer_except_host_header_id = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
 }
 
 resource "aws_cloudfront_response_headers_policy" "security" {
@@ -247,7 +240,7 @@ resource "aws_cloudfront_distribution" "site" {
     allowed_methods            = ["GET", "HEAD", "OPTIONS"]
     cached_methods             = ["GET", "HEAD", "OPTIONS"]
     compress                   = true
-    cache_policy_id            = data.aws_cloudfront_cache_policy.optimized[0].id
+    cache_policy_id            = local.cloudfront_managed_caching_optimized_id
     response_headers_policy_id = aws_cloudfront_response_headers_policy.security[0].id
 
     function_association {
@@ -263,8 +256,8 @@ resource "aws_cloudfront_distribution" "site" {
     allowed_methods            = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
     cached_methods             = ["GET", "HEAD", "OPTIONS"]
     compress                   = true
-    cache_policy_id            = data.aws_cloudfront_cache_policy.disabled[0].id
-    origin_request_policy_id   = data.aws_cloudfront_origin_request_policy.all_viewer_except_host[0].id
+    cache_policy_id            = local.cloudfront_managed_caching_disabled_id
+    origin_request_policy_id   = local.cloudfront_managed_all_viewer_except_host_header_id
     response_headers_policy_id = aws_cloudfront_response_headers_policy.security[0].id
   }
 
@@ -275,8 +268,8 @@ resource "aws_cloudfront_distribution" "site" {
     allowed_methods            = ["GET", "HEAD", "OPTIONS"]
     cached_methods             = ["GET", "HEAD", "OPTIONS"]
     compress                   = true
-    cache_policy_id            = data.aws_cloudfront_cache_policy.disabled[0].id
-    origin_request_policy_id   = data.aws_cloudfront_origin_request_policy.all_viewer_except_host[0].id
+    cache_policy_id            = local.cloudfront_managed_caching_disabled_id
+    origin_request_policy_id   = local.cloudfront_managed_all_viewer_except_host_header_id
     response_headers_policy_id = aws_cloudfront_response_headers_policy.security[0].id
   }
 
@@ -287,8 +280,8 @@ resource "aws_cloudfront_distribution" "site" {
     allowed_methods            = ["GET", "HEAD", "OPTIONS"]
     cached_methods             = ["GET", "HEAD", "OPTIONS"]
     compress                   = true
-    cache_policy_id            = data.aws_cloudfront_cache_policy.disabled[0].id
-    origin_request_policy_id   = data.aws_cloudfront_origin_request_policy.all_viewer_except_host[0].id
+    cache_policy_id            = local.cloudfront_managed_caching_disabled_id
+    origin_request_policy_id   = local.cloudfront_managed_all_viewer_except_host_header_id
     response_headers_policy_id = aws_cloudfront_response_headers_policy.security[0].id
   }
 
