@@ -479,14 +479,20 @@ jobs:
           model_identity_hash="$(printf '%s' "${MODEL_ID}" | sha256sum | cut -c1-12)"
           model_slug="${MODEL_ID//@/-at-}"
           model_slug="${model_slug:0:80}"
-          release_tag="release-${RELEASE_ID}"
+          # A failed deploy may already have pushed a correct image before a
+          # later workflow-only verification step fails. Include the deploying
+          # revision so a corrected workflow can publish a new immutable image
+          # without deleting or overwriting the prior audit artifact.
+          release_tag="release-${RELEASE_ID}-${GITHUB_SHA}"
           sha_tag="sha-${GITHUB_SHA}-${model_hash}"
           # The repository is immutable. Include the release-manifest hash so a
           # negative result can safely redeploy the retained baseline model ID.
           # The model slug is readable, while the full-identity hash prevents a
           # collision if an unusually long ID is truncated. `@` is never legal
           # in a Docker tag, so pinned model revisions use the explicit `-at-`.
-          model_tag="model-${model_slug}-${model_identity_hash}-${model_hash}"
+          # Bind the alias to the deploying revision as well, so a workflow-only
+          # correction never selects an image labeled for an older commit.
+          model_tag="model-${model_slug}-${model_identity_hash}-${model_hash}-${GITHUB_SHA:0:12}"
           validate_ecr_tag() {
             local tag="$1"
             ((${#tag} >= 1 && ${#tag} <= 128))
@@ -538,7 +544,17 @@ jobs:
             test "$(docker image inspect --format '{{ index .Config.Labels "io.product-search.release-manifest-sha256" }}' "${image_ref}")" = "sha256:${release_manifest_sha256}"
             container_id="$(docker create --entrypoint /bin/true "${image_ref}")"
             mkdir registry-image-release
-            if ! docker cp "${container_id}:/var/task/release/." registry-image-release/; then
+            # The release bundle is intentionally read-only in the image. Stream
+            # its tar archive so directory modes are restored only after nested
+            # paths have been extracted; docker cp otherwise applies a read-only
+            # parent mode before creating models/pretrained.
+            if ! docker cp "${container_id}:/var/task/release/." - |
+              tar --extract \
+                --file - \
+                --directory registry-image-release \
+                --no-same-owner \
+                --no-same-permissions \
+                --delay-directory-restore; then
               docker rm -f "${container_id}" >/dev/null 2>&1 || true
               return 1
             fi
