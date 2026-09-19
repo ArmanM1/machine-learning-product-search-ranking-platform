@@ -1,6 +1,6 @@
 # Two-minute demo script: validation-only portfolio release
 
-Status: ready for the current unchanged cross-encoder release. Add the verified CloudFront URL and exact production latency only after the final deployment artifact and independent browser smoke test succeed.
+Status: ready for the live unchanged cross-encoder release at [the CloudFront demo](https://d28luwf0s38h38.cloudfront.net). Production activation and independent desktop/mobile/keyboard verification succeeded.
 
 ## 0:00–0:20 — Rank a query
 
@@ -32,7 +32,9 @@ Show the release and operations sections in **Evidence**.
 
 “The same release identity connects the model revision, data/configuration hashes, container, Lambda version, and public UI. Cold start is reported separately from the warmed request matrix.”
 
-After final activation, read the warm p95 and cold observation directly from the live Evidence tab. Do not substitute numbers from an incomplete workflow run.
+“The warm acceptance gate ran 200 requests with 40 candidates at concurrency one after 10 warmups. All 200 succeeded. End-to-end p95 was 3182.1945 milliseconds and model p95 was 3045.0259365 milliseconds. The separate one-sample cold observation was 110595.374 milliseconds end to end, including 8477.82 milliseconds of Lambda initialization and 92454.36681 milliseconds of model load; it is excluded from the warm percentiles.”
+
+State that this is a deployment acceptance gate, not a throughput or scaling benchmark. The production activation smoke also completed 25/25 requests with zero errors.
 
 ## 1:45–2:00 — State the boundary
 
@@ -42,10 +44,10 @@ End on the **Rank** tab with the result still visible.
 
 ## Presenter checklist
 
-- [ ] The URL is the generated CloudFront domain and has passed an independent current smoke test.
-- [ ] The interface shows live API data, not fixture mode.
-- [ ] Every spoken quality value matches the committed validation evidence.
-- [ ] Production latency values are read from the successful deployment artifact/live Evidence tab.
-- [ ] Cold and warm latency are not conflated.
-- [ ] No task-specific fine-tuning, held-out test result, promotion, rollback, or customer-impact claim is made.
-- [ ] No account ID, bucket path, signed URL, private product text, or internal stack trace appears.
+- [x] The generated CloudFront URL passed an independent current smoke test.
+- [x] Rank, Evidence, Evaluation, Failures, and Run details show live API data on desktop and mobile with keyboard navigation.
+- [x] Every spoken quality value matches the committed validation evidence.
+- [x] Production latency values come from the successful sanitized deployment artifact.
+- [x] Cold and warm latency are not conflated.
+- [x] No task-specific fine-tuning, held-out test result, promotion, rollback, or customer-impact claim is made.
+- [x] No account ID, bucket path, signed URL, private product text, or internal stack trace appears.

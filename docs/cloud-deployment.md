@@ -1,6 +1,6 @@
 # AWS cloud deployment
 
-Status: bootstrap and production Terraform are applied in `us-east-1`; workflow-bound GitHub OIDC roles are live, the private campaign ledger is initialized, the immutable dataset and validation-only baseline bundle are published, and live quota probes confirmed capacity for the optional Training and Processing path. The baseline serving candidate passed its private API, cold-start, 200-request warm, and staged CloudFront browser gates. A subsequent read-only plan found two expected in-place serving-surface updates, so the repository does not currently claim no drift or successful public activation. No candidate training, held-out evaluation, or trained-model promotion is claimed.
+Status: bootstrap and production Terraform are applied in `us-east-1`; workflow-bound GitHub OIDC roles are live, the private campaign ledger is initialized, and the immutable dataset and validation-only baseline bundle are published. The final deployment reconciled the expected in-place serving updates, activated the baseline, passed 25/25 production API smoke requests with zero errors, and passed workflow plus independent browser verification at [the generated CloudFront domain](https://d28luwf0s38h38.cloudfront.net). No separate post-activation no-drift plan is claimed. No candidate training, held-out evaluation, or trained-model promotion has run.
 
 ## Prerequisite evidence
 
@@ -473,5 +473,5 @@ full typed and cross-artifact validation against the readback directory. There i
 
 - Root/account-owner MFA remains declined as an accepted exception; this does not block the remaining protected workflows.
 - Training, evaluation, publication, image, data, infrastructure, and rollback mutations still require an operation-bound fresh financial receipt and the appropriate exact authorization phrase. The explicitly owner-authorized public-demo deployment retains the narrow documented receipt/ledger exception and still requires its deployment authorization phrase.
-- Final public activation, independent browser verification, and the successful deployment artifact remain pending; no public URL is a portfolio claim before those checks pass.
+- Public activation and independent browser verification are complete at `https://d28luwf0s38h38.cloudfront.net`; `/`, `/healthz`, `/readyz`, and `/api/v1/operations` returned HTTP 200 in the final verification. `/openapi.json` is intentionally not routed through CloudFront and returned HTTP 403, so the public documentation points to the committed source schemas instead.
 - Candidate training, frozen trial selection, the two clean held-out jobs, candidate deployment, benchmark, rollback, and exact redeployment must complete before the project claims a `verified` trained-candidate release. They are not prerequisites for honestly publishing the separate `validation_only` baseline portfolio release.

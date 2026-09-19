@@ -1,6 +1,6 @@
 # Architecture
 
-Status: the AWS foundation and content-addressed dataset are live, and the immutable validation-only baseline bundle is published. The pinned unchanged cross-encoder has passed the private API, cold-start, 200-request warm, and staged browser gates. A final deployment must still reconcile the serving surface and produce successful public-activation evidence. Candidate training, held-out evaluation, post-deployment benchmark, and rollback proof remain unexecuted.
+Status: the AWS foundation, content-addressed dataset, immutable validation-only baseline bundle, Lambda API, and [CloudFront interface](https://d28luwf0s38h38.cloudfront.net) are live. The pinned unchanged cross-encoder passed the private gates, public activation, 25-request production API smoke, workflow browser checks, and independent desktop/mobile/keyboard verification. Candidate training, held-out evaluation, the optional post-deployment benchmark, and rollback proof remain unexecuted.
 
 ## Product boundary
 
@@ -131,7 +131,7 @@ The deploy workflow first inspects Terraform state. An existing public surface r
 
 Staged browser requests map every static URL to the immutable `releases/<release-id>/` prefix, so no live-root object changes. Because the public CloudFront API origin targets `production`, the same-origin staged browser check uses a brief revision-ID-CAS canary transition and immediately restores the exact captured alias revision; a restoration failure disables Lambda traffic and is retried by final compensation. Durable activation then CAS-moves the alias, copies the complete static release, verifies the exact CloudFront root and every release object byte plus desktop/mobile/keyboard flows, and only afterward advances the model pointer. Activation and manual rollback install `EXIT`, `INT`, and `TERM` compensation before their first mutation; cancellation preserves the original failure status while attempting to restore alias, static bytes, and pointer, and disables Lambda traffic if coherent restoration cannot be proved. Immediately before evidence publication the workflow re-observes the exact production alias revision and resolved runtime image. Any later failure restores the prior alias, full static release, and pointer; an unrecognized concurrent revision is never overwritten. The canonical deployment-evidence key is itself versioned and advances with an ETag precondition, so a retry can record its new Lambda version without erasing earlier successful observations.
 
-The first successfully activated revision will be the reproducible baseline release. Only its completed post-activation evidence can establish the known-good rollback target required before a candidate revision is promoted.
+The first successfully activated revision is the reproducible baseline release. Its completed post-activation evidence establishes the known-good baseline target required before a future candidate revision can be promoted. This does not claim that an actual rollback operation has been verified.
 
 ## Operational limits
 
@@ -146,4 +146,4 @@ The first successfully activated revision will be the reproducible baseline rele
 - Optional public-serving expiry: when explicitly enabled, the first automatic shutdown invocation occurs within 24 hours; recovery is manual and Terraform does not silently restore a tripped surface.
 - Financial envelope: signed operation-specific snapshot plus conditional cumulative ledger reservation. Billing lag, trigger delivery, and already-incurred requests mean this is not a hard USD 0 guarantee.
 
-Validation quality and ranking-reproducibility claims are available in the committed baseline evidence. The incomplete deployment run may inform engineering decisions, but numeric production latency, a public-live claim, and a known-good rollback target remain unavailable until a successful activation artifact passes its final gates.
+Validation quality, ranking reproducibility, and bounded production activation claims are available. The warm acceptance gate completed 200/200 requests for 40 candidates at concurrency 1 after 10 warmups, with 3182.1945 ms end-to-end p95 and 3045.0259365 ms model p95. The separate one-sample cold observation was 110595.374 ms end to end and was excluded from warm percentiles. These measurements are not the optional nine-condition throughput/scaling benchmark.

@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0.0",
   "as_of": "2026-09-19",
-  "project_status": "validation_only_baseline_release_ready_for_public_activation",
+  "project_status": "public_validation_only_baseline_live",
   "public_repository_url": "https://github.com/ArmanM1/machine-learning-product-search-ranking-platform",
   "full_prd_completed": false,
   "milestone_0_accepted": false,
@@ -46,7 +46,7 @@
     "candidate_promoted": false,
     "aws_training_executed": false,
     "aws_processing_executed": false,
-    "public_demo_deployed": false,
+    "public_demo_deployed": true,
     "rollback_verified": false,
     "teardown_verified": false,
     "external_review_completed": false
@@ -111,8 +111,8 @@
     ]
   },
   "verified_result": null,
-  "public_demo_url": null,
+  "public_demo_url": "https://d28luwf0s38h38.cloudfront.net",
   "current_release_id": null,
   "evidence_manifest_sha256": null,
-  "note": "The content-addressed dataset, two-process validation scoring, exact quality/ranking reproduction, and immutable validation-only baseline bundle are complete. The strongest unchanged system is the pinned cross-encoder over enriched product text. A final deployment is reconciling the remaining serving-surface drift and has not yet produced a successful public-activation artifact, so public_demo_deployed remains false and the URL/checksum fields remain null. Candidate training, held-out evaluation, candidate promotion, rollback proof, and teardown proof remain unexecuted."
+  "note": "The content-addressed dataset, two-process validation scoring, exact quality/ranking reproduction, immutable validation-only baseline bundle, public CloudFront activation, and production API/browser verification are complete. Production activation passed 25 of 25 API smoke requests with zero errors; workflow and independent checks verified desktop, mobile, and keyboard flows. The strongest unchanged system is the pinned cross-encoder over enriched product text. Candidate training, held-out evaluation, candidate promotion, the optional full serving benchmark, rollback proof, and teardown proof remain unexecuted. The private release identifier and a canonical evidence-manifest checksum are intentionally not published here."
 }

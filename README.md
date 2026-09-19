@@ -9,11 +9,11 @@ A production-minded product-search reranker that scores a supplied candidate set
 
 The current portfolio release is deliberately scoped to the strongest unchanged model: `cross-encoder/ms-marco-MiniLM-L6-v2` over enriched product text. It is a reproducible **validation-only baseline**, not a claim of project-specific fine-tuning or held-out test performance.
 
-> **Public demo:** final CloudFront activation and independent browser verification are in progress. The generated URL will be placed here only after that verification succeeds.
+> **Live demo:** [Open the Rank interface](https://d28luwf0s38h38.cloudfront.net)
 
-![Minimalist Rank and Evidence interface in illustrative fixture mode](docs/assets/overview-fixture.png)
+![Live minimalist Rank interface served through CloudFront](docs/assets/live-rank.png)
 
-> This repository image is still the explicitly labeled fixture capture. It will be replaced by a live-release capture with the final deployment evidence; its illustrative values are not portfolio claims.
+> Live CloudFront capture after production API, browser, and independent desktop/mobile/keyboard verification.
 
 ## Measured result
 
@@ -26,6 +26,18 @@ The pinned cross-encoder was evaluated twice in separate scoring processes on th
 | Exact top-1 rate | 0.721439 | 0.610112 | +0.111327 |
 
 These are descriptive validation comparisons between unchanged systems. They are not held-out estimates, confidence-bounded improvements, or evidence that the project trained a better model. The full sanitized result is committed in [`evidence/baselines/milestone-2-validation.json`](evidence/baselines/milestone-2-validation.json).
+
+## Live serving result
+
+| Production check | Result |
+|---|---:|
+| API activation smoke | 25/25 successful, 0 errors |
+| Warm acceptance gate | 200/200 successful, 40 candidates, concurrency 1, after 10 warmups |
+| Warm end-to-end p95 | 3182.1945 ms |
+| Warm model p95 | 3045.0259365 ms |
+| Controlled cold observation | 110595.374 ms end to end; 8477.82 ms init; 92454.36681 ms model load |
+
+The cold observation is one on-demand sample and is excluded from the warm percentiles. This is a bounded acceptance gate on a 4,096 MB x86_64 Lambda in `us-east-1` with reserved concurrency 2 and provisioned concurrency 0—not a throughput or scaling benchmark. Independent verification covered Rank, Evidence, Evaluation, Failures, and Run details on desktop and mobile with keyboard navigation, no console warnings or errors, and HTTP 200 for every inspected API request.
 
 ## What this demonstrates
 
@@ -77,7 +89,7 @@ The same-origin demo exposes a small, evidence-first contract:
 | `GET /api/v1/runs/{run_id}` | Sanitized quality, provenance, and limitation evidence |
 | `GET /api/v1/operations` | Version-bound warm serving measurements and cold-start disclosure |
 
-The running service publishes its typed OpenAPI contract at `/openapi.json`; the source models and error semantics live in [`src/search_rank/schemas/api.py`](src/search_rank/schemas/api.py).
+CloudFront intentionally exposes only the bounded application routes above; `/openapi.json` is not publicly routed. The typed source models and error semantics live in [`src/search_rank/schemas/api.py`](src/search_rank/schemas/api.py).
 
 ## Run locally
 
@@ -118,7 +130,7 @@ Cloud writes are restricted to protected GitHub environments on `main`; see [clo
 
 ## Current evidence boundary
 
-The prepared dataset, baseline scoring, two-process quality/ranking reproduction, and immutable validation-only release bundle are complete. Final public activation is still pending, so no public URL or successful production-deployment claim appears in this commit. Project-specific training, held-out evaluation, candidate promotion, rollback proof, and teardown proof remain unexecuted. The machine-readable boundary is [`evidence/status.json`](evidence/status.json).
+The prepared dataset, baseline scoring, two-process quality/ranking reproduction, immutable validation-only release bundle, public CloudFront activation, and independent live verification are complete. Project-specific training, held-out evaluation, candidate promotion, rollback proof, teardown proof, and the optional nine-condition serving benchmark remain unexecuted. The machine-readable boundary is [`evidence/status.json`](evidence/status.json).
 
 ## License and data
 

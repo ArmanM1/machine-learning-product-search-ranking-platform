@@ -148,9 +148,17 @@ def test_query_identity_and_public_claim_boundary_are_consistent() -> None:
     assert claim["candidate_trained"] is False
     assert claim["heldout_evaluation_completed"] is False
     assert claim["candidate_promoted"] is False
-    assert claim["public_demo_deployed"] is False
+    assert claim["public_demo_deployed"] is True
+    assert claim["terraform_no_drift_verified"] is False
+    assert claim["aws_training_executed"] is False
+    assert claim["aws_processing_executed"] is False
+    assert claim["rollback_verified"] is False
+    assert claim["teardown_verified"] is False
+    assert claim["external_review_completed"] is False
 
     assert status["full_prd_completed"] is False
+    assert status["milestone_0_accepted"] is False
+    assert status["project_status"] == "public_validation_only_baseline_live"
     assert status["current_evidence_mode"] == "validation_only"
     assert status["release_evidence_modes"]["validation_only"] == {
         "bundle_published": True,
@@ -158,7 +166,9 @@ def test_query_identity_and_public_claim_boundary_are_consistent() -> None:
         "held_out_claims_allowed": False,
     }
     assert status["verified_result"] is None
-    assert status["public_demo_url"] is None
+    assert status["release_evidence_modes"]["verified"]["bundle_published"] is False
+    assert status["public_demo_url"] == "https://d28luwf0s38h38.cloudfront.net"
+    assert status["current_release_id"] is None
     assert status["evidence_manifest_sha256"] is None
 
     validation = status["validation_result"]

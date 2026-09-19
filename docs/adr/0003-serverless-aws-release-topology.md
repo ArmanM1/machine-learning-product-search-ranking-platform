@@ -1,6 +1,6 @@
 # ADR 0003: Serverless AWS release topology
 
-- Status: accepted and implemented for the validation-only baseline; final public activation evidence is pending
+- Status: accepted, implemented, and publicly activated for the validation-only baseline
 
 ## Decision
 
@@ -8,7 +8,7 @@ Use private immutable images in ECR, optional run-to-completion SageMaker Traini
 
 The serving image contains the active release model. Lambda receives CloudWatch logging permissions and sanitized `public/*` report reads only. It receives no raw-data permission. CloudFront sends `/api/*`, `/healthz`, and `/readyz` to the production Function URL and everything else to the private site bucket. A separate IAM-authenticated candidate Function URL supports pre-activation API checks.
 
-The current release packages the pinned, unchanged cross-encoder in `validation_only` evidence mode. The immutable baseline bundle is published, and the private API, cold-start, 200-request warm, and staged browser gates have run successfully. Durable CloudFront activation and its final successful deployment artifact remain pending; no task-specific SageMaker training or Processing evaluation has run.
+The current release packages the pinned, unchanged cross-encoder in `validation_only` evidence mode. The immutable baseline bundle is published, and the private API, cold-start, 200-request warm, staged browser, durable CloudFront activation, production API, and independent browser checks completed successfully. No task-specific SageMaker Training or Processing evaluation has run.
 
 ## Why
 

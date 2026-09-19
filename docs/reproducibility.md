@@ -1,6 +1,6 @@
 # Reproducibility
 
-Status: the clean, commit-bound cloud preparation published the current `query-split-manifest-v1` identity and content-addressed dataset. Two separate validation scoring processes reproduced every quality metric, rank, and score for all six baseline systems, and the protected workflow published the immutable validation-only baseline bundle with zero test access. Final public activation remains pending. Candidate training and held-out evaluation have not run.
+Status: the clean, commit-bound cloud preparation published the current `query-split-manifest-v1` identity and content-addressed dataset. Two separate validation scoring processes reproduced every quality metric, rank, and score for all six baseline systems; the protected workflow published the immutable validation-only baseline bundle with zero test access; and the public deployment passed its API and browser gates. Candidate training and held-out evaluation have not run.
 
 ## Supported environment
 
@@ -185,7 +185,7 @@ The serving benchmark always attempts exactly 200 measured requests for each of 
 | Typed public evidence | initial `promoted/<model-id>/`, then immutable `promoted/releases/<release-id>/public-evidence.json` | Validation-only baseline artifact published with zero test access; verified candidate mode pending and unexecuted |
 | Release manifest | initial `promoted/<model-id>/`, then immutable `promoted/releases/<release-id>/release-manifest.json` | Validation-only baseline artifact published |
 | Exact bundle inventory | initial `promoted/<model-id>/`, then immutable `promoted/releases/<release-id>/bundle-checksums.json` | Validation-only baseline artifact published and verified before staging |
-| Deployment evidence | `public/<release-id>/deployment-evidence.json` | Successful final activation artifact pending |
+| Deployment evidence | `public/<release-id>/deployment-evidence.json` | Successful activation artifact published; 25/25 production API smoke requests and desktop/mobile/keyboard browser checks passed |
 | Performance evidence | `public/<release-id>/performance/<run-id>/performance-report.json` | Pending |
 | Durable portfolio release record | `evidence/releases/<release-id>.json` against `schemas/json/portfolio_release_evidence.schema.json` | Contract/assembler implemented; complete live chain pending |
 

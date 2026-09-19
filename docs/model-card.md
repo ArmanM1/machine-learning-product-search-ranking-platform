@@ -1,6 +1,6 @@
 # Model card: current validation-only reranker
 
-Status: the current portfolio release serves a pinned, unchanged cross-encoder. Its validation quality and ranking output are reproducible; project-specific training and held-out evaluation have not been executed. Final public activation is pending.
+Status: the public portfolio release serves a pinned, unchanged cross-encoder at [the live CloudFront demo](https://d28luwf0s38h38.cloudfront.net). Its validation quality and ranking output are reproducible, and its production API and browser smoke checks passed. Project-specific training and held-out evaluation have not been executed.
 
 ## Current serving model
 
@@ -63,7 +63,9 @@ The reported split is validation, not the official test split. Metrics are macro
 
 The public service contract accepts curated query IDs and at most 40 supplied candidates. The model and tokenizer are embedded in an immutable Lambda container image. Deployment measures a newly published version’s cold request separately from the explicitly warmed request matrix.
 
-The current deployment candidate completed its private API, cold-start, and 200-request warm gates, but the workflow has not yet produced a successful final activation artifact. Exact runtime numbers and the production URL will be added from that successful artifact rather than copied from an incomplete run.
+The successful production activation recorded 25/25 API smoke requests with zero errors. Its warm acceptance gate used 40 candidates at concurrency 1 after 10 explicit warmups: 200/200 measured requests succeeded, end-to-end p95 was 3182.1945 ms, and model p95 was 3045.0259365 ms. The Lambda used 4,096 MB on x86_64 in `us-east-1`, with reserved concurrency 2 and provisioned concurrency 0.
+
+The separately controlled on-demand cold observation was one sample: 110595.374 ms end to end, including 8477.82 ms Lambda initialization and 92454.36681 ms model load. It was excluded from the warm percentiles. The 200-request result is an activation gate at concurrency 1, not the optional nine-condition throughput/scaling benchmark.
 
 ## Reproducibility
 
@@ -71,7 +73,7 @@ The current deployment candidate completed its private API, cold-start, and 200-
 - Data preparation uses deterministic query-level splits and content-addressed manifests.
 - The baseline configuration, validation query set, quality matrix, ranks, and scores are checksum-bound.
 - Two separate local processes reproduced all non-latency ranking fields exactly.
-- Local timing was not reproducible across the two uncontrolled machines/runs, so those local latency values are not used as serving claims.
+- Local timing was not reproducible across the two uncontrolled scoring runs, so those local latency values are not used as serving claims.
 - The validation-only release bundle records zero test access and cannot contain trained-candidate provenance.
 
 ## Limitations and risks
