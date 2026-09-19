@@ -907,6 +907,15 @@ jobs:
           terraform apply -input=false -auto-approve deploy.tfplan
           terraform output -raw lambda_function_name > ../../../../lambda-function-name.txt
           terraform output -raw candidate_api_url > ../../../../candidate-api-url.txt
+          # A failed publication intentionally sets reserved concurrency to zero.
+          # This newly authorized deploy is the explicit recovery boundary; restore
+          # the bounded capacity before collecting any candidate evidence.
+          aws lambda put-function-concurrency \
+            --function-name "$(cat ../../../../lambda-function-name.txt)" \
+            --reserved-concurrent-executions 2 \
+            > ../../../../candidate-concurrency-restored-private.json
+          jq -e '.ReservedConcurrentExecutions == 2' \
+            ../../../../candidate-concurrency-restored-private.json >/dev/null
       - name: Measure the newly published candidate's first on-demand invocation
         shell: bash
         run: |

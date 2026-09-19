@@ -867,6 +867,12 @@ def test_first_deploy_keeps_public_serving_private_until_candidate_gates_pass() 
     assert '-var="enable_public_serving=${public_serving_enabled}"' in private_section
     assert "cloudfront_distribution_id" not in private_section
     assert "cloudfront_url" not in private_section
+    concurrency_restore = private_section.index("candidate-concurrency-restored-private.json")
+    assert private_section.index("terraform apply -input=false -auto-approve deploy.tfplan") < (
+        concurrency_restore
+    )
+    assert "--reserved-concurrent-executions 2" in private_section
+    assert "'.ReservedConcurrentExecutions == 2'" in private_section
     assert 'if [[ "${public_serving_existed}" == "false" ]]' in public_section
     assert '-var="enable_public_serving=true"' in public_section
     assert "public-serving plan unexpectedly deletes or replaces resources" in public_section
