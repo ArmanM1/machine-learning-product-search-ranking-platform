@@ -2,21 +2,47 @@
 
 from __future__ import annotations
 
+import math
+import re
 import time
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, cast
 
 import numpy as np
-from sentence_transformers import CrossEncoder
+import torch
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 from search_rank.artifacts.checksums import sha256_directory, sha256_file
-from search_rank.baselines.bm25 import tokenize
-from search_rank.evaluation.metrics import rank_by_score
 from search_rank.schemas.evidence import ReleaseManifest
 from search_rank.schemas.model import ModelArtifact
 
 from .query_store import CuratedQuery
+
+_TOKEN_PATTERN = re.compile(r"\w+", flags=re.UNICODE)
+
+
+def _tokenize(value: str) -> list[str]:
+    """Match the versioned BM25 tokenizer without importing training baselines."""
+
+    return _TOKEN_PATTERN.findall(value.casefold())
+
+
+def _rank_by_score(product_ids: Sequence[str], scores: Sequence[float]) -> list[int]:
+    """Match canonical ranking semantics without importing the evaluation package."""
+
+    if len(product_ids) != len(scores):
+        raise ValueError("product_ids and scores must have equal length")
+    if len(set(product_ids)) != len(product_ids):
+        raise ValueError("product_ids must be unique within a query")
+    checked: list[float] = []
+    for score in scores:
+        numeric = float(score)
+        if not math.isfinite(numeric):
+            raise ValueError("scores must be finite")
+        checked.append(numeric)
+    return sorted(range(len(product_ids)), key=lambda index: (-checked[index], product_ids[index]))
 
 
 @dataclass(frozen=True)
@@ -40,14 +66,52 @@ class Ranker(Protocol):
     def rank(self, query: CuratedQuery) -> RankingOutput: ...
 
 
-class _CrossEncoderPredictor(Protocol):
-    def predict(
+class _PairTokenizer(Protocol):
+    def __call__(
         self,
-        sentences: list[tuple[str, str]],
+        text: list[str],
+        text_pair: list[str],
         *,
-        batch_size: int,
-        show_progress_bar: bool,
-    ) -> Any: ...
+        padding: bool,
+        truncation: str,
+        return_tensors: str,
+    ) -> Mapping[str, torch.Tensor]: ...
+
+
+class _SequenceClassifierOutput(Protocol):
+    logits: torch.Tensor
+
+
+class _SequenceClassifier(Protocol):
+    def __call__(self, **features: torch.Tensor) -> _SequenceClassifierOutput: ...
+
+
+@dataclass(frozen=True)
+class _SequenceClassifierRuntime:
+    tokenizer: _PairTokenizer
+    model: _SequenceClassifier
+
+
+def _load_sequence_classifier(checkpoint: Path) -> _SequenceClassifierRuntime:
+    """Load a standard local Hugging Face sequence-classification checkpoint."""
+
+    checkpoint_path = str(checkpoint)
+    tokenizer = AutoTokenizer.from_pretrained(
+        checkpoint_path,
+        local_files_only=True,
+        trust_remote_code=False,
+    )
+    model = AutoModelForSequenceClassification.from_pretrained(
+        checkpoint_path,
+        local_files_only=True,
+        trust_remote_code=False,
+    )
+    model.to("cpu")
+    model.eval()
+    return _SequenceClassifierRuntime(
+        tokenizer=cast(_PairTokenizer, tokenizer),
+        model=cast(_SequenceClassifier, model),
+    )
 
 
 class LexicalRanker:
@@ -68,12 +132,12 @@ class LexicalRanker:
 
         started = time.perf_counter()
         corpus = [
-            tokenize(product.title if self.text_template == "title_v1" else product.text)
+            _tokenize(product.title if self.text_template == "title_v1" else product.text)
             for product in query.products
         ]
         model = BM25Okapi(corpus, k1=1.5, b=0.75)
-        scores = np.asarray(model.get_scores(tokenize(query.query)), dtype=float).tolist()
-        order = rank_by_score([product.product_id for product in query.products], scores)
+        scores = np.asarray(model.get_scores(_tokenize(query.query)), dtype=float).tolist()
+        order = _rank_by_score([product.product_id for product in query.products], scores)
         results = tuple(
             RankedCandidate(
                 product_id=query.products[index].product_id,
@@ -95,17 +159,48 @@ class CrossEncoderRanker:
         artifact_checksum: str,
         batch_size: int = 32,
         text_template: str = "enriched_v1",
+        runtime: _SequenceClassifierRuntime | None = None,
     ) -> None:
         if text_template not in {"title_v1", "enriched_v1"}:
             raise ValueError(f"unsupported text template: {text_template}")
+        if batch_size <= 0:
+            raise ValueError("batch_size must be a positive integer")
         self.model_id = model_id
         self.artifact_checksum = artifact_checksum
         self.batch_size = batch_size
         self.text_template = text_template
-        self.model = cast(
-            CrossEncoder,
-            CrossEncoder(str(checkpoint), device="cpu", trust_remote_code=False),
-        )
+        self._runtime = runtime or _load_sequence_classifier(Path(checkpoint))
+        self.tokenizer = self._runtime.tokenizer
+        self.model = self._runtime.model
+
+    def _predict_raw_logits(self, pairs: list[tuple[str, str]]) -> list[float]:
+        # CrossEncoder.predict sorts standard text pairs by descending character
+        # length before batching, then restores caller order. Keep that batching
+        # contract so this lean runtime produces the same raw checkpoint logits.
+        sorted_indices = np.argsort([-sum(len(value) for value in pair) for pair in pairs])
+        sorted_pairs = [pairs[int(index)] for index in sorted_indices]
+        sorted_scores: list[float] = []
+        with torch.inference_mode():
+            for start in range(0, len(sorted_pairs), self.batch_size):
+                batch = sorted_pairs[start : start + self.batch_size]
+                features = self.tokenizer(
+                    [query for query, _ in batch],
+                    [text for _, text in batch],
+                    padding=True,
+                    truncation="longest_first",
+                    return_tensors="pt",
+                )
+                cpu_features = {name: value.to("cpu") for name, value in features.items()}
+                logits = self.model(**cpu_features).logits
+                if logits.ndim == 2 and logits.shape[1] == 1:
+                    logits = logits[:, 0]
+                elif logits.ndim != 1:
+                    raise ValueError("cross-encoder checkpoint must emit one logit per input pair")
+                if logits.shape[0] != len(batch):
+                    raise ValueError("cross-encoder prediction count differs from candidate rows")
+                sorted_scores.extend(float(score) for score in logits.detach().cpu().tolist())
+        restore_order = np.argsort(sorted_indices)
+        return [sorted_scores[int(index)] for index in restore_order]
 
     def rank(self, query: CuratedQuery) -> RankingOutput:
         started = time.perf_counter()
@@ -116,20 +211,13 @@ class CrossEncoderRanker:
             )
             for product in query.products
         ]
-        scores = np.asarray(
-            cast(_CrossEncoderPredictor, self.model).predict(
-                pairs,
-                batch_size=self.batch_size,
-                show_progress_bar=False,
-            ),
-            dtype=float,
-        ).reshape(-1)
-        order = rank_by_score([product.product_id for product in query.products], scores.tolist())
+        scores = self._predict_raw_logits(pairs)
+        order = _rank_by_score([product.product_id for product in query.products], scores)
         results = tuple(
             RankedCandidate(
                 product_id=query.products[index].product_id,
                 title=query.products[index].title,
-                score=float(scores[index]),
+                score=scores[index],
                 rank=rank,
             )
             for rank, index in enumerate(order, start=1)
@@ -178,6 +266,7 @@ def load_rankers(
         ):
             raise ValueError("candidate ModelArtifact differs from the verified release identity")
     rankers: dict[str, Ranker] = {}
+    verified_checkpoints: dict[Path, tuple[str, _SequenceClassifierRuntime]] = {}
     for model in manifest["models"]:
         kind = model["kind"]
         ranker: Ranker
@@ -189,18 +278,26 @@ def load_rankers(
             )
         elif kind in {"pretrained", "fine_tuned"}:
             checkpoint = (manifest_path.parent / model["checkpoint"]).resolve()
-            actual = f"sha256:{sha256_directory(checkpoint)}"
+            verified = verified_checkpoints.get(checkpoint)
+            if verified is None:
+                actual = f"sha256:{sha256_directory(checkpoint)}"
+            else:
+                actual, runtime = verified
             if actual != model["artifact_checksum"]:
                 raise ValueError(
                     f"model checksum mismatch for {model['model_id']}: expected "
                     f"{model['artifact_checksum']}, got {actual}"
                 )
+            if verified is None:
+                runtime = _load_sequence_classifier(checkpoint)
+                verified_checkpoints[checkpoint] = (actual, runtime)
             ranker = CrossEncoderRanker(
                 model_id=model["model_id"],
                 checkpoint=checkpoint,
                 artifact_checksum=actual,
                 batch_size=int(model.get("batch_size", 32)),
                 text_template=str(model.get("text_template", "enriched_v1")),
+                runtime=runtime,
             )
         else:
             raise ValueError(f"unsupported public model kind: {kind}")
