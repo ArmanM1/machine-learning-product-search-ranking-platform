@@ -34,7 +34,7 @@ flowchart LR
     F --> G{Quality and<br/>latency gate}
     G -->|pass| H[Promote candidate]
     G -->|fail| I[Retain baseline]
-    H --> J[Lambda + API Gateway<br/>+ CloudFront demo]
+    H --> J[Lambda Function URLs<br/>+ CloudFront demo]
     I --> J
     J --> K[Benchmark · rollback<br/>· exact redeployment]
 ```
@@ -47,7 +47,7 @@ The serving surface reranks a known list of candidates; it is not a full-catalog
 |---|---|
 | Ranking | PyTorch, Transformers, sentence-transformers, BM25, scikit-learn |
 | Data and evidence | pandas, PyArrow, Pydantic, NumPy/SciPy, immutable JSON/Parquet artifacts |
-| API and UI | FastAPI, AWS Lambda container images, API Gateway, React, TypeScript, Vite |
+| API and UI | FastAPI, AWS Lambda container images and Function URLs, React, TypeScript, Vite |
 | Cloud | SageMaker Training/Processing, S3, ECR, CloudFront, EventBridge, CloudWatch |
 | Delivery | Terraform, GitHub Actions OIDC, pytest, Vitest, Playwright, Ruff, mypy, Trivy, Checkov |
 

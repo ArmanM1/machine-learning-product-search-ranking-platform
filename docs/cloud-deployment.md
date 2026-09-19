@@ -9,7 +9,7 @@ Do not run an apply until all fields below are recorded privately and the bounde
 - AWS account identity and account plan.
 - The recorded owner-approved MFA exception, zero root access keys, and a verified non-root temporary-credential path. MFA will not be configured or requested again.
 - No root key and no long-lived GitHub key.
-- `us-east-1` access for S3, ECR, IAM, Lambda, API Gateway, CloudFront, CloudWatch, Budgets, and SageMaker.
+- `us-east-1` access for S3, ECR, IAM, Lambda, CloudFront, CloudWatch, Budgets, and SageMaker.
 - Current SageMaker quota for one allowed instance: the selected Managed Spot Training quota before
   training and Processing quota `L-0307F515` before either held-out access counter.
 - Current regional pricing and the applicable-credit balance/expiration.
@@ -51,8 +51,8 @@ This is the exact applied resource inventory represented by Terraform. Runtime s
 
 ### Serving resources, disabled by default
 
-- `enable_serving=true` creates one x86_64 Lambda container function with reserved concurrency two and no provisioned concurrency, the `candidate` and `production` aliases, and an IAM-authenticated candidate smoke API.
-- `enable_public_serving=true` additionally creates the unauthenticated production API and Lambda permission, the public-site bucket policy, and one CloudFront distribution with a private S3 origin and production API origin.
+- `enable_serving=true` creates one x86_64 Lambda container function with reserved concurrency two and no provisioned concurrency, the `candidate` and `production` aliases, and an IAM-authenticated candidate Function URL.
+- `enable_public_serving=true` additionally creates the unauthenticated production Function URL and its two required resource-policy permissions, the public-site bucket policy, and one CloudFront distribution with a private S3 origin and production Function URL origin.
 - The public flag is rejected unless `enable_serving=true`; it also creates one CloudFront origin access control, one security-header policy, and one small SPA route-rewrite function.
 - Model-load, server-error, and concurrency CloudWatch alarms.
 
@@ -284,7 +284,7 @@ before a partial bucket can be stranded. The role has no bucket-delete permissio
    quota. Its only compact namespace match is read-only refresh of the exact
    `product-search-ranking-prod-*` roles already bounded by the external permissions ceiling.
 
-   `infrastructure.yml` does not accept a public-serving input and therefore cannot create the public surface for the first time. After backend initialization it inspects state and passes `enable_public_serving=true` only when a public API, CloudFront distribution, production Lambda permission, or site policy already exists. This preserves an existing public deployment during later reviewed reconciliations without bypassing the deployment gates.
+   `infrastructure.yml` does not accept a public-serving input and therefore cannot create the public surface for the first time. After backend initialization it inspects state and passes `enable_public_serving=true` only when a production Function URL, CloudFront distribution, production Lambda permission, or site policy already exists. This preserves an existing public deployment during later reviewed reconciliations without bypassing the deployment gates.
 
    The disposable dev root uses a separate `product-search-ranking-dev-permissions-boundary`; never attach
    the production ceiling to dev roles. Generate `boundary` and `platform-seed-policy` again with

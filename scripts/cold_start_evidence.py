@@ -285,7 +285,7 @@ def build_evidence(
         "excluded_from_warm_samples": True,
         "limitations": [
             "This is one controlled cold-start observation, not a cold-latency distribution.",
-            "End-to-end latency includes the private candidate API Gateway path and network time.",
+            "End-to-end latency includes the private candidate Function URL path and network time.",
             "CloudWatch max memory and process peak memory use different measurement scopes.",
         ],
     }

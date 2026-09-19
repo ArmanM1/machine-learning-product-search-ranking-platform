@@ -463,7 +463,7 @@ def test_platform_workflow_only_preserves_a_public_surface_already_present_in_st
     assert "SEARCH_RANK_DEPLOYMENT_NONCE" in source[:state_detection]
     assert '-var="serving_git_sha=${serving_git_sha}"' in source
     assert '-var="serving_deployment_nonce=${serving_deployment_nonce}"' in source
-    assert "module.platform.aws_apigatewayv2_api.production[0]" in source[state_detection:plan]
+    assert "module.platform.aws_lambda_function_url.production[0]" in source[state_detection:plan]
     assert "module.platform.aws_cloudfront_distribution.site[0]" in source[state_detection:plan]
     assert "public_serving_enabled=true" in source[state_detection:plan]
     assert '-var="enable_public_serving=${public_serving_enabled}"' in source[plan:]
@@ -585,23 +585,7 @@ def test_infrastructure_and_production_roles_have_separate_non_escalating_author
     assert "local.artifact_bucket_arn" in deployment_bucket_list
     assert "local.site_bucket_arn" in deployment_bucket_list
     for policy in (infrastructure, production):
-        api_gateway_create = next(
-            block
-            for block in policy.split("statement {")
-            if '"arn:${local.partition}:apigateway:${var.aws_region}::/apis"' in block
-        )
-        assert 'actions = ["apigateway:POST"]' in api_gateway_create
-        assert (
-            '"arn:${local.partition}:apigateway:${var.aws_region}::/tags/'
-            'arn%3A${local.partition}%3Aapigateway%3A${var.aws_region}'
-            '%3A%3A%2Fv2%2Fapis%2F*"'
-            in api_gateway_create
-        )
-        assert '::/tags/*"' not in api_gateway_create
-        assert 'variable = "aws:RequestTag/Project"' in api_gateway_create
-        assert 'variable = "aws:RequestTag/Environment"' in api_gateway_create
-        assert "apigateway:PATCH" not in api_gateway_create
-        assert "apigateway:PUT" not in api_gateway_create
+        assert "apigateway:" not in policy
     assert (
         'actions   = ["cloudfront:CreateDistribution", "cloudfront:CreateFunction", "cloudfront:TagResource"]'
         in production
@@ -611,8 +595,11 @@ def test_infrastructure_and_production_roles_have_separate_non_escalating_author
         "lambda:AddPermission",
         "lambda:CreateAlias",
         "lambda:CreateFunction",
+        "lambda:CreateFunctionUrlConfig",
+        "lambda:GetFunctionUrlConfig",
         "lambda:TagResource",
         "lambda:UntagResource",
+        "lambda:UpdateFunctionUrlConfig",
     ):
         assert f'"{action}"' in production
     assert '"lambda:RemovePermission"' not in production

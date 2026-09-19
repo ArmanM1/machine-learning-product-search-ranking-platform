@@ -134,7 +134,7 @@ jobs:
                   raise SystemExit(f"{name} must be finite and non-negative")
               return value
 
-          # PRD allowance for S3, ECR, Lambda, API Gateway, and CloudFront combined.
+          # PRD allowance for S3, ECR, Lambda, and CloudFront combined.
           conservative_serving_allowance = Decimal("3.00")
           spent = amount("CAMPAIGN_SPEND_TO_DATE_USD")
           credit = amount("REMAINING_APPLICABLE_CREDIT_USD")
@@ -838,9 +838,10 @@ jobs:
           terraform_state="$(terraform state list)"
           public_serving_enabled=false
           for public_address in \
-            'module.platform.aws_apigatewayv2_api.production[0]' \
+            'module.platform.aws_lambda_function_url.production[0]' \
             'module.platform.aws_cloudfront_distribution.site[0]' \
-            'module.platform.aws_lambda_permission.production_api[0]' \
+            'module.platform.aws_lambda_permission.production_function_url[0]' \
+            'module.platform.aws_lambda_permission.production_function_url_invoke[0]' \
             'module.platform.aws_s3_bucket_policy.site[0]'; do
             if grep -Fqx "${public_address}" <<<"${terraform_state}"; then
               public_serving_enabled=true
@@ -1010,7 +1011,7 @@ jobs:
             --output /dev/null
           cold_result="$(curl \
             --silent --show-error --connect-timeout 10 --max-time 30 \
-            --aws-sigv4 "aws:amz:${AWS_REGION}:execute-api" \
+            --aws-sigv4 "aws:amz:${AWS_REGION}:lambda" \
             --user "${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}" \
             --header "x-amz-security-token: ${AWS_SESSION_TOKEN}" \
             --header "x-request-id: ${cold_request_id}" \
@@ -1098,7 +1099,7 @@ jobs:
             sleep 0.06
             local arguments=(
               --silent --show-error --connect-timeout 10 --max-time 30
-              --aws-sigv4 "aws:amz:${AWS_REGION}:execute-api"
+              --aws-sigv4 "aws:amz:${AWS_REGION}:lambda"
               --user "${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}"
               --header "x-amz-security-token: ${AWS_SESSION_TOKEN}"
               --header "accept: application/json"
@@ -1344,8 +1345,7 @@ jobs:
               "module.platform.aws_lambda_function.api[0]",
               "module.platform.aws_lambda_alias.candidate[0]",
               "module.platform.aws_lambda_alias.production[0]",
-              "module.platform.aws_apigatewayv2_api.candidate[0]",
-              "module.platform.aws_apigatewayv2_stage.candidate[0]",
+              "module.platform.aws_lambda_function_url.candidate[0]",
           }
           changed_private = [
               {"address": address, "actions": changes.get(address)}
@@ -2685,7 +2685,7 @@ jobs:
                .model_id == $model and
                .code_commit == $commit and
                .serving_image_digest == $digest and
-               .warm.scope == "deployed_api_gateway_lambda_gate" and
+               .warm.scope == "deployed_lambda_function_url_gate" and
                .warm.candidate_count == 40 and
                .warm.measured_request_count == 200 and
                .warm.controlled_cold_sample_included == false and

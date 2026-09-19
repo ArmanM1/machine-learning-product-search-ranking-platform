@@ -663,14 +663,16 @@ def test_deploy_build_config_is_available_in_the_current_shell_and_later_steps()
     assert build.index('} >> "${GITHUB_ENV}"') < first_use
 
 
-def test_serving_throttle_supports_product_flows_but_preserves_compute_bound() -> None:
+def test_function_url_serving_preserves_client_pacing_and_compute_bound() -> None:
     serving = (ROOT / "infra/terraform/modules/platform/serving.tf").read_text(encoding="utf-8")
     deploy = (WORKFLOWS / "deploy.yml").read_text(encoding="utf-8")
     benchmark = (WORKFLOWS / "benchmark-serving.yml").read_text(encoding="utf-8")
     variables = (ROOT / "infra/terraform/modules/platform/variables.tf").read_text(encoding="utf-8")
 
-    assert serving.count("throttling_burst_limit = 40") == 2
-    assert serving.count("throttling_rate_limit  = 20") == 2
+    assert "throttling_burst_limit" not in serving
+    assert "throttling_rate_limit" not in serving
+    assert 'resource "aws_lambda_function_url" "candidate"' in serving
+    assert 'resource "aws_lambda_function_url" "production"' in serving
     assert "sleep 0.06" in deploy
     assert "TARGET_API_REQUEST_RATE = 18.0" in benchmark
     assert "for offset in range(0, count, offered_concurrency)" in benchmark
@@ -857,11 +859,9 @@ def test_first_deploy_keeps_public_serving_private_until_candidate_gates_pass() 
     assert 'variable "enable_public_serving"' in module_variables
     assert "!var.enable_public_serving || var.enable_serving" in module_variables
     public_resources = (
-        "aws_apigatewayv2_api.production",
-        "aws_apigatewayv2_integration.production",
-        "aws_apigatewayv2_route.production",
-        "aws_apigatewayv2_stage.production",
-        "aws_lambda_permission.production_api",
+        "aws_lambda_function_url.production",
+        "aws_lambda_permission.production_function_url",
+        "aws_lambda_permission.production_function_url_invoke",
         "aws_cloudfront_origin_access_control.site",
         "aws_cloudfront_response_headers_policy.security",
         "aws_cloudfront_function.spa_rewrite",
@@ -878,7 +878,32 @@ def test_first_deploy_keeps_public_serving_private_until_candidate_gates_pass() 
             1
         ].split("}\n", 1)[0]
     )
-    assert "try(aws_apigatewayv2_stage.production[0].invoke_url, null)" in outputs
+    assert "try(aws_lambda_function_url.candidate[0].function_url, null)" in outputs
+    assert "try(aws_lambda_function_url.production[0].function_url, null)" in outputs
+    assert 'authorization_type = "AWS_IAM"' in serving
+    assert 'authorization_type = "NONE"' in serving
+    assert 'action                 = "lambda:InvokeFunctionUrl"' in serving
+    assert "invoked_via_function_url = true" in serving
+    invoke_permission = serving.split(
+        'resource "aws_lambda_permission" "production_function_url_invoke" {', 1
+    )[1].split("}\n", 1)[0]
+    assert "function_url_auth_type" not in invoke_permission
+    assert 'aws:amz:${AWS_REGION}:lambda' in deploy
+    assert 'aws:amz:${AWS_REGION}:execute-api' not in deploy
+
+    iam = (ROOT / "infra/terraform/modules/platform/iam.tf").read_text(encoding="utf-8")
+    deployment_policy = iam.split(
+        'data "aws_iam_policy_document" "github_deployment" {', 1
+    )[1].split('data "aws_iam_policy_document" "github_images" {', 1)[0]
+    candidate_arn = (
+        'arn:${local.partition}:lambda:${var.aws_region}:${local.account_id}:'
+        'function:${local.name}-api:candidate'
+    )
+    assert candidate_arn in deployment_policy
+    assert 'actions   = ["lambda:InvokeFunctionUrl"]' in deployment_policy
+    assert 'variable = "lambda:FunctionUrlAuthType"' in deployment_policy
+    assert 'actions   = ["lambda:InvokeFunction"]' in deployment_policy
+    assert 'variable = "lambda:InvokedViaFunctionUrl"' in deployment_policy
     assert 'try("https://${aws_cloudfront_distribution.site[0].domain_name}", null)' in outputs
     for environment in ("dev", "prod"):
         environment_root = ROOT / "infra/terraform/environments" / environment

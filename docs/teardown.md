@@ -12,7 +12,7 @@ Teardown is destructive and requires exact environment selection plus owner auth
 
 The disposable environment contains the resources listed in `docs/cloud-deployment.md`: two data/site
 buckets, three ECR repositories, IAM workload/OIDC roles, optional OIDC provider, Lambda and two aliases,
-two HTTP APIs, CloudFront/OAC/header policy, logs/alarms, and—when public serving exists—the shutdown Lambda,
+two Lambda Function URLs, CloudFront/OAC/header policy, logs/alarms, and—when public serving exists—the shutdown Lambda,
 dedicated role/log group, and recurring EventBridge expiry. The AWS Budget SNS trigger and budgets are
 optional and remain disabled under the owner waiver. SageMaker jobs are run resources, not Terraform
 resources. The state bucket and private campaign ledger are a separate protected bootstrap environment.
@@ -29,7 +29,7 @@ resources. The state bucket and private campaign ledger are a separate protected
 ## Ordered teardown
 
 1. Trip the public shutdown path and verify ranker concurrency is zero and CloudFront is disabled. Then remove
-   public entry points using a reviewed Terraform plan: CloudFront, HTTP APIs, Lambda aliases/function,
+   public entry points using a reviewed Terraform plan: CloudFront, Function URLs, Lambda aliases/function,
    shutdown schedule/handler, and alarms.
 2. Delete non-retained ECR images only after recording the promoted and rollback image digests.
 3. Remove disposable S3 objects and every noncurrent version. Buckets use `force_destroy=false`, so Terraform refuses accidental deletion while data remains.
@@ -51,7 +51,7 @@ granting GitHub production deletion authority. It is intentionally narrower than
   `main` through the immutable repository owner/repository IDs;
 - the role can mutate only deterministic dev state, buckets, repositories, base log groups, and the exact
   Terraform-managed dev roles; explicit denies cover named and tagged production resources;
-- CloudFront, API Gateway, Lambda, SageMaker, the shared OIDC provider, and budgets are inventory-only.
+- CloudFront, Lambda Function URLs, Lambda, SageMaker, the shared OIDC provider, and budgets are inventory-only.
   The workflow cannot delete those resources;
 - the accepted fixture is exactly the 56-resource base dev platform with serving, budgets, notification
   email, and OIDC-provider creation disabled. Any missing, extra, drifted, deferred, non-AWS, replacement,
@@ -145,7 +145,7 @@ The bootstrap bucket has `prevent_destroy=true`. Retire it in a separate reviewe
 
 - [ ] Terraform reports no managed resources for the destroyed environment.
 - [ ] No project SageMaker job or endpoint is running.
-- [ ] No project Lambda, HTTP API, CloudFront distribution, ECR repository, or non-state S3 bucket remains.
+- [ ] No project Lambda, Function URL, CloudFront distribution, ECR repository, or non-state S3 bucket remains.
 - [ ] Project IAM roles are gone; shared OIDC provider decision is recorded.
 - [ ] The public-expiry rule and shutdown handler are gone; optional budgets/SNS subscriptions are absent or
   removed if no longer wanted.

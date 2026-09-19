@@ -414,7 +414,7 @@ class ServiceState:
             code_commit=deployment.code_commit,
             serving_image_digest=deployment.serving_image_digest,
             warm=PublicWarmServingEvidence(
-                scope="deployed_api_gateway_lambda_gate",
+                scope="deployed_lambda_function_url_gate",
                 candidate_count=gate.candidate_count,
                 warmup_request_count=gate.warmup_request_count,
                 measured_request_count=gate.valid_request_count,

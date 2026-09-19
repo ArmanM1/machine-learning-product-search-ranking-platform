@@ -34,7 +34,7 @@ export function OverviewPage() {
   const operationalVerified = operational.status === 'verified'
   const latencyLabel = overview.evidence_mode === 'fixture'
     ? 'Illustrative offline p95'
-    : 'Warm API Gateway/Lambda p95'
+    : 'Warm Lambda Function URL p95'
   const latencyValue = overview.evidence_mode === 'fixture'
     ? overview.p95_inference_latency_ms === null
       ? 'Not measured'

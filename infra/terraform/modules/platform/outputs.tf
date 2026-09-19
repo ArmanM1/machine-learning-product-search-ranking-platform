@@ -70,11 +70,11 @@ output "lambda_function_name" {
 }
 
 output "candidate_api_url" {
-  value = try(aws_apigatewayv2_stage.candidate[0].invoke_url, null)
+  value = try(aws_lambda_function_url.candidate[0].function_url, null)
 }
 
 output "production_api_url" {
-  value = try(aws_apigatewayv2_stage.production[0].invoke_url, null)
+  value = try(aws_lambda_function_url.production[0].function_url, null)
 }
 
 output "cloudfront_distribution_id" {

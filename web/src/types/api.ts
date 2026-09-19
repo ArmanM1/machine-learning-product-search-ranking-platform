@@ -217,7 +217,7 @@ export interface OperationalEvidenceVerified {
   code_commit: string
   serving_image_digest: string
   warm: {
-    scope: 'deployed_api_gateway_lambda_gate'
+    scope: 'deployed_lambda_function_url_gate'
     candidate_count: number
     warmup_request_count: number
     measured_request_count: number

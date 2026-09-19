@@ -95,7 +95,7 @@ class PublicLatencyPercentiles(ContractModel):
 
 
 class PublicWarmServingEvidence(ContractModel):
-    scope: Literal["deployed_api_gateway_lambda_gate"]
+    scope: Literal["deployed_lambda_function_url_gate"]
     candidate_count: Literal[40]
     warmup_request_count: Literal[10]
     measured_request_count: Literal[200]

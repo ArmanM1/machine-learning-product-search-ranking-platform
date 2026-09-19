@@ -49,7 +49,7 @@ locals {
     }
     api_error_count = {
       metric_name = "ApiErrorCount"
-      pattern     = "{ $.message = \"api_request\" && $.status_code >= 400 }"
+      pattern     = "{ $.message = \"api_request\" && $.status_code >= 500 }"
       value       = "1"
       unit        = "Count"
     }
@@ -119,18 +119,13 @@ resource "aws_cloudwatch_metric_alarm" "api_server_errors" {
   alarm_description   = "Repeated public API server errors."
   comparison_operator = "GreaterThanOrEqualToThreshold"
   evaluation_periods  = 2
-  metric_name         = "5xx"
-  namespace           = "AWS/ApiGateway"
+  metric_name         = aws_cloudwatch_log_metric_filter.service["api_error_count"].metric_transformation[0].name
+  namespace           = aws_cloudwatch_log_metric_filter.service["api_error_count"].metric_transformation[0].namespace
   period              = 60
   statistic           = "Sum"
   threshold           = 3
   treat_missing_data  = "notBreaching"
   alarm_actions       = local.alarm_actions
-
-  dimensions = {
-    ApiId = aws_apigatewayv2_api.production[0].id
-    Stage = aws_apigatewayv2_stage.production[0].name
-  }
 
   tags = local.common_tags
 }

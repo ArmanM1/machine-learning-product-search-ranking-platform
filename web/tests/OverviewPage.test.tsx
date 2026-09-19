@@ -40,7 +40,7 @@ function failedOverview(): OverviewData {
       code_commit: 'a'.repeat(40),
       serving_image_digest: `sha256:${'b'.repeat(64)}`,
       warm: {
-        scope: 'deployed_api_gateway_lambda_gate',
+        scope: 'deployed_lambda_function_url_gate',
         candidate_count: 40,
         warmup_request_count: 10,
         measured_request_count: 200,
@@ -87,7 +87,7 @@ describe('overview claim boundaries', () => {
     vi.mocked(apiClient.getOverview).mockResolvedValue(failedOverview())
     render(<MemoryRouter><OverviewPage /></MemoryRouter>)
 
-    expect(await screen.findByText('Warm API Gateway/Lambda p95')).toBeInTheDocument()
+    expect(await screen.findByText('Warm Lambda Function URL p95')).toBeInTheDocument()
     expect(screen.getByText('240 ms')).toBeInTheDocument()
     expect(
       screen.getByText('40 candidates · 200/200 successful · cold excluded'),

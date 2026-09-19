@@ -24,7 +24,7 @@ on:
         default: false
         type: boolean
       serving_image_uri:
-        description: Required immutable @sha256 URI when serving is enabled
+        description: Optional immutable assertion; existing serving state is recovered when omitted
         required: false
         type: string
       authorization:
@@ -119,10 +119,10 @@ jobs:
             test -z "${APPROVED_PLAN_SHA256}"
             test -z "${REVIEWED_COMMIT_SHA}"
           fi
-          if [[ "${ENABLE_SERVING}" == "true" ]]; then
+          if [[ "${ENABLE_SERVING}" == "true" && -n "${SERVING_IMAGE_URI}" ]]; then
             [[ "${SERVING_IMAGE_URI}" =~ @sha256:[0-9a-f]{64}$ ]]
           else
-            test -z "${SERVING_IMAGE_URI}"
+            test "${ENABLE_SERVING}" = "true" || test -z "${SERVING_IMAGE_URI}"
           fi
           if [[ "${ENABLE_BUDGETS}" == "true" ]]; then
             : "${TF_BUDGET_NOTIFICATION_EMAIL:?Budget email is required when budgets are enabled}"
@@ -384,9 +384,10 @@ jobs:
           if [[ "${serving_enabled}" == "true" ]]; then
             terraform_state="$(terraform state list)"
             for public_address in \
-              'module.platform.aws_apigatewayv2_api.production[0]' \
+              'module.platform.aws_lambda_function_url.production[0]' \
               'module.platform.aws_cloudfront_distribution.site[0]' \
-              'module.platform.aws_lambda_permission.production_api[0]' \
+              'module.platform.aws_lambda_permission.production_function_url[0]' \
+              'module.platform.aws_lambda_permission.production_function_url_invoke[0]' \
               'module.platform.aws_s3_bucket_policy.site[0]'; do
               if grep -Fqx "${public_address}" <<<"${terraform_state}"; then
                 public_serving_enabled=true

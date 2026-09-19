@@ -60,15 +60,15 @@ dataset       |                     (run to completion) |
       |       +----------+-------------+                |
       +------------------+             |                |
                  v                                v
-        private versioned S3          Lambda aliases + HTTP APIs
+        private versioned S3          Lambda aliases + Function URLs
                  |                                |
-         promoted pointer                         +-- candidate API for smoke tests
-                 |                                +-- production API for public traffic
+         promoted pointer                         +-- IAM candidate URL for smoke tests
+                 |                                +-- production URL for public traffic
                  +-----------> serving image      |
                                                    v
 private S3 site origin ----------------------> CloudFront
                                                    |
-                                                   +-- /api/*, /healthz, /readyz -> API Gateway
+                                                   +-- /api/*, /healthz, /readyz -> production Function URL
 ```
 
 All resources default to `us-east-1`. There is no NAT Gateway, load balancer, database, OpenSearch domain, SageMaker notebook, SageMaker real-time endpoint, scheduled retraining, or provisioned Lambda concurrency. When public serving exists, a budget-independent EventBridge schedule trips the exact Lambda/CloudFront shutdown handler within 24 hours. Optional AWS Budget triggers remain disabled under the owner waiver.
@@ -125,7 +125,7 @@ the trained-model contract.
 
 The model and tokenizer are embedded in an immutable private ECR serving image. Lambda does not read raw training data. Terraform publishes the newest function version behind a `candidate` alias while ignoring drift on the `production` alias. A workflow-attempt-and-release nonce changes only the Lambda configuration identity, so a retry of the same immutable image and serving Git revision still receives a fresh, previously uninvoked numeric version. The release Git SHA identifies the code that assembled and verified the release bundle; the serving Git SHA separately identifies the checkout used to build the runtime image, and both are verified against their own immutable artifacts rather than incorrectly required to be equal.
 
-The deploy workflow first inspects Terraform state. An existing public surface remains enabled during later reconciliations, but a first deployment creates only the Lambda versions, aliases, and IAM-authenticated candidate API. Before any public API, Lambda permission, site bucket policy, or CloudFront resource exists, the workflow proves the candidate version is new, on-demand, backed by the exact resolved ECR URI and digest, and has no earlier CloudWatch events. It correlates the first rank request with the Lambda initialization report and structured startup/request measurements, then runs the API contract and a separately warmed 200-request latency/error gate. Only after those gates pass may a second no-delete/no-replacement Terraform plan create the public surface; that plan must leave the already-tested private runtime resources unchanged.
+The deploy workflow first inspects Terraform state. An existing public surface remains enabled during later reconciliations, but a first deployment creates only the Lambda versions, aliases, and IAM-authenticated candidate Function URL. Before any public Function URL, Lambda permission, site bucket policy, or CloudFront resource exists, the workflow proves the candidate version is new, on-demand, backed by the exact resolved ECR URI and digest, and has no earlier CloudWatch events. It correlates the first rank request with the Lambda initialization report and structured startup/request measurements, then runs the API contract and a separately warmed 200-request latency/error gate. Only after those gates pass may a second no-delete/no-replacement Terraform plan create the public surface; that plan must leave the already-tested private runtime resources unchanged.
 
 Staged browser requests map every static URL to the immutable `releases/<release-id>/` prefix, so no live-root object changes. Because the public CloudFront API origin targets `production`, the same-origin staged browser check uses a brief revision-ID-CAS canary transition and immediately restores the exact captured alias revision; a restoration failure disables Lambda traffic and is retried by final compensation. Durable activation then CAS-moves the alias, copies the complete static release, verifies the exact CloudFront root and every release object byte plus desktop/mobile/keyboard flows, and only afterward advances the model pointer. Activation and manual rollback install `EXIT`, `INT`, and `TERM` compensation before their first mutation; cancellation preserves the original failure status while attempting to restore alias, static bytes, and pointer, and disables Lambda traffic if coherent restoration cannot be proved. Immediately before evidence publication the workflow re-observes the exact production alias revision and resolved runtime image. Any later failure restores the prior alias, full static release, and pointer; an unrecognized concurrent revision is never overwritten. The canonical deployment-evidence key is itself versioned and advances with an ETag precondition, so a retry can record its new Lambda version without erasing earlier successful observations.
 
@@ -136,8 +136,8 @@ The first deployed revision is the reproducible baseline release. It establishes
 - Lambda: x86_64, 4,096 MB or less, 2,048 MB ephemeral storage or less, 30-second timeout.
 - Reserved concurrency: exactly 2.
 - Provisioned concurrency: no resource exists; effective value is 0.
-- API Gateway default route throttle: burst 40, rate 20 requests/second. Lambda reserved
-  concurrency two remains the compute and cost-capacity bound.
+- Function URLs add no fixed compute capacity. Lambda reserved concurrency two remains the
+  hard compute and cost-capacity bound.
 - CloudWatch operational log retention: 7 days.
 - S3 public access: blocked for both buckets; CloudFront uses origin access control.
 - CloudFront: generated domain, TLS redirect, managed caching policies, API caching disabled.

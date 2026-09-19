@@ -16,7 +16,7 @@ spend, and credit balance are not claimed as applied or current until live evide
 | Paid CPU training and processing | 10 instance-hours total |
 | Lambda reserved concurrency | 2 |
 | Lambda provisioned concurrency | 0 |
-| API Gateway default route throttle | 20 requests/second, burst 40 |
+| Lambda Function URL | No fixed capacity; Lambda reserved concurrency is the hard bound |
 | Post-release idle target | at most USD 2/month before credits |
 
 These are simultaneous checks. Staying below one limit does not excuse breaching another.
@@ -31,7 +31,7 @@ The hosted GitHub training workflow uses a stricter five-hour final runtime plus
 | SageMaker CPU and processing | USD 4 |
 | S3 | USD 1 |
 | ECR | USD 1 |
-| Lambda, API Gateway, CloudFront | USD 1 |
+| Lambda and CloudFront | USD 1 |
 | CloudWatch and transfer | USD 3 |
 | Unclassified price drift reserve | USD 10 |
 | Total | USD 40 |
@@ -107,7 +107,7 @@ It also requires the owner-approved maximum out-of-pocket value to remain exactl
 authorization phrase explicitly acknowledges the separately accepted credits-only risk. Promotional
 credits, billing lag, and taxes still cannot provide a hard external guarantee of USD 0.
 
-Request-based serving does not have a meaningful fixed job price. The infrastructure and deploy workflows reserve a conservative USD 3 allowance for platform bootstrap and serving. The deployment protocol adds exactly one controlled candidate cold-start rank request and bounded CloudWatch log reads before the existing smoke and 200-request warm gate; it does not add provisioned concurrency. Before a public run, the operator must update the evidence with current S3, ECR, Lambda, API Gateway, CloudFront, CloudWatch, and transfer pricing.
+Request-based serving does not have a meaningful fixed job price. The infrastructure and deploy workflows reserve a conservative USD 3 allowance for platform bootstrap and serving. The deployment protocol adds exactly one controlled candidate cold-start rank request and bounded CloudWatch log reads before the existing smoke and 200-request warm gate; it does not add provisioned concurrency. Before a public run, the operator must update the evidence with current S3, ECR, Lambda Function URL, CloudFront, CloudWatch, and transfer pricing.
 
 The optional manual serving benchmark reserves an additional conservative USD 0.50 allowance and executes exactly 1,800 measured plus 90 warmup rank requests. It cannot run unless the same campaign, applicable-credit, reserve, and zero-out-of-pocket checks pass. Publishing latency percentiles also requires at least 199 successes in the 40-candidate/concurrency-one primary condition, at least 20 in every other measured condition, and at least one successful warmup per condition; failed attempts still consume request-based services and remain visible in the raw evidence.
 

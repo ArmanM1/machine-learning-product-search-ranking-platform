@@ -78,7 +78,7 @@ The evaluation report's `serialization` phase directly times canonical determini
 encoding of each query's ranking records. It uses the same record serializer as the JSONL
 ranking artifacts and reports one sample per query for each model. `candidate_count` is set
 only when every query in that summary has the same candidate count; otherwise it is null.
-The phase excludes file writes, UTF-8 transport, API Gateway, Lambda, and network time;
+The phase excludes file writes, UTF-8 transport, the Lambda Function URL, Lambda, and network time;
 those costs remain part of the separately measured end-to-end serving latency and must not
 be attributed to serialization.
 

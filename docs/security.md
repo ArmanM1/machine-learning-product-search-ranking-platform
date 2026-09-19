@@ -96,12 +96,12 @@ The normal target state uses short-lived browser/CLI sessions and protected GitH
 ## Public API rules
 
 - Core routes accept known curated query IDs only.
-- The unlinked candidate smoke API requires AWS IAM authorization; the production API is intentionally public and bounded.
+- The unlinked candidate Function URL requires AWS IAM authorization; the production Function URL is intentionally public and bounded by Lambda reserved concurrency and automatic expiry.
 - `top_k` is 1 through 40 and unknown fields are rejected where practical.
 - The application reads request bodies through a 16,384-byte bounded cache before validation; it
   enforces the measured byte count even when `Content-Length` is absent or understated and rejects
   malformed, duplicated, or mismatched `Content-Length` values. This stricter application boundary
-  sits inside API Gateway's platform request limit. Typed response models plus the curated-query and
+  sits well below the Lambda Function URL platform payload limit. Typed response models plus the curated-query and
   `top_k <= 40` bounds cap public response cardinality.
 - Errors include a request ID, stable code, and no stack trace or cloud identifier.
 - `/readyz` succeeds only after model, curated assets, and release-manifest checksums pass.

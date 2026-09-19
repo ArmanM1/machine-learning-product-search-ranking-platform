@@ -163,13 +163,13 @@ variable "required_credit_reserve_usd" {
 }
 
 variable "enable_serving" {
-  description = "Create the private Lambda candidate and IAM-authenticated candidate API after an immutable image digest exists."
+  description = "Create the private Lambda candidate and IAM-authenticated candidate Function URL after an immutable image digest exists."
   type        = bool
   default     = false
 }
 
 variable "enable_public_serving" {
-  description = "Expose the production API and CloudFront site only after the private candidate gates pass. Production public serving is always protected by an independent 24-hour expiry; AWS Budgets are optional defense in depth."
+  description = "Expose the production Function URL and CloudFront site only after the private candidate gates pass. Production public serving is always protected by an independent 24-hour expiry; AWS Budgets are optional defense in depth."
   type        = bool
   default     = false
 

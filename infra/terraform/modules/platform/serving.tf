@@ -70,32 +70,11 @@ resource "aws_lambda_alias" "production" {
   }
 }
 
-resource "aws_apigatewayv2_api" "candidate" {
+resource "aws_lambda_function_url" "candidate" {
   count = var.enable_serving ? 1 : 0
 
-  name          = "${local.name}-candidate"
-  protocol_type = "HTTP"
-  description   = "Candidate-alias smoke-test API; never linked from the public site"
-  tags          = local.common_tags
-}
-
-resource "aws_apigatewayv2_integration" "candidate" {
-  count = var.enable_serving ? 1 : 0
-
-  api_id                 = aws_apigatewayv2_api.candidate[0].id
-  integration_type       = "AWS_PROXY"
-  integration_uri        = aws_lambda_alias.candidate[0].invoke_arn
-  integration_method     = "POST"
-  payload_format_version = "2.0"
-  timeout_milliseconds   = 30000
-}
-
-resource "aws_apigatewayv2_route" "candidate" {
-  count = var.enable_serving ? 1 : 0
-
-  api_id             = aws_apigatewayv2_api.candidate[0].id
-  route_key          = "$default"
-  target             = "integrations/${aws_apigatewayv2_integration.candidate[0].id}"
+  function_name      = aws_lambda_function.api[0].function_name
+  qualifier          = aws_lambda_alias.candidate[0].name
   authorization_type = "AWS_IAM"
 }
 
@@ -105,58 +84,12 @@ resource "aws_cloudwatch_log_group" "candidate_api" {
   tags              = local.common_tags
 }
 
-resource "aws_apigatewayv2_stage" "candidate" {
-  count = var.enable_serving ? 1 : 0
-
-  api_id      = aws_apigatewayv2_api.candidate[0].id
-  name        = "$default"
-  auto_deploy = true
-
-  default_route_settings {
-    throttling_burst_limit = 40
-    throttling_rate_limit  = 20
-  }
-
-  access_log_settings {
-    destination_arn = aws_cloudwatch_log_group.candidate_api.arn
-    format = jsonencode({
-      requestId      = "$context.requestId"
-      routeKey       = "$context.routeKey"
-      status         = "$context.status"
-      responseLength = "$context.responseLength"
-      integrationErr = "$context.integrationErrorMessage"
-    })
-  }
-
-  tags = local.common_tags
-}
-
-resource "aws_apigatewayv2_api" "production" {
+resource "aws_lambda_function_url" "production" {
   count = var.enable_public_serving ? 1 : 0
 
-  name          = "${local.name}-production"
-  protocol_type = "HTTP"
-  description   = "Public API backed by the production Lambda alias"
-  tags          = local.common_tags
-}
-
-resource "aws_apigatewayv2_integration" "production" {
-  count = var.enable_public_serving ? 1 : 0
-
-  api_id                 = aws_apigatewayv2_api.production[0].id
-  integration_type       = "AWS_PROXY"
-  integration_uri        = aws_lambda_alias.production[0].invoke_arn
-  integration_method     = "POST"
-  payload_format_version = "2.0"
-  timeout_milliseconds   = 30000
-}
-
-resource "aws_apigatewayv2_route" "production" {
-  count = var.enable_public_serving ? 1 : 0
-
-  api_id    = aws_apigatewayv2_api.production[0].id
-  route_key = "$default"
-  target    = "integrations/${aws_apigatewayv2_integration.production[0].id}"
+  function_name      = aws_lambda_function.api[0].function_name
+  qualifier          = aws_lambda_alias.production[0].name
+  authorization_type = "NONE"
 }
 
 resource "aws_cloudwatch_log_group" "production_api" {
@@ -165,52 +98,31 @@ resource "aws_cloudwatch_log_group" "production_api" {
   tags              = local.common_tags
 }
 
-resource "aws_apigatewayv2_stage" "production" {
+resource "aws_lambda_permission" "production_function_url" {
   count = var.enable_public_serving ? 1 : 0
 
-  api_id      = aws_apigatewayv2_api.production[0].id
-  name        = "$default"
-  auto_deploy = true
+  statement_id           = "AllowPublicProductionFunctionUrl"
+  action                 = "lambda:InvokeFunctionUrl"
+  function_name          = aws_lambda_function.api[0].function_name
+  qualifier              = aws_lambda_alias.production[0].name
+  principal              = "*"
+  function_url_auth_type = "NONE"
 
-  default_route_settings {
-    throttling_burst_limit = 40
-    throttling_rate_limit  = 20
-  }
-
-  access_log_settings {
-    destination_arn = aws_cloudwatch_log_group.production_api.arn
-    format = jsonencode({
-      requestId      = "$context.requestId"
-      routeKey       = "$context.routeKey"
-      status         = "$context.status"
-      responseLength = "$context.responseLength"
-      integrationErr = "$context.integrationErrorMessage"
-    })
-  }
-
-  tags = local.common_tags
+  depends_on = [aws_lambda_function_url.production]
 }
 
-resource "aws_lambda_permission" "candidate_api" {
-  count = var.enable_serving ? 1 : 0
-
-  statement_id  = "AllowCandidateApiGateway"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.api[0].function_name
-  qualifier     = aws_lambda_alias.candidate[0].name
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${aws_apigatewayv2_api.candidate[0].execution_arn}/*/*"
-}
-
-resource "aws_lambda_permission" "production_api" {
+# AWS requires both resource-policy actions for new public Function URLs.
+resource "aws_lambda_permission" "production_function_url_invoke" {
   count = var.enable_public_serving ? 1 : 0
 
-  statement_id  = "AllowProductionApiGateway"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.api[0].function_name
-  qualifier     = aws_lambda_alias.production[0].name
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${aws_apigatewayv2_api.production[0].execution_arn}/*/*"
+  statement_id             = "AllowPublicProductionFunctionUrlInvoke"
+  action                   = "lambda:InvokeFunction"
+  function_name            = aws_lambda_function.api[0].function_name
+  qualifier                = aws_lambda_alias.production[0].name
+  principal                = "*"
+  invoked_via_function_url = true
+
+  depends_on = [aws_lambda_function_url.production]
 }
 
 resource "aws_cloudfront_origin_access_control" "site" {
@@ -317,7 +229,7 @@ resource "aws_cloudfront_distribution" "site" {
   }
 
   origin {
-    domain_name = trimprefix(aws_apigatewayv2_api.production[0].api_endpoint, "https://")
+    domain_name = trimsuffix(trimprefix(aws_lambda_function_url.production[0].function_url, "https://"), "/")
     origin_id   = "production-api"
 
     custom_origin_config {

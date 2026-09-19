@@ -583,8 +583,26 @@ data "aws_iam_policy_document" "github_deployment" {
 
   statement {
     effect    = "Allow"
-    actions   = ["execute-api:Invoke"]
-    resources = ["arn:${local.partition}:execute-api:${var.aws_region}:${local.account_id}:*/*/*/*"]
+    actions   = ["lambda:InvokeFunctionUrl"]
+    resources = ["arn:${local.partition}:lambda:${var.aws_region}:${local.account_id}:function:${local.name}-api:candidate"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "lambda:FunctionUrlAuthType"
+      values   = ["AWS_IAM"]
+    }
+  }
+
+  statement {
+    effect    = "Allow"
+    actions   = ["lambda:InvokeFunction"]
+    resources = ["arn:${local.partition}:lambda:${var.aws_region}:${local.account_id}:function:${local.name}-api:candidate"]
+
+    condition {
+      test     = "Bool"
+      variable = "lambda:InvokedViaFunctionUrl"
+      values   = ["true"]
+    }
   }
 }
 
@@ -1251,53 +1269,6 @@ data "aws_iam_policy_document" "github_terraform" {
   }
 
   statement {
-    effect    = "Allow"
-    actions   = ["apigateway:GET"]
-    resources = ["arn:${local.partition}:apigateway:${var.aws_region}::/apis*"]
-  }
-
-  statement {
-    effect  = "Allow"
-    actions = ["apigateway:POST"]
-    resources = [
-      "arn:${local.partition}:apigateway:${var.aws_region}::/apis",
-      # API Gateway authorizes tags supplied to CreateApi/CreateStage against a
-      # separate, URL-encoded /tags resource before the new API has an ID.
-      "arn:${local.partition}:apigateway:${var.aws_region}::/tags/arn%3A${local.partition}%3Aapigateway%3A${var.aws_region}%3A%3A%2Fv2%2Fapis%2F*",
-    ]
-
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestTag/Project"
-      values   = [var.project_name]
-    }
-
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestTag/Environment"
-      values   = [var.environment]
-    }
-  }
-
-  statement {
-    effect    = "Allow"
-    actions   = ["apigateway:PATCH", "apigateway:POST", "apigateway:PUT"]
-    resources = ["arn:${local.partition}:apigateway:${var.aws_region}::/apis*"]
-
-    condition {
-      test     = "StringEquals"
-      variable = "aws:ResourceTag/Project"
-      values   = [var.project_name]
-    }
-
-    condition {
-      test     = "StringEquals"
-      variable = "aws:ResourceTag/Environment"
-      values   = [var.environment]
-    }
-  }
-
-  statement {
     effect = "Allow"
     actions = [
       "cloudfront:DescribeFunction",
@@ -1371,10 +1342,12 @@ data "aws_iam_policy_document" "github_terraform" {
       "lambda:AddPermission",
       "lambda:CreateAlias",
       "lambda:CreateFunction",
+      "lambda:CreateFunctionUrlConfig",
       "lambda:GetAlias",
       "lambda:GetFunction",
       "lambda:GetFunctionConfiguration",
       "lambda:GetPolicy",
+      "lambda:GetFunctionUrlConfig",
       "lambda:GetFunctionConcurrency",
       "lambda:ListAliases",
       "lambda:ListVersionsByFunction",
@@ -1386,6 +1359,7 @@ data "aws_iam_policy_document" "github_terraform" {
       "lambda:UpdateAlias",
       "lambda:UpdateFunctionCode",
       "lambda:UpdateFunctionConfiguration",
+      "lambda:UpdateFunctionUrlConfig",
     ]
     resources = ["arn:${local.partition}:lambda:${var.aws_region}:${local.account_id}:function:${local.name}-api*"]
   }
@@ -1592,7 +1566,6 @@ data "aws_iam_policy_document" "github_production_terraform" {
   statement {
     effect = "Allow"
     actions = [
-      "apigateway:GET",
       "cloudfront:DescribeFunction",
       "cloudfront:GetCachePolicy",
       "cloudfront:GetDistribution",
@@ -1609,6 +1582,7 @@ data "aws_iam_policy_document" "github_production_terraform" {
       "events:ListTagsForResource",
       "events:ListTargetsByRule",
       "lambda:GetFunctionConcurrency",
+      "lambda:GetFunctionUrlConfig",
       "lambda:GetPolicy",
       "lambda:ListTags",
       "logs:DescribeLogGroups",
@@ -1627,43 +1601,6 @@ data "aws_iam_policy_document" "github_production_terraform" {
     effect    = "Allow"
     actions   = ["budgets:DescribeBudget", "budgets:DescribeNotificationsForBudget", "budgets:DescribeSubscribersForNotification", "budgets:ViewBudget"]
     resources = ["arn:${local.partition}:budgets::${local.account_id}:budget/${local.name}-*"]
-  }
-
-  statement {
-    effect  = "Allow"
-    actions = ["apigateway:POST"]
-    resources = [
-      "arn:${local.partition}:apigateway:${var.aws_region}::/apis",
-      # API Gateway authorizes tags supplied to CreateApi/CreateStage against a
-      # separate, URL-encoded /tags resource before the new API has an ID.
-      "arn:${local.partition}:apigateway:${var.aws_region}::/tags/arn%3A${local.partition}%3Aapigateway%3A${var.aws_region}%3A%3A%2Fv2%2Fapis%2F*",
-    ]
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestTag/Project"
-      values   = [var.project_name]
-    }
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestTag/Environment"
-      values   = [var.environment]
-    }
-  }
-
-  statement {
-    effect    = "Allow"
-    actions   = ["apigateway:PATCH", "apigateway:POST", "apigateway:PUT"]
-    resources = ["arn:${local.partition}:apigateway:${var.aws_region}::/apis*"]
-    condition {
-      test     = "StringEquals"
-      variable = "aws:ResourceTag/Project"
-      values   = [var.project_name]
-    }
-    condition {
-      test     = "StringEquals"
-      variable = "aws:ResourceTag/Environment"
-      values   = [var.environment]
-    }
   }
 
   statement {
@@ -1719,9 +1656,11 @@ data "aws_iam_policy_document" "github_production_terraform" {
       "lambda:AddPermission",
       "lambda:CreateAlias",
       "lambda:CreateFunction",
+      "lambda:CreateFunctionUrlConfig",
       "lambda:GetAlias",
       "lambda:GetFunction",
       "lambda:GetFunctionConfiguration",
+      "lambda:GetFunctionUrlConfig",
       "lambda:GetProvisionedConcurrencyConfig",
       "lambda:ListAliases",
       "lambda:ListVersionsByFunction",
@@ -1732,6 +1671,7 @@ data "aws_iam_policy_document" "github_production_terraform" {
       "lambda:UpdateAlias",
       "lambda:UpdateFunctionCode",
       "lambda:UpdateFunctionConfiguration",
+      "lambda:UpdateFunctionUrlConfig",
     ]
     resources = ["arn:${local.partition}:lambda:${var.aws_region}:${local.account_id}:function:${local.name}-api*"]
   }
