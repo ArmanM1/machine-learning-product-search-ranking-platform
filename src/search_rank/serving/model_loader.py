@@ -96,7 +96,7 @@ def _load_sequence_classifier(checkpoint: Path) -> _SequenceClassifierRuntime:
     """Load a standard local Hugging Face sequence-classification checkpoint."""
 
     checkpoint_path = str(checkpoint)
-    tokenizer = AutoTokenizer.from_pretrained(
+    tokenizer = AutoTokenizer.from_pretrained(  # type: ignore[no-untyped-call]
         checkpoint_path,
         local_files_only=True,
         trust_remote_code=False,

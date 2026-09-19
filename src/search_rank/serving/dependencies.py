@@ -104,6 +104,7 @@ class ServiceState:
             return
         started = time.perf_counter()
         try:
+            log_event(LOGGER, "service_startup_phase", phase="validate_release")
             raw_release_manifest = json.loads(
                 self.settings.release_manifest.read_text(encoding="utf-8")
             )
@@ -111,11 +112,14 @@ class ServiceState:
                 mode="json", exclude_none=True
             )
             self._verify_release_artifacts(release_manifest, self.settings.release_manifest)
+            log_event(LOGGER, "service_startup_phase", phase="load_public_evidence")
             evidence: PublicEvidenceEnvelope | None = None
             if self.settings.public_evidence:
                 payload = json.loads(self.settings.public_evidence.read_text(encoding="utf-8"))
                 evidence = PublicEvidenceEnvelope.model_validate(payload)
+            log_event(LOGGER, "service_startup_phase", phase="load_curated_queries")
             query_store = QueryStore.from_json(self.settings.curated_queries)
+            log_event(LOGGER, "service_startup_phase", phase="load_rankers")
             rankers, loaded_manifest = load_rankers(self.settings.release_manifest)
             if loaded_manifest != release_manifest:
                 raise ValueError("model loader and release validator read different manifests")

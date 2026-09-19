@@ -200,6 +200,10 @@ def test_model_load_emits_bounded_startup_metrics(
     assert state.startup_succeeded
     assert state.model_load_duration_ms is not None and state.model_load_duration_ms >= 0
     assert events == [
+        ("service_startup_phase", {"phase": "validate_release"}),
+        ("service_startup_phase", {"phase": "load_public_evidence"}),
+        ("service_startup_phase", {"phase": "load_curated_queries"}),
+        ("service_startup_phase", {"phase": "load_rankers"}),
         (
             "service_startup_success",
             {

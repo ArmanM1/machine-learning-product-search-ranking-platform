@@ -41,7 +41,10 @@ dev = [
   "ruff>=0.12,<1",
   "types-pyyaml>=6.0,<7",
 ]
-serve = ["awslambdaric>=4.0.2,<5"]
+serve = [
+  "awslambdaric>=4.0.2,<5",
+  "transformers>=4.48,<5",
+]
 
 [project.scripts]
 search-rank = "search_rank.cli:app"

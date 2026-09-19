@@ -24,7 +24,15 @@ def test_container_contract_is_digest_pinned_and_uses_scoped_runtime_user(filena
         assert "USER ${APP_UID}:${APP_GID}" in text
         assert "USER root" not in text
         assert 'ENTRYPOINT ["/opt/search-rank-venv/bin/python", "-m", "awslambdaric"]' in text
-        assert 'CMD ["search_rank.serving.app.handler"]' in text
+        assert 'CMD ["search_rank.lambda_handler.handler"]' in text
+        assert "HF_HUB_OFFLINE=1" in text
+        assert "TRANSFORMERS_OFFLINE=1" in text
+        assert "TOKENIZERS_PARALLELISM=false" in text
+        assert "OPENBLAS_NUM_THREADS=2" in text
+        assert "pandas pyarrow scikit-learn scipy sentence-transformers" in text
+        assert "psutil pyyaml" not in text
+        assert "import yaml; import search_rank.lambda_handler" in text
+        assert "importlib.util.find_spec(name) is None" in text
         assert "ARG VITE_DATA_MODE=api" in text
         assert 'test "${VITE_DATA_MODE}" = "api"' in text
         assert 'c.data_mode!=="api"' in text

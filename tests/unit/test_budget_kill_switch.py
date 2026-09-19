@@ -1,10 +1,29 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 from typing import Any
 
 import pytest
 
 from search_rank.serving import budget_kill_switch
+
+
+def test_kill_switch_import_does_not_load_ranker_or_web_runtime() -> None:
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; from search_rank.serving import budget_kill_switch; "
+            "blocked=('torch', 'transformers', 'fastapi', 'sentence_transformers'); "
+            "assert not any(name == root or name.startswith(root + '.') "
+            "for name in sys.modules for root in blocked)",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
 
 
 class FakeLambdaClient:

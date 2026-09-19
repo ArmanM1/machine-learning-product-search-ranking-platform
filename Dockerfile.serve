@@ -40,7 +40,15 @@ ENV PYTHONUNBUFFERED=1 \
     PATH="/opt/search-rank-venv/bin:${PATH}" \
     PYTHONPATH="/opt/search-rank-venv/lib/python3.11/site-packages:${LAMBDA_TASK_ROOT}" \
     HF_HOME=/tmp/huggingface \
-    TRANSFORMERS_CACHE=/tmp/huggingface
+    TRANSFORMERS_CACHE=/tmp/huggingface \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1 \
+    HF_HUB_DISABLE_TELEMETRY=1 \
+    TOKENIZERS_PARALLELISM=false \
+    OMP_NUM_THREADS=2 \
+    MKL_NUM_THREADS=2 \
+    OPENBLAS_NUM_THREADS=2 \
+    MALLOC_ARENA_MAX=2
 
 WORKDIR ${LAMBDA_TASK_ROOT}
 
@@ -55,6 +63,11 @@ RUN apt-get update \
     && system_python="$(command -v python)" \
     && "${system_python}" -m pip install --no-cache-dir "uv==${UV_VERSION}" \
     && uv sync --frozen --no-dev --no-editable --extra serve \
+    && uv pip uninstall --python "${UV_PROJECT_ENVIRONMENT}/bin/python" \
+       pandas pyarrow scikit-learn scipy sentence-transformers \
+       psutil typer uvicorn \
+    && "${UV_PROJECT_ENVIRONMENT}/bin/python" -c \
+       'import importlib.util; import yaml; import search_rank.lambda_handler; blocked=("pandas", "pyarrow", "scipy", "sklearn", "sentence_transformers"); assert all(importlib.util.find_spec(name) is None for name in blocked)' \
     && uv cache clean \
     && "${system_python}" -m pip uninstall --yes uv setuptools wheel \
     && "${system_python}" -c 'import pathlib, shutil, sysconfig; path = pathlib.Path(sysconfig.get_paths()["purelib"]) / "setuptools"; shutil.rmtree(path) if path.exists() else None' \
@@ -65,4 +78,4 @@ RUN apt-get update \
 USER ${APP_UID}:${APP_GID}
 
 ENTRYPOINT ["/opt/search-rank-venv/bin/python", "-m", "awslambdaric"]
-CMD ["search_rank.serving.app.handler"]
+CMD ["search_rank.lambda_handler.handler"]
