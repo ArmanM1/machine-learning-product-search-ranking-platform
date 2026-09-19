@@ -1810,7 +1810,7 @@ jobs:
                   --content-type "text/html" --metadata-directive REPLACE --no-progress \
                   || restoration_failed=1
               else
-                aws s3 rm "s3://${SITE_BUCKET}/index.html" --no-progress \
+                aws s3 rm "s3://${SITE_BUCKET}/index.html" \
                   || restoration_failed=1
                 aws lambda put-function-concurrency --function-name "${function_name}" \
                   --reserved-concurrent-executions 0 >/dev/null \
@@ -2084,13 +2084,13 @@ jobs:
             await page.locator('.release-state').filter({ hasText: expectedStatus }).waitFor()
             await requireNoFailurePanel(page)
             await page.getByRole('link', { name: 'Evaluation', exact: true }).first().click()
-            await page.locator('main h1, main h2').first().waitFor()
+            await page.locator('.evaluation-page').waitFor()
             await requireNoFailurePanel(page)
             await page.getByRole('link', { name: 'Failures', exact: true }).first().click()
-            await page.locator('main h1, main h2').first().waitFor()
+            await page.locator('.failures-page').waitFor()
             await requireNoFailurePanel(page)
             await page.getByRole('link', { name: 'Run details', exact: true }).first().click()
-            await page.locator('main h1, main h2').first().waitFor()
+            await page.locator('.experiment-page').waitFor()
             await requireNoFailurePanel(page)
             await page.screenshot({ path: screenshot, fullPage: true })
             if (pageErrors.length) throw new Error(`browser page errors: ${pageErrors.join('; ')}`)
@@ -2149,7 +2149,7 @@ jobs:
               --metadata-directive REPLACE \
               --no-progress
           else
-            aws s3 rm "s3://${SITE_BUCKET}/index.html" --no-progress
+            aws s3 rm "s3://${SITE_BUCKET}/index.html"
             aws lambda put-function-concurrency --function-name "${function_name}" \
               --reserved-concurrent-executions 0 >/dev/null
           fi
@@ -2598,7 +2598,7 @@ jobs:
               --metadata-directive REPLACE \
               --no-progress
           else
-            aws s3 rm "s3://${SITE_BUCKET}/index.html" --no-progress
+            aws s3 rm "s3://${SITE_BUCKET}/index.html"
             aws lambda put-function-concurrency \
               --function-name "${function_name}" \
               --reserved-concurrent-executions 0 >/dev/null

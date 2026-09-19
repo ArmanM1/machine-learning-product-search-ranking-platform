@@ -820,6 +820,11 @@ def test_deploy_static_and_compensation_paths_are_fail_closed() -> None:
     assert '[("<root>", index_path)]' in production
     assert deploy.count('--paths "/*"') >= 5
     assert "page.on('requestfailed'" in production
+    assert "await page.locator('.evaluation-page').waitFor()" in production
+    assert "await page.locator('.failures-page').waitFor()" in production
+    assert "await page.locator('.experiment-page').waitFor()" in production
+    assert "await page.locator('main h1, main h2').first().waitFor()" not in production
+    assert 'aws s3 rm "s3://${SITE_BUCKET}/index.html" --no-progress' not in deploy
     assert "workflow-restored-alias-revision.txt" in deploy
     assert "alias_restoration_safe" in deploy
     assert "refusing unsafe final compensation" in deploy
