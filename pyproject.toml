@@ -46,6 +46,16 @@ serve = [
   "transformers>=4.48,<5",
 ]
 
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-cpu", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
 [project.scripts]
 search-rank = "search_rank.cli:app"
 
