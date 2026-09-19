@@ -1094,8 +1094,8 @@ jobs:
             local path="$2"
             local output="$3"
             local payload="${4:-}"
-            # Keep sustained candidate traffic below the API stage's 20 rps
-            # throttle while preserving response-time measurements.
+            # Pace sustained candidate traffic so response-time measurements
+            # remain reproducible; Lambda reserved concurrency is the capacity bound.
             sleep 0.06
             local arguments=(
               --silent --show-error --connect-timeout 10 --max-time 30

@@ -963,7 +963,6 @@ jobs:
                   "measurement_class": "warm_after_explicit_per_condition_warmups",
                   "candidate_counts": list(CANDIDATE_COUNTS),
                   "offered_concurrency_levels": list(OFFERED_CONCURRENCY),
-                  "api_gateway_rate_limit_rps": 20,
                   "target_request_rate_rps": TARGET_API_REQUEST_RATE,
                   "wave_pacing_enabled": True,
                   "warmup_requests_per_condition": WARMUP_REQUESTS,
@@ -1185,7 +1184,6 @@ jobs:
           if (
               protocol.get("measurement_class")
               != "warm_after_explicit_per_condition_warmups"
-              or protocol.get("api_gateway_rate_limit_rps") != 20
               or protocol.get("target_request_rate_rps") != 18.0
               or protocol.get("wave_pacing_enabled") is not True
               or protocol.get("minimum_warmup_successes_per_condition") != 1

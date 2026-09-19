@@ -358,11 +358,6 @@
           "title": "Offered Concurrency Levels",
           "type": "array"
         },
-        "api_gateway_rate_limit_rps": {
-          "const": 20,
-          "title": "Api Gateway Rate Limit Rps",
-          "type": "integer"
-        },
         "target_request_rate_rps": {
           "const": 18.0,
           "title": "Target Request Rate Rps",
@@ -439,7 +434,6 @@
         "measurement_class",
         "candidate_counts",
         "offered_concurrency_levels",
-        "api_gateway_rate_limit_rps",
         "target_request_rate_rps",
         "wave_pacing_enabled",
         "warmup_requests_per_condition",

@@ -546,7 +546,6 @@ def performance_report() -> dict[str, Any]:
             "measurement_class": "warm_after_explicit_per_condition_warmups",
             "candidate_counts": [10, 20, 40],
             "offered_concurrency_levels": [1, 4, 8],
-            "api_gateway_rate_limit_rps": 20,
             "target_request_rate_rps": 18.0,
             "wave_pacing_enabled": True,
             "warmup_requests_per_condition": 10,
@@ -609,6 +608,11 @@ def test_performance_report_requires_exact_matrix_and_recomputes_raw_aggregates(
     report = PerformanceReport.model_validate(performance_report())
     assert len(report.conditions) == 9
     assert report.totals.measured_request_count == 1800
+
+    invalid = deepcopy(performance_report())
+    invalid["protocol"]["api_gateway_rate_limit_rps"] = 20
+    with pytest.raises(ValidationError, match="extra_forbidden"):
+        PerformanceReport.model_validate(invalid)
 
     invalid = deepcopy(performance_report())
     invalid["protocol"]["target_request_rate_rps"] = 17.0

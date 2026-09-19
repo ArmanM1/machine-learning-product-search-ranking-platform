@@ -568,7 +568,6 @@ class BenchmarkProtocol(ContractModel):
     measurement_class: Literal["warm_after_explicit_per_condition_warmups"]
     candidate_counts: tuple[Literal[10], Literal[20], Literal[40]]
     offered_concurrency_levels: tuple[Literal[1], Literal[4], Literal[8]]
-    api_gateway_rate_limit_rps: Literal[20]
     target_request_rate_rps: Annotated[float, Field(json_schema_extra={"const": 18.0})]
     wave_pacing_enabled: Literal[True]
     warmup_requests_per_condition: Literal[10]
