@@ -7,9 +7,9 @@ on:
         description: Deploy a promoted release or restore the prior healthy release
         required: true
         type: choice
-        options: [deploy, rollback]
+        options: [deploy, rollback, diagnose]
       release_id:
-        description: Immutable release ID to deploy, or prior static release ID to restore
+        description: Immutable release ID to deploy, prior static release ID to restore, or diagnostic
         required: true
         type: string
       model_id:
@@ -25,7 +25,7 @@ on:
         required: false
         type: string
       authorization:
-        description: Type DEPLOY PUBLIC AWS DEMO or ROLL BACK PUBLIC AWS DEMO
+        description: Type DEPLOY PUBLIC AWS DEMO, ROLL BACK PUBLIC AWS DEMO, or DIAGNOSE SERVING
         required: true
         type: string
 
@@ -2734,6 +2734,111 @@ jobs:
             active-promotion-pointer.json
           if-no-files-found: warn
           retention-days: 90
+
+  diagnose:
+    if: github.ref == 'refs/heads/main' && inputs.action == 'diagnose'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    env:
+      AWS_REGION: us-east-1
+      FUNCTION_NAME: product-search-ranking-prod-api
+      AUTHORIZATION: ${{ inputs.authorization }}
+    steps:
+      - name: Validate read-only diagnostic authorization
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${AUTHORIZATION}" = "DIAGNOSE SERVING"
+      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-diagnose-${{ github.run_id }}
+          mask-aws-account-id: true
+      - name: Summarize recent candidate startup failures
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws lambda get-function-configuration \
+            --function-name "${FUNCTION_NAME}" \
+            --qualifier candidate > function-private.json
+          start_ms="$(python - <<'PY'
+          from datetime import datetime, timedelta, timezone
+
+          print(int((datetime.now(timezone.utc) - timedelta(minutes=45)).timestamp() * 1000))
+          PY
+          )"
+          aws logs filter-log-events \
+            --log-group-name "/aws/lambda/${FUNCTION_NAME}" \
+            --start-time "${start_ms}" \
+            --no-interleaved > logs-private.json
+          python - <<'PY'
+          import json
+          import re
+          from collections import Counter
+          from pathlib import Path
+
+          config = json.loads(Path("function-private.json").read_text(encoding="utf-8"))
+          logs = json.loads(Path("logs-private.json").read_text(encoding="utf-8"))
+          events = logs.get("events", [])
+          platform = Counter()
+          application = Counter()
+          reports = []
+          report_pattern = re.compile(
+              r"Duration: (?P<duration>[0-9.]+) ms.*?"
+              r"Memory Size: (?P<memory>[0-9]+) MB.*?"
+              r"Max Memory Used: (?P<maximum>[0-9]+) MB"
+              r"(?:.*?Init Duration: (?P<init>[0-9.]+) ms)?"
+              r"(?:.*?Status: (?P<status>[A-Za-z]+))?"
+              r"(?:.*?Error Type: (?P<error>[A-Za-z0-9_.-]+))?"
+          )
+          for event in events:
+              message = str(event.get("message", ""))
+              lowered = message.lower()
+              if "task timed out" in lowered:
+                  platform["task_timeout"] += 1
+              if "runtime exited" in lowered:
+                  platform["runtime_exit"] += 1
+              if "signal: killed" in lowered or "out of memory" in lowered:
+                  platform["memory_termination"] += 1
+              if message.startswith("REPORT RequestId:"):
+                  match = report_pattern.search(message)
+                  if match:
+                      reports.append(
+                          {
+                              key: (float(value) if key in {"duration", "init"} else int(value))
+                              if key in {"duration", "init", "memory", "maximum"}
+                              else value
+                              for key, value in match.groupdict().items()
+                              if value is not None
+                          }
+                      )
+              try:
+                  payload = json.loads(message)
+              except (TypeError, ValueError):
+                  continue
+              name = payload.get("message")
+              if name in {
+                  "service_startup_success",
+                  "service_startup_failed",
+                  "api_request",
+              }:
+                  application[str(name)] += 1
+          summary = {
+              "configuration": {
+                  "state": config.get("State"),
+                  "last_update_status": config.get("LastUpdateStatus"),
+                  "timeout_seconds": config.get("Timeout"),
+                  "memory_mb": config.get("MemorySize"),
+              },
+              "event_count": len(events),
+              "platform_event_counts": dict(sorted(platform.items())),
+              "application_event_counts": dict(sorted(application.items())),
+              "recent_reports": reports[-5:],
+          }
+          print(json.dumps(summary, indent=2, sort_keys=True))
+          PY
 
   rollback:
     if: github.ref == 'refs/heads/main' && inputs.action == 'rollback'
