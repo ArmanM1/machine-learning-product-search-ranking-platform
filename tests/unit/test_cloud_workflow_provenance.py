@@ -185,7 +185,10 @@ def test_failed_heldout_gate_publishes_evidence_without_promoting_candidate() ->
     assert '.bundle_s3_key == ("promoted/releases/" + $release + "/")' in deploy
     assert '.evaluation.release_status == "failed"' in deploy
     assert ".evaluation.strongest_baseline_model_id == $manifest.promoted_model_id" in deploy
-    assert 'model_tag="model-${model_slug}-${model_identity_hash}-${model_hash}"' in deploy
+    assert (
+        'model_tag="model-${model_slug}-${model_identity_hash}-${model_hash}-${GITHUB_SHA:0:12}"'
+        in deploy
+    )
     assert "bundle_s3_key=\"$(jq -er '.bundle_s3_key' current-pointer.json)\"" in benchmark
     assert 'status == "failed"' in benchmark
     assert 'evaluation.get("strongest_baseline_model_id") == MODEL_ID' in benchmark
@@ -422,10 +425,10 @@ def test_benchmark_preserves_direct_server_serialization_measurements() -> None:
     assert "a successful request has invalid serialization latency" in workflow
 
 
-def _serving_model_tag(model_id: str, release_manifest_sha256: str) -> str:
+def _serving_model_tag(model_id: str, release_manifest_sha256: str, git_sha: str) -> str:
     slug = model_id.replace("@", "-at-")[:80]
     identity = hashlib.sha256(model_id.encode()).hexdigest()[:12]
-    return f"model-{slug}-{identity}-{release_manifest_sha256[:12]}"
+    return f"model-{slug}-{identity}-{release_manifest_sha256[:12]}-{git_sha[:12]}"
 
 
 def test_deploy_derives_bounded_docker_safe_tags_for_baseline_and_negative_release() -> None:
@@ -433,18 +436,23 @@ def test_deploy_derives_bounded_docker_safe_tags_for_baseline_and_negative_relea
     pinned_baseline = (
         "pretrained-cross-encoder@233902d25c440f23af6f7d6e94d2946bac0bee0a-enriched_v1"
     )
-    initial_tag = _serving_model_tag(pinned_baseline, "1" * 64)
-    retained_baseline_tag = _serving_model_tag(pinned_baseline, "2" * 64)
+    initial_tag = _serving_model_tag(pinned_baseline, "1" * 64, "a" * 40)
+    retained_baseline_tag = _serving_model_tag(pinned_baseline, "2" * 64, "a" * 40)
+    retry_revision_tag = _serving_model_tag(pinned_baseline, "2" * 64, "b" * 40)
 
-    for tag in (initial_tag, retained_baseline_tag):
+    for tag in (initial_tag, retained_baseline_tag, retry_revision_tag):
         assert 1 <= len(tag) <= 128
         assert re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}", tag)
         assert "@" not in tag
     assert initial_tag != retained_baseline_tag
+    assert retained_baseline_tag != retry_revision_tag
     assert 'model_slug="${MODEL_ID//@/-at-}"' in deploy
     assert 'model_slug="${model_slug:0:80}"' in deploy
     assert 'model_identity_hash="$(printf \'%s\' "${MODEL_ID}" | sha256sum | cut -c1-12)"' in deploy
-    assert 'model_tag="model-${model_slug}-${model_identity_hash}-${model_hash}"' in deploy
+    assert (
+        'model_tag="model-${model_slug}-${model_identity_hash}-${model_hash}-${GITHUB_SHA:0:12}"'
+        in deploy
+    )
     assert "((${#tag} >= 1 && ${#tag} <= 128))" in deploy
     assert '[[ "${tag}" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]' in deploy
 
@@ -460,7 +468,14 @@ def test_deploy_reuses_only_content_identical_immutable_ecr_images() -> None:
     assert "io.product-search.release-manifest-sha256=sha256:${release_manifest_sha256}" in deploy
     assert "aws ecr batch-get-image" in deploy
     assert "aws ecr put-image" in deploy
+    assert 'release_tag="release-${RELEASE_ID}-${GITHUB_SHA}"' in deploy
     assert 'test "$(lookup_tag_digest "${tag}")" = "${digest}"' in deploy
+    assert 'docker cp "${container_id}:/var/task/release/." -' in deploy
+    assert "--file -" in deploy
+    assert "--delay-directory-restore" in deploy
+    assert "--no-same-owner" in deploy
+    assert "--no-same-permissions" in deploy
+    assert 'docker cp "${container_id}:/var/task/release/." registry-image-release/' not in deploy
     assert deploy.count('docker push "${SERVE_REPOSITORY}:${release_tag}"') == 1
     assert 'docker push "${SERVE_REPOSITORY}:${sha_tag}"' not in deploy
     assert 'docker push "${SERVE_REPOSITORY}:${model_tag}"' not in deploy
