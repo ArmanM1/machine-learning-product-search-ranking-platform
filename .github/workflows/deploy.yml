@@ -804,9 +804,13 @@ jobs:
               application/vnd.docker.distribution.manifest.v2+json \
               application/vnd.oci.image.manifest.v1+json \
             > registry-image.json
-          jq -er --arg digest "${digest}" \
+          # ECR digests the exact manifest bytes. `-j` suppresses jq's trailing
+          # newline so immutable aliases retain the Docker-pushed digest.
+          jq -jer --arg digest "${digest}" \
             '.images | map(select(.imageId.imageDigest == $digest)) | .[0].imageManifest' \
             registry-image.json > registry-image-manifest.json
+          test "sha256:$(sha256sum registry-image-manifest.json | cut -d' ' -f1)" = \
+            "${digest}"
           registry_manifest_media_type="$(jq -er --arg digest "${digest}" \
             '.images | map(select(.imageId.imageDigest == $digest)) | .[0].imageManifestMediaType' \
             registry-image.json)"

@@ -469,6 +469,12 @@ def test_deploy_reuses_only_content_identical_immutable_ecr_images() -> None:
     assert "aws ecr batch-get-image" in deploy
     assert "aws ecr put-image" in deploy
     assert 'release_tag="release-${RELEASE_ID}-${GITHUB_SHA}"' in deploy
+    assert 'jq -jer --arg digest "${digest}"' in deploy
+    assert (
+        'test "sha256:$(sha256sum registry-image-manifest.json | cut -d\' \' -f1)" = \\\n'
+        '            "${digest}"'
+        in deploy
+    )
     assert 'test "$(lookup_tag_digest "${tag}")" = "${digest}"' in deploy
     assert 'docker cp "${container_id}:/var/task/release/." -' in deploy
     assert "--file -" in deploy
