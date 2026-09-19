@@ -1667,13 +1667,15 @@ jobs:
               await route.fulfill({ response: staged })
             })
             const response = await page.goto(origin.origin, {
-              waitUntil: 'domcontentloaded',
+              waitUntil: 'networkidle',
               timeout: 120000,
             })
             if (!response || !response.ok()) throw new Error('staged CloudFront document was not successful')
             await page.getByRole('link', { name: 'Rerank workspace home', exact: true }).waitFor()
             await page.getByRole('heading', { name: /Compare product rankings|Inspect the selected baseline/i }).waitFor()
             await page.getByRole('link', { name: 'Rank', exact: true }).waitFor()
+            await page.locator('.comparison-summary').waitFor({ timeout: 120000 })
+            await page.locator('.rankings-grid').waitFor()
             await page.getByRole('link', { name: 'Evidence', exact: true }).click()
             await page.getByRole('heading', { name: 'Evidence', exact: true }).waitFor()
             await page.locator('.release-state').filter({ hasText: expectedStatus }).waitFor()

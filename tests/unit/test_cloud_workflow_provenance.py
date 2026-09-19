@@ -533,6 +533,15 @@ def test_deploy_browser_checks_use_real_mode_status_and_candidate_canary() -> No
     assert '--name production \\\n            --function-version "${candidate_version}"' in deploy
     assert '"$(cat ../cloudfront-url.txt)/healthz" > ../staged-candidate-health.json' in deploy
     assert '.status == "ok" and .service_version == $version' in deploy
+    staged_browser = deploy.split(
+        "name: Browser-smoke the staged static candidate through CloudFront", 1
+    )[1].split("name: Capture rollback state and activate", 1)[0]
+    assert "waitUntil: 'networkidle'" in staged_browser
+    assert "await page.locator('.comparison-summary').waitFor({ timeout: 120000 })" in staged_browser
+    assert "await page.locator('.rankings-grid').waitFor()" in staged_browser
+    assert staged_browser.index("await page.locator('.rankings-grid').waitFor()") < (
+        staged_browser.index("name: 'Evidence', exact: true")
+    )
 
 
 def test_deploy_advances_staged_decision_only_after_production_verification() -> None:
