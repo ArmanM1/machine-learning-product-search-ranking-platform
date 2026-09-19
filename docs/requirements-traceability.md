@@ -11,7 +11,7 @@ Status legend: **code path** means an implementation location exists or is reser
 | FR-SETUP-003 | `evidence/setup/account-checkpoint.md` | User-facing card delivered; retained evidence pending |
 | FR-SETUP-004 | `docs/security.md` | Policy documented; private-boundary verification pending |
 | FR-SETUP-005 | `evidence/setup/account-checkpoint.md`, `iam.tf` | Not accepted for MFA: owner declined it; immutable non-root OIDC path is configured and awaits workflow proof |
-| FR-SETUP-006 | `infra/terraform/modules/platform/budgets.tf`, `budget_kill_switch.tf`, `docs/budget-kill-switch.md` | Owner waived AWS Budget creation/email confirmation; waiver is an exception, not a passed gate. Optional thresholds remain dormant, while public serving has budget-independent expiry within 24 hours; apply/trip evidence pending |
+| FR-SETUP-006 | `infra/terraform/modules/platform/budgets.tf`, `budget_kill_switch.tf`, `docs/budget-kill-switch.md` | Owner waived AWS Budget creation/email confirmation; waiver is an exception, not a passed gate. Optional thresholds and the default-off public-serving kill switch remain dormant unless explicitly enabled by privileged infrastructure reconciliation |
 | FR-SETUP-007 | `docs/cost-controls.md`, `validate_financial_snapshot.py`, `reserve_financial_capacity.py` | No current credit balance is asserted here. Every AWS write needs a fresh operation-bound receipt, and every ordinary write needs a successful cumulative conditional ledger reservation; live balance/price evidence pending |
 | FR-SETUP-008 | `bootstrap-infrastructure.yml`, `render_bootstrap_iam.py` | No static key exists; repository OIDC customization and state-role trust must be migrated to the exact workflow-bound subject, then redacted identity proof remains pending |
 | FR-SETUP-009 | `bootstrap-infrastructure.yml`, `docs/cloud-deployment.md` | Fixed six-resource create-only plan workflow ready; exact plan hash/run evidence pending |
@@ -78,7 +78,7 @@ Status legend: **code path** means an implementation location exists or is reser
 | FR-CLOUD-002 | Training IAM/storage, `train.yml` | Completed one-instance Spot Training job manifest |
 | FR-CLOUD-003 | Processing IAM/storage, `release.yml`, strict `SageMakerProcessingQuotaPreflight` | Exact `L-0307F515` applied-capacity receipt, then two completed separately counted clean Processing jobs plus bound report |
 | FR-CLOUD-004 | `storage.tf`, `prepare-data.yml` | Applied versioning/lifecycle inspection and immutable cloud-object checksum evidence pending |
-| FR-CLOUD-005 | `serving.tf`, `budget_kill_switch.tf`, `bootstrap-baseline.yml`, `deploy.yml` | Baseline bundle, API/Lambda/CloudFront smoke, public URL, and observed automatic-expiry trip/recovery evidence |
+| FR-CLOUD-005 | `serving.tf`, `budget_kill_switch.tf`, `bootstrap-baseline.yml`, `deploy.yml` | Baseline bundle, API/Lambda/CloudFront smoke, public URL, and optional automatic-expiry trip/recovery evidence when that control is enabled |
 | FR-CLOUD-006 | `infra/terraform/`, `reserve_financial_capacity.py` | Format/validate passed locally; apply/plan plus conditional ledger create/conflict/idempotency evidence pending |
 | FR-CLOUD-007 | `iam.tf`, `render_bootstrap_iam.py`, `docs/cloud-deployment.md` | Repository OIDC customization readback, applied one-workflow-per-role trust inspection, and fork/wrong-workflow denial tests pending |
 | FR-CLOUD-008 | Lambda aliases/S3 versions/ECR retention, `deploy.yml` | Successful rollback artifact |

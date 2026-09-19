@@ -6,12 +6,12 @@ create_github_oidc_provider       = false
 existing_github_oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
 
 # Keep false until the owner approves the alert address and confirms it directly in AWS.
-# Required before enable_public_serving can be set true; provisions the USD 10 kill switch.
 enable_budgets            = false
 budget_notification_email = ""
 alarm_notification_email  = ""
 
 # Create the private candidate first; expose the public API/site only after its gates pass.
-enable_serving        = false
-enable_public_serving = false
-serving_image_uri     = ""
+enable_serving                    = false
+enable_public_serving             = false
+enable_public_serving_kill_switch = false
+serving_image_uri                 = ""

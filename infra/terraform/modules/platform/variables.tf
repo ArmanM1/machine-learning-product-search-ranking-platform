@@ -169,13 +169,27 @@ variable "enable_serving" {
 }
 
 variable "enable_public_serving" {
-  description = "Expose the production Function URL and CloudFront site only after the private candidate gates pass. Production public serving is always protected by an independent 24-hour expiry; AWS Budgets are optional defense in depth."
+  description = "Expose the production Function URL and CloudFront site only after the private candidate gates pass. Optional automatic cost/expiry controls are enabled separately."
   type        = bool
   default     = false
 
   validation {
     condition     = !var.enable_public_serving || var.enable_serving
     error_message = "enable_public_serving requires enable_serving=true."
+  }
+}
+
+variable "enable_public_serving_kill_switch" {
+  description = "Provision the optional production IAM, Lambda, SNS, and EventBridge shutdown controls. Disabled by default so public serving does not require identity or scheduler mutations."
+  type        = bool
+  default     = false
+
+  validation {
+    condition = (
+      !var.enable_public_serving_kill_switch ||
+      (var.environment == "prod" && var.enable_serving && var.enable_public_serving)
+    )
+    error_message = "enable_public_serving_kill_switch requires production public serving to be enabled."
   }
 }
 

@@ -846,6 +846,9 @@ def test_first_deploy_keeps_public_serving_private_until_candidate_gates_pass() 
     module_variables = (ROOT / "infra/terraform/modules/platform/variables.tf").read_text(
         encoding="utf-8"
     )
+    kill_switch = (ROOT / "infra/terraform/modules/platform/budget_kill_switch.tf").read_text(
+        encoding="utf-8"
+    )
 
     private_reconcile = deploy.index("Reconcile the private candidate serving infrastructure")
     candidate_gate = deploy.index(
@@ -875,6 +878,13 @@ def test_first_deploy_keeps_public_serving_private_until_candidate_gates_pass() 
 
     assert 'variable "enable_public_serving"' in module_variables
     assert "!var.enable_public_serving || var.enable_serving" in module_variables
+    kill_switch_variable = module_variables.split(
+        'variable "enable_public_serving_kill_switch" {', 1
+    )[1].split("}\n", 1)[0]
+    assert "default     = false" in kill_switch_variable
+    assert "var.enable_public_serving_kill_switch" in kill_switch
+    assert "var.enable_public_serving &&" in kill_switch
+    assert "enable_public_serving_kill_switch" not in public_section
     public_resources = (
         "aws_lambda_function_url.production",
         "aws_lambda_permission.production_function_url",
@@ -945,8 +955,13 @@ def test_first_deploy_keeps_public_serving_private_until_candidate_gates_pass() 
         example = (environment_root / "terraform.tfvars.example").read_text(encoding="utf-8")
         assert 'variable "enable_public_serving"' in variables
         assert "!var.enable_public_serving || var.enable_serving" in variables
+        assert 'variable "enable_public_serving_kill_switch"' in variables
         assert "enable_public_serving             = var.enable_public_serving" in main
-        assert "enable_public_serving = false" in example
+        assert (
+            "enable_public_serving_kill_switch = var.enable_public_serving_kill_switch" in main
+        )
+        assert re.search(r"(?m)^enable_public_serving\s*=\s*false$", example)
+        assert re.search(r"(?m)^enable_public_serving_kill_switch\s*=\s*false$", example)
 
 
 def test_deploy_alarm_email_is_private_and_optional() -> None:

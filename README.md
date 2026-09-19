@@ -18,7 +18,7 @@ The project is deliberately more than a notebook: immutable artifacts, held-out 
 - **Learning to rank:** BM25 and an unchanged pretrained cross-encoder are compared with a task-fine-tuned cross-encoder on identical candidate groups.
 - **Credible evaluation:** query-level graded nDCG, paired bootstrap confidence intervals, deterministic ranking artifacts, latency distributions, slices, wins, losses, and two controlled ablations.
 - **Leakage-resistant release engineering:** validation selects the model; the official test split is available only to two separately counted clean release jobs after trial selection is frozen.
-- **Production ML operations:** content-addressed data, digest-pinned containers, SageMaker Managed Spot training, immutable S3 evidence, promotion/retention decisions, Lambda aliases, CloudFront, rollback, and automatic public-serving expiry.
+- **Production ML operations:** content-addressed data, digest-pinned containers, SageMaker Managed Spot training, immutable S3 evidence, promotion/retention decisions, Lambda aliases, CloudFront, rollback, and optional automatic public-serving shutdown controls.
 - **Software quality:** typed Python and TypeScript, contract and integration tests, container/IaC/dependency scans, least-privilege GitHub OIDC roles, and Terraform drift checks.
 
 ## System flow

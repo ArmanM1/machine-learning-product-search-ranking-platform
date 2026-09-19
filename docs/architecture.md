@@ -71,7 +71,7 @@ private S3 site origin ----------------------> CloudFront
                                                    +-- /api/*, /healthz, /readyz -> production Function URL
 ```
 
-All resources default to `us-east-1`. There is no NAT Gateway, load balancer, database, OpenSearch domain, SageMaker notebook, SageMaker real-time endpoint, scheduled retraining, or provisioned Lambda concurrency. When public serving exists, a budget-independent EventBridge schedule trips the exact Lambda/CloudFront shutdown handler within 24 hours. Optional AWS Budget triggers remain disabled under the owner waiver.
+All resources default to `us-east-1`. There is no NAT Gateway, load balancer, database, OpenSearch domain, SageMaker notebook, SageMaker real-time endpoint, scheduled retraining, or provisioned Lambda concurrency. The public surface remains bounded by Lambda reserved concurrency. A budget-independent EventBridge schedule and exact Lambda/CloudFront shutdown handler are available only through the default-off `enable_public_serving_kill_switch` opt-in. Optional AWS Budget triggers remain disabled under the owner waiver.
 
 ## Component boundaries
 
@@ -141,7 +141,7 @@ The first deployed revision is the reproducible baseline release. It establishes
 - CloudWatch operational log retention: 7 days.
 - S3 public access: blocked for both buckets; CloudFront uses origin access control.
 - CloudFront: generated domain, TLS redirect, managed caching policies, API caching disabled.
-- Public-serving expiry: first automatic shutdown invocation within 24 hours; recovery is manual and Terraform does not silently restore a tripped surface.
+- Optional public-serving expiry: when explicitly enabled, the first automatic shutdown invocation occurs within 24 hours; recovery is manual and Terraform does not silently restore a tripped surface.
 - Financial envelope: signed operation-specific snapshot plus conditional cumulative ledger reservation. Billing lag, trigger delivery, and already-incurred requests mean this is not a hard USD 0 guarantee.
 
 Measured quality, latency, runtime, cost, and cloud-execution claims remain unavailable until their evidence gates pass.

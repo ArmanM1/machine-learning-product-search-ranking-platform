@@ -23,7 +23,7 @@ Status: the repository/environment/workflow-bound GitHub OIDC roles, external pe
 | Public bucket exposure | Account/bucket public-access blocks and CloudFront origin access control |
 | Model reads raw data at runtime | Lambda role can read only `public/*`; model is embedded in the image |
 | Arbitrary-code or SSRF input | Curated query IDs only; no uploads, URLs, paths, serialized objects, or shell input |
-| Cost denial of service or concurrent budget oversubscription | Operation-bound HMAC receipt, conditional S3 campaign-ledger reservation, one shared financial concurrency group, API throttle, Lambda reserved concurrency two, zero provisioned concurrency, and automatic public-serving expiry within 24 hours |
+| Cost denial of service or concurrent budget oversubscription | Operation-bound HMAC receipt, conditional S3 campaign-ledger reservation, one shared financial concurrency group, API throttle, Lambda reserved concurrency two, zero provisioned concurrency, and an optional default-off public-serving expiry control |
 | Sensitive logging | Structured allowlist fields; no product descriptions, payloads, credentials, account IDs, or stack traces in public responses |
 | Dependency compromise | Pinned locks, PR dependency scans, image scan, Terraform scan, non-root serving container requirement |
 
@@ -96,7 +96,7 @@ The normal target state uses short-lived browser/CLI sessions and protected GitH
 ## Public API rules
 
 - Core routes accept known curated query IDs only.
-- The unlinked candidate Function URL requires AWS IAM authorization; the production Function URL is intentionally public and bounded by Lambda reserved concurrency and automatic expiry.
+- The unlinked candidate Function URL requires AWS IAM authorization; the production Function URL is intentionally public and bounded by Lambda reserved concurrency. A 24-hour automatic shutdown is available as a separate privileged opt-in.
 - `top_k` is 1 through 40 and unknown fields are rejected where practical.
 - The application reads request bodies through a 16,384-byte bounded cache before validation; it
   enforces the measured byte count even when `Content-Length` is absent or understated and rejects

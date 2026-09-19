@@ -1,8 +1,16 @@
 locals {
   budget_kill_switch_threshold_usd = 10
-  budget_kill_switch_topic_enabled = var.environment == "prod" && var.enable_budgets
-  public_serving_expiry_hours      = 24
-  budget_kill_switch_enabled       = var.environment == "prod" && var.enable_public_serving
+  budget_kill_switch_topic_enabled = (
+    var.environment == "prod" &&
+    var.enable_budgets &&
+    var.enable_public_serving_kill_switch
+  )
+  public_serving_expiry_hours = 24
+  budget_kill_switch_enabled = (
+    var.environment == "prod" &&
+    var.enable_public_serving &&
+    var.enable_public_serving_kill_switch
+  )
 }
 
 resource "aws_sns_topic" "budget_kill_switch" {
@@ -48,8 +56,8 @@ resource "aws_sns_topic_policy" "budget_kill_switch" {
   policy = data.aws_iam_policy_document.budget_kill_switch_topic[0].json
 }
 
-# The role exists in production before public serving is enabled. This lets the restricted
-# production reconciler pass it to the event-driven function without gaining IAM mutation rights.
+# This optional role is provisioned only when the operator explicitly enables the
+# public-serving kill switch through a sufficiently privileged infrastructure reconciliation.
 resource "aws_iam_role" "budget_kill_switch" {
   count = local.budget_kill_switch_enabled ? 1 : 0
 

@@ -2,14 +2,16 @@
 
 Status: implemented in Terraform, handler code, and local tests; no live apply or trip is claimed.
 
-## Owner waiver and automatic expiry
+## Owner waiver and optional automatic expiry
 
 The owner explicitly waived AWS Budget creation and email confirmation. That waiver is recorded
 as a deliberate PRD exception; it is never represented as a passed budget gate. Public production
-serving therefore has a budget-independent, no-idle-compute expiry as its primary automatic safety
-control. An exact EventBridge rule invokes the shutdown command no later than 24 hours after the
-public resources are created. Both `ACTUAL` and `FORECASTED` AWS Budgets notifications at USD 10
-remain available as an optional second trigger if budgets are enabled later.
+serving is therefore deployable without IAM or EventBridge mutation. The Terraform variable
+`enable_public_serving_kill_switch` defaults to `false`; a privileged infrastructure reconciliation
+may explicitly enable the no-idle-compute control. When enabled, an exact EventBridge rule invokes
+the shutdown command no later than 24 hours after the public resources are created. Both `ACTUAL`
+and `FORECASTED` AWS Budgets notifications at USD 10 remain available as an optional second trigger
+when both budgets and the kill switch are enabled.
 
 Either trigger invokes a small Lambda command from the same immutable serving image.
 The command first sets the public ranker function's reserved concurrency to zero and then disables
@@ -33,8 +35,8 @@ outside the controlled public ranker can therefore appear after the USD 10 notif
 manual credit, signed preflight, durable reservation, concurrency, and deployment controls remain
 required; the waived AWS Budget/email steps remain visibly waived.
 
-The kill switch never automatically restores service. The daily schedule continues to keep an
-expired deployment fail-closed. Ordinary Terraform reconciliation ignores
+When enabled, the kill switch never automatically restores service. The daily schedule continues to
+keep an expired deployment fail-closed. Ordinary Terraform reconciliation ignores
 external changes to the ranker's reserved concurrency and the distribution's enabled flag, so it
 cannot silently undo a trip. Recovery requires an operator to investigate the budget event,
 re-establish the approved financial evidence, explicitly restore ranker concurrency to two, and

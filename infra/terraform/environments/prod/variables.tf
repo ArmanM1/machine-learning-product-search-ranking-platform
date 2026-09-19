@@ -94,6 +94,17 @@ variable "enable_public_serving" {
   }
 }
 
+variable "enable_public_serving_kill_switch" {
+  description = "Provision optional IAM, Lambda, SNS, and EventBridge controls that shut down public serving."
+  type        = bool
+  default     = false
+
+  validation {
+    condition     = !var.enable_public_serving_kill_switch || var.enable_public_serving
+    error_message = "enable_public_serving_kill_switch requires enable_public_serving=true."
+  }
+}
+
 variable "serving_image_uri" {
   type    = string
   default = ""

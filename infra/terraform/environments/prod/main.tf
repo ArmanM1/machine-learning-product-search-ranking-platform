@@ -30,6 +30,7 @@ module "platform" {
   required_credit_reserve_usd       = 40
   enable_serving                    = var.enable_serving
   enable_public_serving             = var.enable_public_serving
+  enable_public_serving_kill_switch = var.enable_public_serving_kill_switch
   serving_image_uri                 = var.serving_image_uri
   serving_git_sha                   = var.serving_git_sha
   serving_deployment_nonce          = var.serving_deployment_nonce

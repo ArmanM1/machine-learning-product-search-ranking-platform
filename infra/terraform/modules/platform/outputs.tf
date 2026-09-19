@@ -86,7 +86,7 @@ output "cloudfront_url" {
 }
 
 output "budget_kill_switch" {
-  description = "Backward-compatible evidence for the budget-independent public expiry and optional AWS Budget trigger."
+  description = "State of the optional public-serving cost/expiry kill switch and AWS Budget trigger."
   value = {
     status = (
       local.budget_kill_switch_enabled ? "armed" : "disabled"
@@ -94,7 +94,7 @@ output "budget_kill_switch" {
     threshold_usd              = local.budget_kill_switch_threshold_usd
     trigger_types              = ["ACTUAL", "FORECASTED"]
     budget_trigger_enabled     = local.budget_kill_switch_topic_enabled
-    automatic_expiry_hours     = local.public_serving_expiry_hours
+    automatic_expiry_hours     = local.budget_kill_switch_enabled ? local.public_serving_expiry_hours : null
     expiry_rule_arn            = try(aws_cloudwatch_event_rule.public_serving_expiry[0].arn, null)
     topic_arn                  = try(aws_sns_topic.budget_kill_switch[0].arn, null)
     handler_function_name      = try(aws_lambda_function.budget_kill_switch[0].function_name, null)
@@ -107,7 +107,7 @@ output "budget_kill_switch" {
 }
 
 output "cost_guard" {
-  description = "Manual cost bounds plus the budget-independent production expiry and optional budget trigger."
+  description = "Manual cost bounds plus the explicitly optional production expiry and AWS Budget trigger."
   value = {
     campaign_budget_usd          = var.campaign_budget_usd
     maximum_out_of_pocket_usd    = var.maximum_out_of_pocket_usd
@@ -118,6 +118,6 @@ output "cost_guard" {
     sagemaker_realtime_endpoints = 0
     budget_kill_switch_armed     = local.budget_kill_switch_enabled
     budget_kill_switch_usd       = local.budget_kill_switch_threshold_usd
-    public_serving_expiry_hours  = local.public_serving_expiry_hours
+    public_serving_expiry_hours  = local.budget_kill_switch_enabled ? local.public_serving_expiry_hours : null
   }
 }

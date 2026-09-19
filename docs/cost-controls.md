@@ -88,7 +88,8 @@ The public-demo `deploy` job has one explicit owner-authorized exception: it doe
 snapshot and does not append to or verify the cumulative reservation ledger. It exists so private snapshot
 or ledger failures with no safe, actionable public diagnostic cannot block the already validated public
 baseline. The exact deployment authorization phrase, request-bounded infrastructure, shared concurrency
-group, and automatic public-serving expiry remain enforced. Rollback and all non-deployment AWS workflows
+group, and Lambda reserved-concurrency bound remain enforced. The IAM/Lambda/EventBridge public-serving
+kill switch is a separate privileged opt-in and defaults off. Rollback and all non-deployment AWS workflows
 remain snapshot- and ledger-gated.
 
 Before either held-out access counter is reserved, `release.yml` reads the exact regional SageMaker
@@ -117,8 +118,10 @@ The optional manual serving benchmark reserves an additional conservative USD 0.
   no budget email secret is required. The Terraform definitions remain dormant for a future explicit owner
   decision; if enabled later, actual and forecast budgets notify at USD 1, 10, 25, and 40, and the USD 10
   notification also invokes the dedicated shutdown path.
-- Production public serving always creates a budget-independent EventBridge expiry. Its first invocation is
-  within 24 hours and repeated invocations keep Lambda reserved concurrency at zero and disable the exact
+- `enable_public_serving_kill_switch` can explicitly add a budget-independent EventBridge expiry. It defaults
+  off so the restricted production deploy role can publish the already bounded public surface without IAM
+  or scheduler mutation. When enabled through privileged infrastructure reconciliation, its first invocation
+  is within 24 hours and repeated invocations keep Lambda reserved concurrency at zero and disable the exact
   CloudFront distribution until explicit operator recovery. This is containment, not a real-time billing
   cutoff or hard USD 0 guarantee.
 - S3 lifecycle for scratch data, run checkpoints, multipart uploads, and noncurrent versions.

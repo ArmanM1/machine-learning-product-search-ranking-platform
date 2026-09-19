@@ -94,6 +94,17 @@ variable "enable_public_serving" {
   }
 }
 
+variable "enable_public_serving_kill_switch" {
+  description = "Production-only opt-in for the public-serving cost/expiry kill switch; keep false in dev."
+  type        = bool
+  default     = false
+
+  validation {
+    condition     = !var.enable_public_serving_kill_switch
+    error_message = "enable_public_serving_kill_switch is production-only and must remain false in dev."
+  }
+}
+
 variable "serving_image_uri" {
   type    = string
   default = ""

@@ -11,8 +11,9 @@ budget_notification_email = ""
 alarm_notification_email  = ""
 
 # Create the private candidate first; expose the public API/site only after its gates pass.
-enable_serving        = false
-enable_public_serving = false
-serving_image_uri     = ""
-serving_git_sha       = ""
-serving_deployment_nonce = ""
+enable_serving                    = false
+enable_public_serving             = false
+enable_public_serving_kill_switch = false
+serving_image_uri                 = ""
+serving_git_sha                   = ""
+serving_deployment_nonce          = ""

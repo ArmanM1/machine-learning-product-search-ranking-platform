@@ -45,7 +45,7 @@ This is the exact applied resource inventory represented by Terraform. Runtime s
 - Ten repository/environment/workflow-bound GitHub OIDC roles with distinct policies.
 - Optionally, the account-wide GitHub OIDC provider if inspection confirms it does not already exist.
 - Pre-created Lambda/API log groups with seven-day retention.
-- A production public-serving shutdown handler and recurring 24-hour expiry when the public surface exists.
+- An optional production public-serving shutdown handler and recurring 24-hour expiry when explicitly enabled by privileged infrastructure reconciliation.
 - Dormant optional actual/forecast budgets and their SNS trigger; these remain disabled under the owner waiver.
 - Optionally, SageMaker failure EventBridge rules when an operations notification address is supplied.
 
@@ -396,7 +396,8 @@ when `FINANCIAL_CAPACITY_RESERVATION_REQUIRED=false`. This narrow exception lets
 owner-authorized launch proceed after the private snapshot and ledger controls reject the operation without
 exposing a safe, actionable reason. `FINANCIAL_SNAPSHOT_REQUIRED=false` also makes the deployment-only discarded
 snapshot checks explicit no-ops. The job still requires the exact public-deployment authorization phrase,
-keeps its bounded serving shape and concurrency controls, and installs automatic public-serving expiry.
+and keeps its bounded serving shape and concurrency controls. The optional IAM/Lambda/EventBridge shutdown
+control is not installed unless `enable_public_serving_kill_switch=true` is separately reconciled.
 Manual rollback and every training, evaluation, publication, image, data, and infrastructure workflow
 continue to require the signed snapshot and an atomic ledger reservation.
 
