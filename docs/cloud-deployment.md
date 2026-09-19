@@ -1,6 +1,6 @@
 # AWS cloud deployment
 
-Status: bootstrap and production Terraform are applied in `us-east-1`; all 57 managed resources completed a post-apply no-drift plan. Workflow-bound GitHub OIDC roles are live, the private campaign ledger is initialized, the immutable dataset is published, and live quota probes confirm capacity for the selected GPU Training and Processing instance classes. No candidate training, held-out evaluation, model promotion, or public release is claimed yet.
+Status: bootstrap and production Terraform are applied in `us-east-1`; workflow-bound GitHub OIDC roles are live, the private campaign ledger is initialized, the immutable dataset and validation-only baseline bundle are published, and live quota probes confirmed capacity for the optional Training and Processing path. The baseline serving candidate passed its private API, cold-start, 200-request warm, and staged CloudFront browser gates. A subsequent read-only plan found two expected in-place serving-surface updates, so the repository does not currently claim no drift or successful public activation. No candidate training, held-out evaluation, or trained-model promotion is claimed.
 
 ## Prerequisite evidence
 
@@ -27,7 +27,7 @@ state and atomic ledger reservation preserve the campaign and USD 40 credit rese
 
 ## Bounded bootstrap plan
 
-This is the exact applied resource inventory represented by Terraform. Runtime serving resources stay disabled until an immutable release is ready.
+This is the Terraform-managed resource inventory applied in stages. Runtime serving was initially disabled; the serving and public-surface flags were enabled only after the immutable validation-only release was ready and its private runtime gates passed.
 
 ### State bootstrap
 
@@ -472,5 +472,6 @@ full typed and cross-artifact validation against the readback directory. There i
 ## Current unresolved prerequisites and owner inputs
 
 - Root/account-owner MFA remains declined as an accepted exception; this does not block the remaining protected workflows.
-- Each mutating workflow still requires an operation-bound fresh financial receipt and its exact authorization phrase.
-- Candidate training, frozen trial selection, the two clean held-out jobs, deployment, benchmark, rollback, and exact redeployment must complete before the project claims a verified release.
+- Training, evaluation, publication, image, data, infrastructure, and rollback mutations still require an operation-bound fresh financial receipt and the appropriate exact authorization phrase. The explicitly owner-authorized public-demo deployment retains the narrow documented receipt/ledger exception and still requires its deployment authorization phrase.
+- Final public activation, independent browser verification, and the successful deployment artifact remain pending; no public URL is a portfolio claim before those checks pass.
+- Candidate training, frozen trial selection, the two clean held-out jobs, candidate deployment, benchmark, rollback, and exact redeployment must complete before the project claims a `verified` trained-candidate release. They are not prerequisites for honestly publishing the separate `validation_only` baseline portfolio release.

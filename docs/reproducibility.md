@@ -1,6 +1,6 @@
 # Reproducibility
 
-Status: command and evidence contract. A clean, commit-bound cloud preparation published the current `query-split-manifest-v1` identity and content-addressed dataset. Two earlier local validation scoring processes reproduced every quality metric, rank, and score for all six baseline systems; controlled cloud baseline latency, candidate training, held-out evaluation, and deployment remain pending.
+Status: the clean, commit-bound cloud preparation published the current `query-split-manifest-v1` identity and content-addressed dataset. Two separate validation scoring processes reproduced every quality metric, rank, and score for all six baseline systems, and the protected workflow published the immutable validation-only baseline bundle with zero test access. Final public activation remains pending. Candidate training and held-out evaluation have not run.
 
 ## Supported environment
 
@@ -62,7 +62,7 @@ field shape with explicit `unavailable` identities. Account IDs, ARNs, bucket/ob
 and training text are not part of the logging context; the immutable training `RunManifest`
 remains the durable source for full job lifecycle and artifact checksums.
 
-## Local validation baseline evidence
+## Validation baseline evidence
 
 The original scoring process and the later full reproduction used the same canonical `baselines-v1` config hash, dataset-manifest hash, 2,057-query validation set, and zero held-out test accesses. Across 249,000 rows, all parsed non-latency fields were exactly equal. The deterministic semantic comparison reproduced both `(query_id, product_id, rank)` and `(query_id, product_id, rank, score)` hashes for every system. All six complete quality vectors were also exactly equal. The unchanged strongest system was `pretrained-cross-encoder@233902d25c440f23af6f7d6e94d2946bac0bee0a-enriched_v1` at graded nDCG@10 `0.8490371644459062` in both runs.
 
@@ -79,11 +79,13 @@ Raw ranking JSONL hashes are intentionally recorded separately in `evidence/base
 
 These were separate processes, but not controlled performance trials: both observed a dirty shared worktree, and the second run's recorded Git SHA does not bind its uncommitted state. The evidence therefore closes local quality and ranking reproducibility only. It does not claim latency reproducibility or a clean-checkout reproduction.
 
+The protected baseline and bootstrap workflows subsequently checksum-verified the declared inputs and published an immutable `validation_only` release bundle containing the baseline summary, typed public evidence, release manifest, exact bundle inventory, and initial pointer. That cloud publication does not turn the uncontrolled local timing values into serving evidence and does not authorize a held-out claim.
+
 Held-out evaluation is deliberately omitted from routine reproduction. It must fail locally unless the guarded release context supplies `ALLOW_HELDOUT_EVAL=1`, frozen hashes, baseline declaration, and the next access counter.
 
-Before that guarded context can exist, complete the exact three-run validation comparison and publish its immutable selection artifact. See `docs/trial-selection.md`. The protected order is treatment final run, random-negative ablation, title-only ablation, `freeze-trial-selection.yml`, then `release.yml`. The release rejects a missing or changed selection before either held-out access counter is reserved.
+For a future trained-candidate release, the exact three-run validation comparison and immutable selection artifact must be completed first. See `docs/trial-selection.md`. The protected order is treatment final run, random-negative ablation, title-only ablation, `freeze-trial-selection.yml`, then `release.yml`. The release rejects a missing or changed selection before either held-out access counter is reserved. None of those trained-candidate steps is part of the current baseline claim.
 
-The first deployable revision is created without held-out access by the protected `bootstrap-baseline.yml` workflow. Its source command is:
+The first deployable revision was created without held-out access by the protected `bootstrap-baseline.yml` workflow. Its source command is:
 
 ```text
 python -m search_rank.cli bootstrap-baseline-release \
@@ -96,7 +98,7 @@ python -m search_rank.cli bootstrap-baseline-release \
   --hardware-class <recorded-class> --region us-east-1
 ```
 
-It checksum-verifies the successful validation run, records `evidence_mode=validation_only` and test-access count zero, and creates the pointer only if no prior pointer exists.
+It checksum-verified the successful validation run, recorded `evidence_mode=validation_only` and test-access count zero, and created the pointer only because no prior pointer existed.
 
 ## Test and build commands
 
@@ -172,19 +174,19 @@ The serving benchmark always attempts exactly 200 measured requests for each of 
 | Output | Location | Current value |
 |---|---|---|
 | Dataset manifest | content-addressed processed directory | Cloud-published and remotely verified: processed identity `sha256:814e06ce…a29525`, split identity `sha256:fa7dba0f…2f528`; sanitized receipt in `evidence/cloud/live-data-preparation.json` |
-| Baseline summary | run reports | Two separate local validation scoring processes reproduced exact quality, ranks, and scores; controlled latency and clean-checkout evidence remain pending in `evidence/baselines/milestone-2-validation.json` |
-| Baseline bootstrap command summary | protected validation-only release run | Pending |
+| Baseline summary | run reports and validation-only bundle | Published; two separate scoring processes reproduced exact quality, ranks, and scores. Controlled local latency and clean-checkout reproduction remain incomplete as recorded in `evidence/baselines/milestone-2-validation.json` |
+| Baseline bootstrap command summary | protected validation-only release run | Completed and checksum-bound in the protected release artifacts |
 | Candidate run manifest | run root | Pending |
 | Three candidate/control run manifests | private run reports | Pending |
 | Immutable validation trial selection | `runs/trial-selection/<selection-id>/trial-selection.json` | Contract/workflow implemented; cloud artifact pending |
 | Held-out report | manual release run | Pending |
 | Two clean source reports/provenances | manual release run | Pending |
 | Evaluation-bound candidate ModelArtifact | immutable verified release bundle as `candidate-model-artifact.json` | Contract/workflow implemented; cloud artifact pending |
-| Typed public evidence | initial `promoted/<model-id>/`, then immutable `promoted/releases/<release-id>/public-evidence.json` | Pending |
-| Release manifest | initial `promoted/<model-id>/`, then immutable `promoted/releases/<release-id>/release-manifest.json` | Pending |
-| Exact bundle inventory | initial `promoted/<model-id>/`, then immutable `promoted/releases/<release-id>/bundle-checksums.json` | Pending |
-| Deployment evidence | `public/<release-id>/deployment-evidence.json` | Pending |
+| Typed public evidence | initial `promoted/<model-id>/`, then immutable `promoted/releases/<release-id>/public-evidence.json` | Validation-only baseline artifact published with zero test access; verified candidate mode pending and unexecuted |
+| Release manifest | initial `promoted/<model-id>/`, then immutable `promoted/releases/<release-id>/release-manifest.json` | Validation-only baseline artifact published |
+| Exact bundle inventory | initial `promoted/<model-id>/`, then immutable `promoted/releases/<release-id>/bundle-checksums.json` | Validation-only baseline artifact published and verified before staging |
+| Deployment evidence | `public/<release-id>/deployment-evidence.json` | Successful final activation artifact pending |
 | Performance evidence | `public/<release-id>/performance/<run-id>/performance-report.json` | Pending |
 | Durable portfolio release record | `evidence/releases/<release-id>.json` against `schemas/json/portfolio_release_evidence.schema.json` | Contract/assembler implemented; complete live chain pending |
 
-Never replace `Pending` with a target or example number.
+Never replace `Pending` with a target, example number, or value copied from an incomplete workflow run.

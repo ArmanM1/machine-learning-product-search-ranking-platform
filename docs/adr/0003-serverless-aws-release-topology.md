@@ -1,16 +1,18 @@
 # ADR 0003: Serverless AWS release topology
 
-- Status: accepted design; deployment not yet evidenced
+- Status: accepted and implemented for the validation-only baseline; final public activation evidence is pending
 
 ## Decision
 
-Use private immutable images in ECR, run-to-completion SageMaker Training and Processing jobs, versioned S3 artifacts, a Lambda container behind API Gateway, and a private S3 site origin behind CloudFront.
+Use private immutable images in ECR, optional run-to-completion SageMaker Training and Processing jobs for a future trained-candidate release, versioned S3 artifacts, Lambda container Function URLs, and a private S3 site origin behind CloudFront.
 
-The serving image contains the promoted model. Lambda receives CloudWatch logging permissions and sanitized `public/*` report reads only. It receives no raw-data permission. CloudFront sends `/api/*`, `/healthz`, and `/readyz` to the production HTTP API and everything else to the private site bucket.
+The serving image contains the active release model. Lambda receives CloudWatch logging permissions and sanitized `public/*` report reads only. It receives no raw-data permission. CloudFront sends `/api/*`, `/healthz`, and `/readyz` to the production Function URL and everything else to the private site bucket. A separate IAM-authenticated candidate Function URL supports pre-activation API checks.
+
+The current release packages the pinned, unchanged cross-encoder in `validation_only` evidence mode. The immutable baseline bundle is published, and the private API, cold-start, 200-request warm, and staged browser gates have run successfully. Durable CloudFront activation and its final successful deployment artifact remain pending; no task-specific SageMaker training or Processing evaluation has run.
 
 ## Why
 
-This topology produces real managed-training and serverless-serving evidence while avoiding always-on compute. Candidate and production Lambda aliases support smoke testing and rollback. S3 versioning preserves promotion-pointer history, and immutable release prefixes preserve the prior frontend.
+This topology can produce managed-training evidence when the guarded candidate path is executed and already produces bounded serverless-serving evidence without always-on compute. Candidate and production Lambda aliases support smoke testing and rollback. S3 versioning preserves promotion-pointer history, and immutable release prefixes preserve the prior frontend.
 
 ## Alternatives considered
 
@@ -22,5 +24,5 @@ This topology produces real managed-training and serverless-serving evidence whi
 ## Known tradeoffs
 
 - Container-image cold starts may be material and must be reported separately.
-- API Gateway remains directly addressable even though the user-facing entry point is CloudFront.
+- The production Function URL remains directly addressable even though the user-facing entry point is CloudFront; application and Lambda resource policies enforce the intended route boundary.
 - Reserved concurrency two intentionally throttles load tests above two concurrent executions; evidence must report the resulting 429s rather than imply higher scale.

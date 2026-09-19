@@ -1,12 +1,14 @@
 # Architecture
 
-Status: the AWS foundation is applied, its post-apply Terraform plan is clean, and the content-addressed dataset is published. Candidate training, held-out evaluation, public activation, benchmark, and rollback evidence remain pending.
+Status: the AWS foundation and content-addressed dataset are live, and the immutable validation-only baseline bundle is published. The pinned unchanged cross-encoder has passed the private API, cold-start, 200-request warm, and staged browser gates. A final deployment must still reconcile the serving surface and produce successful public-activation evidence. Candidate training, held-out evaluation, post-deployment benchmark, and rollback proof remain unexecuted.
 
 ## Product boundary
 
 The platform reranks a supplied candidate list for a known shopping query. It does not retrieve a catalog, accept arbitrary product feeds, personalize results, or execute commerce transactions. The benchmark and public demo use curated US-English ESCI query groups with at most 40 candidates.
 
 ## Experiment flow
+
+The solid baseline path below is the executed portfolio scope through immutable release publication. The candidate branch is an implemented but unexecuted experiment/release contract.
 
 ```text
 ESCI source + recorded checksums
@@ -129,7 +131,7 @@ The deploy workflow first inspects Terraform state. An existing public surface r
 
 Staged browser requests map every static URL to the immutable `releases/<release-id>/` prefix, so no live-root object changes. Because the public CloudFront API origin targets `production`, the same-origin staged browser check uses a brief revision-ID-CAS canary transition and immediately restores the exact captured alias revision; a restoration failure disables Lambda traffic and is retried by final compensation. Durable activation then CAS-moves the alias, copies the complete static release, verifies the exact CloudFront root and every release object byte plus desktop/mobile/keyboard flows, and only afterward advances the model pointer. Activation and manual rollback install `EXIT`, `INT`, and `TERM` compensation before their first mutation; cancellation preserves the original failure status while attempting to restore alias, static bytes, and pointer, and disables Lambda traffic if coherent restoration cannot be proved. Immediately before evidence publication the workflow re-observes the exact production alias revision and resolved runtime image. Any later failure restores the prior alias, full static release, and pointer; an unrecognized concurrent revision is never overwritten. The canonical deployment-evidence key is itself versioned and advances with an ETag precondition, so a retry can record its new Lambda version without erasing earlier successful observations.
 
-The first deployed revision is the reproducible baseline release. It establishes a known-good rollback target before any candidate revision can be promoted.
+The first successfully activated revision will be the reproducible baseline release. Only its completed post-activation evidence can establish the known-good rollback target required before a candidate revision is promoted.
 
 ## Operational limits
 
@@ -144,4 +146,4 @@ The first deployed revision is the reproducible baseline release. It establishes
 - Optional public-serving expiry: when explicitly enabled, the first automatic shutdown invocation occurs within 24 hours; recovery is manual and Terraform does not silently restore a tripped surface.
 - Financial envelope: signed operation-specific snapshot plus conditional cumulative ledger reservation. Billing lag, trigger delivery, and already-incurred requests mean this is not a hard USD 0 guarantee.
 
-Measured quality, latency, runtime, cost, and cloud-execution claims remain unavailable until their evidence gates pass.
+Validation quality and ranking-reproducibility claims are available in the committed baseline evidence. The incomplete deployment run may inform engineering decisions, but numeric production latency, a public-live claim, and a known-good rollback target remain unavailable until a successful activation artifact passes its final gates.
