@@ -172,6 +172,8 @@ def test_cloud_workflows_keep_controlled_cold_and_warm_measurements_separate() -
     assert "candidate-cold-prior-events-private.json" in deploy
     assert "--previous-version" in deploy
     assert "--qualifier candidate" in deploy
+    assert "aws lambda get-function-concurrency" in deploy
+    assert "'. + {Concurrency: $concurrency[0]}'" in deploy
     assert 'cold_request_id="$(python -c \'import uuid; print(uuid.uuid4())\')"' in deploy
     assert 'cold_request_id="cold-${GITHUB_RUN_ID}' not in deploy
     assert 'observed_request_id="$(jq -er \'.request_id\' candidate-cold-response.json)"' in deploy

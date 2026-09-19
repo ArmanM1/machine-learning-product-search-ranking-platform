@@ -930,6 +930,13 @@ jobs:
           aws lambda get-function \
             --function-name "${function_name}" \
             --qualifier candidate > candidate-function-private.json
+          aws lambda get-function-concurrency \
+            --function-name "${function_name}" \
+            > candidate-function-concurrency-private.json
+          jq --slurpfile concurrency candidate-function-concurrency-private.json \
+            '. + {Concurrency: $concurrency[0]}' \
+            candidate-function-private.json > candidate-function-private.merged.json
+          mv candidate-function-private.merged.json candidate-function-private.json
           expected_runtime_image="$(cat serving-image-uri.txt)"
           jq -e \
             --arg version "${GITHUB_SHA}" \
