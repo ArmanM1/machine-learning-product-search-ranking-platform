@@ -577,6 +577,13 @@ def test_infrastructure_and_production_roles_have_separate_non_escalating_author
     assert "local.artifact_bucket_arn" not in site_policy
     assert 'actions = ["iam:PassRole"]' in deployment
     assert "local.lambda_role_arn" in deployment
+    deployment_bucket_list = next(
+        block for block in deployment.split("statement {") if '"s3:ListBucket"' in block
+    )
+    assert 'test     = "StringLikeIfExists"' in deployment_bucket_list
+    assert 'variable = "s3:prefix"' in deployment_bucket_list
+    assert "local.artifact_bucket_arn" in deployment_bucket_list
+    assert "local.site_bucket_arn" in deployment_bucket_list
     assert 'actions   = ["apigateway:POST"]' in production
     assert (
         'actions   = ["cloudfront:CreateDistribution", "cloudfront:CreateFunction", "cloudfront:TagResource"]'

@@ -486,7 +486,10 @@ data "aws_iam_policy_document" "github_deployment" {
     ]
 
     condition {
-      test     = "StringLike"
+      # HeadBucket authorizes with s3:ListBucket but supplies no s3:prefix.
+      # IfExists keeps object-list calls prefix-bounded while allowing the
+      # Terraform provider to prove these two exact managed buckets exist.
+      test     = "StringLikeIfExists"
       variable = "s3:prefix"
       values = [
         "",
