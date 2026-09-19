@@ -1010,7 +1010,7 @@ jobs:
             "${GITHUB_WORKSPACE}/scripts/validate_financial_snapshot.py" emit \
             --output /dev/null
           cold_result="$(curl \
-            --silent --show-error --connect-timeout 10 --max-time 30 \
+            --silent --show-error --connect-timeout 10 --max-time 120 \
             --aws-sigv4 "aws:amz:${AWS_REGION}:lambda" \
             --user "${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}" \
             --header "x-amz-security-token: ${AWS_SESSION_TOKEN}" \

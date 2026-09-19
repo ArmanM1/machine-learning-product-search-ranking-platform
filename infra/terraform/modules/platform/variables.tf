@@ -246,13 +246,13 @@ variable "lambda_reserved_concurrency" {
 }
 
 variable "lambda_timeout_seconds" {
-  description = "Inference request timeout."
+  description = "Inference request timeout, including on-demand model initialization."
   type        = number
-  default     = 30
+  default     = 120
 
   validation {
-    condition     = var.lambda_timeout_seconds > 0 && var.lambda_timeout_seconds <= 30
-    error_message = "The public function timeout may not exceed 30 seconds."
+    condition     = var.lambda_timeout_seconds > 0 && var.lambda_timeout_seconds <= 120
+    error_message = "The public function timeout may not exceed 120 seconds."
   }
 }
 

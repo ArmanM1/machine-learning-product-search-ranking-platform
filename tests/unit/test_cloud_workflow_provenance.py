@@ -890,6 +890,20 @@ def test_first_deploy_keeps_public_serving_private_until_candidate_gates_pass() 
     assert "function_url_auth_type" not in invoke_permission
     assert 'aws:amz:${AWS_REGION}:lambda' in deploy
     assert 'aws:amz:${AWS_REGION}:execute-api' not in deploy
+    cold_start_section = deploy[
+        deploy.index("Measure the newly published candidate's first on-demand invocation") : candidate_gate
+    ]
+    warm_gate_section = deploy[candidate_gate:public_publish]
+    assert "--max-time 120" in cold_start_section
+    assert "--max-time 30" in warm_gate_section
+    timeout_variable = module_variables.split('variable "lambda_timeout_seconds" {', 1)[1].split(
+        "}\n", 1
+    )[0]
+    assert "default     = 120" in timeout_variable
+    production_origin = serving.split('origin_id   = "production-api"', 1)[1].split(
+        "}\n", 2
+    )[0]
+    assert "origin_read_timeout    = 120" in production_origin
 
     iam = (ROOT / "infra/terraform/modules/platform/iam.tf").read_text(encoding="utf-8")
     deployment_policy = iam.split(

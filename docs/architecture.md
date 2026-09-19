@@ -133,7 +133,7 @@ The first deployed revision is the reproducible baseline release. It establishes
 
 ## Operational limits
 
-- Lambda: x86_64, 4,096 MB or less, 2,048 MB ephemeral storage or less, 30-second timeout.
+- Lambda: x86_64, 4,096 MB or less, 2,048 MB ephemeral storage or less, 120-second timeout so the first on-demand model initialization can complete; warmed latency is gated separately with a 30-second client timeout.
 - Reserved concurrency: exactly 2.
 - Provisioned concurrency: no resource exists; effective value is 0.
 - Function URLs add no fixed compute capacity. Lambda reserved concurrency two remains the
